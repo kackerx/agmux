@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kackerx/agmux/internal/store"
@@ -36,8 +37,40 @@ func (m Model) previewLinesN() int { return max(m.h-3-3, 1) }
 // previewMsg is one capture of pane (sendErr: the key forwarded before it failed).
 type previewMsg struct {
 	pane, text string
+	cur        *cursor // where the pane's cursor is; nil = hidden or unknown
 	err        error
 	sendErr    bool
+}
+
+// cursor is the pane's cursor in the capture: row counts lines of the whole capture (history
+// included), col is the cell. bar is the bar / underline shapes, which are drawn thinner than a block.
+type cursor struct {
+	row, col int
+	bar      bool
+}
+
+// grab captures the last n lines of pane and, in the same tmux call so both are from the same
+// moment, where its cursor is: the first line of the output is "x y flag shape height".
+func grab(r Runner, pane string, n int) previewMsg {
+	out, err := r.Tmux("display-message", "-p", "-t", pane, "#{cursor_x} #{cursor_y} #{cursor_flag} #{cursor_shape} #{pane_height}",
+		";", "capture-pane", "-p", "-e", "-t", pane, "-S", "-"+strconv.Itoa(n))
+	if err != nil {
+		return previewMsg{pane: pane, err: err}
+	}
+	head, text, _ := strings.Cut(out, "\n")
+	f := strings.Fields(head)
+	if len(f) != 5 { // not the info line: all of it is the screen
+		return previewMsg{pane: pane, text: out}
+	}
+	x, ex := strconv.Atoi(f[0])
+	y, ey := strconv.Atoi(f[1])
+	h, eh := strconv.Atoi(f[4])
+	msg := previewMsg{pane: pane, text: text}
+	if ex == nil && ey == nil && eh == nil && h > 0 && f[2] == "1" { // flag 0: hidden (civis, copy-mode)
+		lines := strings.Count(text, "\n") // one per captured line
+		msg.cur = &cursor{row: lines - h + y, col: x, bar: f[3] == "bar" || f[3] == "underline"}
+	}
+	return msg
 }
 
 // capture grabs the focused session's pane (nil when there is nothing to capture or one is in flight).
@@ -52,10 +85,7 @@ func (m *Model) capture() tea.Cmd {
 	m.capturing = true
 	r, pane, n := m.run, s.TmuxPane, m.previewLinesN()+m.scroll
 	// through the key queue: a capture started before a key must not land after that key's capture
-	return m.keys.do(func() tea.Msg {
-		out, err := r.Tmux("capture-pane", "-p", "-e", "-t", pane, "-S", "-"+strconv.Itoa(n))
-		return previewMsg{pane: pane, text: out, err: err}
-	})
+	return m.keys.do(func() tea.Msg { return grab(r, pane, n) })
 }
 
 // previewLines renders the preview region: h lines, each exactly w wide.
@@ -68,6 +98,7 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 	inner := w - 1 - 4 // one column of gap from the cards, then "│ " … " │"
 	title := ""
 	var content []string
+	curRow := -1 // the row of the box the pane's cursor is on, if it is drawn
 	switch {
 	case !ok || s.TmuxPane == "":
 		content = []string{fg(cMuted, "no pane")}
@@ -85,6 +116,9 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 			n := max(h-3, 0)                  // rows inside the box; none on a tiny terminal
 			content = tail(pv.text, n+scroll) // scroll lines back: drop that many from the bottom
 			content = content[:max(len(content)-scroll, min(len(content), n))]
+			if pv.cur != nil && scroll == 0 { // a scrolled-back view isn't where the cursor is
+				curRow = pv.cur.row - (len(tail(pv.text, 1<<30)) - len(content))
+			}
 		}
 	}
 	out := []string{pad(ansi.Truncate(" "+title, w, "…"), w)}
@@ -98,11 +132,30 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 		if i < len(content) {
 			l = ansi.Truncate(content[i], inner, "")
 		}
+		if i == curRow && pv.cur.col >= 0 && pv.cur.col < inner {
+			l = ansi.Truncate(paintCursor(l, pv.cur), inner, "")
+		}
 		// the reset keeps the pane's own colors from bleeding into the border
 		out = append(out, " "+fg(border, "│")+" "+pad(l, inner)+"\x1b[0m "+fg(border, "│"))
 	}
 	out = append(out, " "+fg(border, "╰"+strings.Repeat("─", inner+2)+"╯"))
 	return out[:h]
+}
+
+// paintCursor draws the pane's cursor on its line l: a block is the cell in reverse video, a bar or
+// underline (a terminal can't draw a thin line here) the cell underlined in the focus color.
+func paintCursor(l string, c *cursor) string {
+	cell := " " // past the end of the text, an empty cell
+	for _, g := range clustersOf(ansi.Strip(l)) {
+		if g.x == c.col { // a wide character is one cell of the cursor, two columns wide
+			cell = g.s
+		}
+	}
+	style := lipgloss.NewStyle().Reverse(true)
+	if c.bar {
+		style = lipgloss.NewStyle().Foreground(cFocus).Underline(true)
+	}
+	return put(l, c.col, style.Render(cell))
 }
 
 // tail is the last n lines of a capture, without the blank rows below the cursor.
@@ -222,7 +275,6 @@ func (m *Model) forward(k tea.KeyMsg) tea.Cmd {
 		if err := send(r); err != nil {
 			return previewMsg{pane: pane, err: err, sendErr: true}
 		}
-		out, err := r.Tmux("capture-pane", "-p", "-e", "-t", pane, "-S", "-"+strconv.Itoa(n))
-		return previewMsg{pane: pane, text: out, err: err}
+		return grab(r, pane, n)
 	})
 }

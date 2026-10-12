@@ -61,6 +61,17 @@ func (f *fakeRunner) Tmux(args ...string) (string, error) {
 
 var listClients = []string{"tmux", "list-clients", "-F", clientsFormat}
 
+// captureCall is the one tmux call that reads a pane for the preview: its cursor, then its last n
+// lines. The ";" is an argv of its own, which tmux takes as the end of the first command.
+func captureCall(pane string, n int) []string {
+	return []string{"tmux", "display-message", "-p", "-t", pane, "#{cursor_x} #{cursor_y} #{cursor_flag} #{cursor_shape} #{pane_height}",
+		";", "capture-pane", "-p", "-e", "-t", pane, "-S", fmt.Sprintf("-%d", n)}
+}
+
+func isCapture(call []string) bool {
+	return len(call) > 7 && call[1] == "display-message" && call[7] == "capture-pane"
+}
+
 // switched is what enter on a card with pane runs by default: pick the one client, switch it.
 func switched(pane string) [][]string {
 	return [][]string{listClients, {"tmux", "switch-client", "-c", "/dev/c", "-t", pane}}
@@ -707,7 +718,7 @@ func TestPreviewToggle(t *testing.T) {
 		t.Fatal("opening the preview captures right away")
 	}
 	msg := cmd()
-	want := []string{"tmux", "capture-pane", "-p", "-e", "-t", "%1", "-S", "-44"} // 50 rows - top/msg/footer - title/box
+	want := captureCall("%1", 44) // 50 rows - top/msg/footer - title/box
 	if got := r.calls[len(r.calls)-1]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("capture: %q, want %q", got, want)
 	}
@@ -820,7 +831,7 @@ func TestPreviewRefreshesOnFrame(t *testing.T) {
 	before := len(r.calls)
 	tm, cmd := m.Update(frameMsg{})
 	runAll(cmd)
-	if len(r.calls) != before+1 || r.calls[before][1] != "capture-pane" || !tm.(Model).capturing {
+	if len(r.calls) != before+1 || !isCapture(r.calls[before]) || !tm.(Model).capturing {
 		t.Errorf("a frame tick with the preview open captures again: %q", r.calls[before:])
 	}
 	m.preview = false
@@ -884,7 +895,7 @@ func TestPreviewPassThrough(t *testing.T) {
 	if quit || !m.pvFocus {
 		t.Fatal("ctrl+c / q / esc / shift+tab / ctrl+] go to the pane while it has the keys")
 	}
-	capture := []string{"tmux", "capture-pane", "-p", "-e", "-t", "%1", "-S", "-44"}
+	capture := captureCall("%1", 44)
 	var want [][]string
 	for _, k := range [][]string{{"-l", "--", "你好 world"}, {"Enter"}, {"C-c"}, {"-l", "--", "q"}, {"Escape"}, {"BTab"}, {"C-]"}} {
 		want = append(want, append([]string{"tmux", "send-keys", "-t", "%1"}, k...), capture)
@@ -934,7 +945,7 @@ func TestPreviewWheelAndClicks(t *testing.T) {
 	if m.scroll != 3 || cmd == nil {
 		t.Fatalf("wheel up over the preview: scroll %d", m.scroll)
 	}
-	if pm := cmd().(previewMsg); r.calls[len(r.calls)-1][7] != "-47" {
+	if pm := cmd().(previewMsg); r.calls[len(r.calls)-1][len(r.calls[len(r.calls)-1])-1] != "-47" {
 		t.Errorf("scrolled capture asks for 44+3 lines: %q (%v)", r.calls[len(r.calls)-1], pm.pane)
 	}
 	var text strings.Builder
@@ -1125,7 +1136,7 @@ func TestPreviewFollowsEveryFocusChange(t *testing.T) {
 	tm, cmd := m.Update(tea.MouseMsg{X: 50, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}) // click b1
 	m = tm.(Model)
 	runAll(cmd)
-	if last := r.calls[len(r.calls)-1]; m.focus != "b1" || last[1] != "capture-pane" || last[5] != "%3" {
+	if last := r.calls[len(r.calls)-1]; m.focus != "b1" || !isCapture(last) || last[4] != "%3" {
 		t.Errorf("a click captures the new card's pane: %q", last)
 	}
 	m.capturing = false
@@ -1135,7 +1146,7 @@ func TestPreviewFollowsEveryFocusChange(t *testing.T) {
 	tm, cmd = m.Update(key("enter")) // unfold: focus lands on a1
 	m = tm.(Model)
 	runAll(cmd)
-	if len(r.calls) == before || r.calls[len(r.calls)-1][5] != "%1" {
+	if len(r.calls) == before || r.calls[len(r.calls)-1][4] != "%1" {
 		t.Errorf("unfolding moves the focus to a1 and captures it: %q", r.calls[before:])
 	}
 	// a capture for b1 arrives after the focus moved to a1: capture a1 straight away
@@ -1198,7 +1209,7 @@ func TestPassThroughLock(t *testing.T) {
 			t.Errorf("%s: board commands ran while locked out: %q", c.name, r.calls)
 		}
 		for _, call := range r.calls {
-			if call[0] != "tmux" || call[1] != "capture-pane" {
+			if call[0] != "tmux" || !isCapture(call) {
 				t.Errorf("%s: only captures may run while locked out, got %q", c.name, call)
 			}
 		}
@@ -1362,7 +1373,7 @@ func TestScrollResetsWhenPollMovesFocus(t *testing.T) {
 	tm, cmd := m.Update(frameMsg{})
 	m = tm.(Model)
 	runAll(cmd)
-	if m.scroll != 0 || !slices.ContainsFunc(r.calls, func(c []string) bool { return c[1] == "capture-pane" && c[len(c)-1] == "-44" }) {
+	if m.scroll != 0 || !slices.ContainsFunc(r.calls, func(c []string) bool { return isCapture(c) && c[len(c)-1] == "-44" }) {
 		t.Errorf("scroll %d, calls %q", m.scroll, r.calls)
 	}
 }
@@ -1407,7 +1418,7 @@ func TestPastePassThrough(t *testing.T) {
 	want := [][]string{
 		{"tmux", "load-buffer", "-b", "agmux", "-", "<stdin:line 1\rline 2;>"},
 		{"tmux", "paste-buffer", "-p", "-d", "-b", "agmux", "-t", "%1"},
-		{"tmux", "capture-pane", "-p", "-e", "-t", "%1", "-S", "-44"},
+		captureCall("%1", 44),
 	}
 	if !reflect.DeepEqual(r.calls, want) {
 		t.Errorf("paste:\n %q\nwant\n %q", r.calls, want)
@@ -1500,7 +1511,7 @@ func TestCaptureQueuedWithKeys(t *testing.T) {
 		for _, c := range r.calls {
 			order = append(order, c[1])
 		}
-		if want := []string{"capture-pane", "send-keys", "capture-pane"}; !reflect.DeepEqual(order, want) {
+		if want := []string{"display-message", "send-keys", "display-message"}; !reflect.DeepEqual(order, want) {
 			t.Fatalf("order %v, want %v", order, want)
 		}
 	}
@@ -2961,5 +2972,143 @@ func TestMatchHintNamesWhatThereIs(t *testing.T) {
 		if f := v[len(v)-1]; !strings.HasPrefix(f, want) {
 			t.Errorf("%q: footer %q, want prefix %q", toml, f, want)
 		}
+	}
+}
+
+// ---- T24: the pane's cursor in the preview ----
+
+// grab reads the cursor and the screen in one call: the info line is not part of the screen, the
+// row is counted in the capture (history included), and a hidden cursor is none.
+func TestGrabCursor(t *testing.T) {
+	screen := strings.Repeat("l\n", 9) + "abcsh-3.2$ \n" // 10 lines: 4 of history, 6 visible
+	for _, c := range []struct {
+		name, out string
+		want      *cursor
+		text      string
+	}{
+		{"block shell prompt", "11 5 1 default 6\n" + screen, &cursor{row: 9, col: 11}, screen},
+		{"bar", "3 0 1 bar 6\n" + screen, &cursor{row: 4, col: 3, bar: true}, screen},
+		{"underline", "3 0 1 underline 6\n" + screen, &cursor{row: 4, col: 3, bar: true}, screen},
+		{"block shape", "3 0 1 block 6\n" + screen, &cursor{row: 4, col: 3}, screen},
+		{"hidden (civis, copy-mode)", "3 0 0 block 6\n" + screen, nil, screen},
+		{"no history", "2 1 1 default 4\nab\ncd\nef\ngh\n", &cursor{row: 1, col: 2}, "ab\ncd\nef\ngh\n"},
+		{"not an info line: all screen", "plain\ncapture\n", nil, "plain\ncapture\n"},
+		{"numbers that aren't", "x y 1 bar 6\n" + screen, nil, screen},
+		{"no height", "1 1 1 bar 0\n" + screen, nil, screen},
+	} {
+		r := &fakeRunner{tmuxOut: map[string]string{"display-message": c.out}}
+		got := grab(r, "%1", 44)
+		if !reflect.DeepEqual(got.cur, c.want) || got.text != c.text || got.pane != "%1" || got.err != nil {
+			t.Errorf("%s: cursor %+v text %q, want %+v %q", c.name, got.cur, got.text, c.want, c.text)
+		}
+		if len(r.calls) != 1 || !reflect.DeepEqual(r.calls[0], captureCall("%1", 44)) {
+			t.Errorf("%s: calls %q", c.name, r.calls)
+		}
+	}
+	r := &fakeRunner{tmuxFail: map[string]error{"display-message": errors.New("can't find pane: %9")}}
+	if got := grab(r, "%9", 44); got.err == nil || got.cur != nil || got.text != "" {
+		t.Errorf("a failed call: %+v", got)
+	}
+}
+
+// noResets drops the resets put() leaves around what it draws, so the styled text reads in a row.
+func noResets(s string) string { return strings.ReplaceAll(s, "\x1b[0m", "") }
+
+func cursorBox(pv previewMsg, scroll int) []string {
+	s := store.Session{ID: "a", Name: "n", TmuxPane: "%1", Status: "idle", ContextPct: -1}
+	return previewLines(s, true, pv, 40, 12, scroll, false) // 9 rows inside the box, 35 columns wide
+}
+
+// The cursor is drawn on its cell: a block reversed (an empty cell too), a bar or underline
+// underlined in the focus color; where it is counts rows of the capture, from the bottom of the content.
+func TestPreviewDrawsCursor(t *testing.T) {
+	trueColor(t)
+	text := "one\ntwo\nthree\n\n\n" // content "one two three"; the blank rows are cut
+	rev := lipgloss.NewStyle().Reverse(true)
+	bar := lipgloss.NewStyle().Foreground(cFocus).Underline(true)
+	for _, c := range []struct {
+		name string
+		cur  cursor
+		row  int // box row
+		want string
+	}{
+		{"block on a letter", cursor{row: 2, col: 1}, 2, "t" + rev.Render("h") + "ree"},
+		{"block past the text", cursor{row: 2, col: 7}, 2, "three  " + rev.Render(" ")},
+		{"block on a blank row below the content", cursor{row: 3, col: 2}, 3, "  " + rev.Render(" ")},
+		{"bar", cursor{row: 0, col: 0, bar: true}, 0, bar.Render("o") + "ne"},
+	} {
+		box := cursorBox(previewMsg{pane: "%1", text: text, cur: &c.cur}, 0)
+		line := box[2+c.row] // title, top border, then the rows
+		if !strings.Contains(noResets(line), noResets(c.want)) {
+			t.Errorf("%s: %q, want it to hold %q", c.name, line, c.want)
+		}
+		if w := ansi.StringWidth(line); w != 40 {
+			t.Errorf("%s: width %d, the box keeps its edges", c.name, w)
+		}
+	}
+	// no cursor drawn: hidden, scrolled back, above the window, off to the right
+	plain := cursorBox(previewMsg{pane: "%1", text: text}, 0)
+	for name, args := range map[string]struct {
+		cur    *cursor
+		scroll int
+	}{
+		"hidden": {nil, 0}, "scrolled": {&cursor{row: 2, col: 1}, 3},
+		"above the window": {&cursor{row: -1, col: 1}, 0}, "below it": {&cursor{row: 40, col: 1}, 0},
+		"right of the box": {&cursor{row: 2, col: 35}, 0}, "left of it": {&cursor{row: 2, col: -1}, 0},
+	} {
+		got := cursorBox(previewMsg{pane: "%1", text: text, cur: args.cur}, args.scroll)
+		if args.scroll == 0 && !reflect.DeepEqual(got, plain) {
+			t.Errorf("%s: drawn anyway", name)
+		}
+		for _, l := range got {
+			if strings.Contains(l, "\x1b[7m") {
+				t.Errorf("%s: a reversed cell", name)
+			}
+		}
+	}
+}
+
+// A wide character under the cursor is reversed whole, the line keeps its width, and a long
+// history shows its last lines: the row is counted from the capture's end.
+func TestPreviewCursorWideAndHistory(t *testing.T) {
+	trueColor(t)
+	rev := lipgloss.NewStyle().Reverse(true)
+	box := cursorBox(previewMsg{pane: "%1", text: "你好x\n", cur: &cursor{row: 0, col: 2}}, 0)
+	if !strings.Contains(noResets(box[2]), "你"+noResets(rev.Render("好"))+"x") || ansi.StringWidth(box[2]) != 40 {
+		t.Errorf("%q", box[2])
+	}
+	var b strings.Builder
+	for i := range 30 {
+		fmt.Fprintf(&b, "line%02d\n", i)
+	}
+	box = cursorBox(previewMsg{pane: "%1", text: b.String(), cur: &cursor{row: 29, col: 0}}, 0) // 9 rows show lines 21–29
+	if !strings.Contains(noResets(box[2+8]), noResets(rev.Render("l"))+"ine29") || strings.Contains(box[2], "\x1b[7m") {
+		t.Errorf("last row %q", box[2+8])
+	}
+}
+
+// Through the board: the cursor of the focused pane shows in the preview, in pass-through too, and
+// not while it is scrolled back.
+func TestBoardShowsPaneCursor(t *testing.T) {
+	trueColor(t)
+	r := &fakeRunner{tmuxOut: map[string]string{"display-message": "3 0 1 default 6\nabcdef\n\n\n\n\n\n"}}
+	m := wide(r, 232, 50)
+	m, _ = press(t, m, "p")
+	m.capturing = false
+	tm, cmd := m.Update(frameMsg{})
+	tm, _ = tm.(Model).Update(cmd().(tea.BatchMsg)[1]())
+	m = tm.(Model)
+	rev := lipgloss.NewStyle().Reverse(true).Render("d")
+	want := noResets("abc" + rev + "ef")
+	if !strings.Contains(noResets(m.View()), want) {
+		t.Fatalf("browsing: no cursor\n%s", ansi.Strip(m.View()))
+	}
+	m.pvFocus, m.pvID, m.pvPane = true, "a1", "%1"
+	if !strings.Contains(noResets(m.View()), want) {
+		t.Error("pass-through: no cursor")
+	}
+	m.scroll = 3
+	if strings.Contains(m.View(), "\x1b[7m") {
+		t.Error("scrolled back: the cursor isn't drawn")
 	}
 }
