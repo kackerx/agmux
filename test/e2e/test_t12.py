@@ -303,3 +303,98 @@ class PassthroughReview(PreviewBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PassthroughReview2(PreviewBase):
+    """T12 second review (specs/m2-preview/design.md「直通目标锁定」and the bullets under it): a lock that has failed stays failed, empty / failed pastes leave nothing in the tmux
+    buffer, a terminal narrower than 100 columns leaves the pass-through with its own message. The tmux that agmux runs is a recording wrapper around the real one."""
+    PANES = PassthroughReview.PANES
+    cat, enter_passthrough_on_a3, preview_focused, footer = (PassthroughReview.cat, PassthroughReview.enter_passthrough_on_a3,
+                                                             PassthroughReview.preview_focused, PassthroughReview.footer)
+
+    def board(self, w, h):
+        real = shutil.which("tmux")
+        self.log = self.env.tmp / "tmux-wrapper.log"
+        wrapper = self.env.bin_real / "tmux"
+        wrapper.write_text(f"#!/bin/sh\nprintf '%s\\037' \"$@\" >> {shlex.quote(str(self.log))}; printf '\\n' >> {shlex.quote(str(self.log))}\nexec {shlex.quote(real)} \"$@\"\n")
+        wrapper.chmod(0o755)
+        return super().board(w, h)
+
+    def calls(self, name=None):
+        if not self.log.exists():
+            return []
+        cs = [[a for a in l.split("\x1f") if a != ""] for l in self.log.read_text().split("\n") if l]
+        return [c for c in cs if name is None or c[0] == name]
+
+    def red_rows(self):  # red text in the message / footer rows only (the cards' own borders and eyes are red for sessions that need attention)
+        return [r.text.strip() for r in self.t.snap()[-3:] if any(is_red(c[1]) for c in r.cells if c[0].strip())]
+
+    def poll_twice(self):
+        n = self.env.show_calls(); self.assertTrue(wait(lambda: self.env.show_calls() >= n + 2, 8)); time.sleep(0.3)
+
+    # ---- 1) a failed lock is sticky: the target coming back does not revive it ----
+    def test_target_gone_for_one_poll_then_back_stays_locked(self):
+        self.enter_passthrough_on_a3(); self.t.lit("ok"); time.sleep(0.4); self.assertEqual(self.cat("a3"), "ok")
+        full = json.loads((self.env.fake / "show.json").read_text())
+        self.env.write_show([]); self.poll_twice()
+        self.env.write_show(full); self.poll_twice(); self.poll_twice()  # the same session, with the same pane, is listed again
+        self.assertIn("session is gone · ctrl+] back to the cards", self.footer())
+        rows = [r for r in self.t.snap() if "session is gone" in r.text]
+        self.assertTrue(rows and is_red(rows[0].cells[rows[0].find("session is gone")][1]), "red footer")
+        self.assertFalse(self.preview_focused(), "the preview border is not pink again")
+        self.t.lit("typed after it came back"); self.t.keys("Enter"); time.sleep(0.8)
+        self.assertEqual(self.cat("a3"), "ok", "zero bytes forwarded after the lock failed, even though the target is back")
+        self.assertEqual(self.cat("a1"), ""); self.assertEqual(self.env.actions(), []); self.assertTrue(self.t.alive())
+        self.t.keys("C-]"); time.sleep(0.5)
+        self.assertNotIn("session is gone", self.footer())
+
+    # ---- 2) empty and failed pastes ----
+    def test_empty_paste_is_ignored_without_calling_tmux(self):
+        self.enter_passthrough_on_a3(); self.t.lit("ok"); time.sleep(0.4)
+        before = len(self.calls())
+        self.t.lit("\x1b[200~\x1b[201~"); time.sleep(1.0)
+        sent = [c for c in self.calls()[before:] if c[0] != "capture-pane"]  # the preview re-captures every 500ms by itself (spec): that is not a reaction to the paste
+        self.assertEqual(sent, [], "an empty paste must not run load-buffer / paste-buffer / send-keys")
+        self.assertEqual(self.red_rows(), [], "and no error message")
+        self.assertEqual(self.cat("a3"), "ok"); self.assertTrue(self.preview_focused())
+
+    def test_failed_paste_deletes_the_buffer_so_it_cannot_land_in_another_pane(self):
+        self.enter_passthrough_on_a3()
+        tm("kill-pane", "-t", self.panes["a3"]); time.sleep(0.3)
+        self.t.lit("\x1b[200~secret text\x1b[201~"); time.sleep(1.0)
+        cs = self.calls()
+        self.assertTrue(any(c[0] == "load-buffer" for c in cs) or any("session is gone" in r.text for r in self.t.snap()), f"calls: {cs}\n{self.t.text()}")
+        self.assertEqual(tm("list-buffers", "-F", "#{buffer_name}").stdout.split(), [], f"no agmux buffer left behind; calls: {cs}")
+        self.t.keys("C-]"); time.sleep(0.5)
+        self.press("k", "k", "i"); self.assertTrue(wait(self.preview_focused, 3), self.t.text())  # a1: the decoy cat pane
+        self.t.lit("\x1b[200~\x1b[201~"); time.sleep(1.0)
+        self.assertEqual(self.cat("a1"), "", f"the second pane got zero bytes; tmux calls: {self.calls()}")
+        self.assertEqual(tm("list-buffers", "-F", "#{buffer_name}").stdout.split(), [])
+
+    # ---- the poll moving the focus resets the local scroll as well ----
+    def test_focus_card_vanishing_resets_the_scroll_offset(self):
+        tm("respawn-pane", "-k", "-t", self.panes["a1"], SEQ_CMD); time.sleep(1.5)
+        self.assertTrue(wait(lambda: "line 200" in pane_text(self.panes["a1"]), 5))
+        self.press("i"); self.assertTrue(wait(self.preview_focused, 3), self.t.text())  # a1 is the focused card: pass-through on the 200-line pane
+        self.t.wheel(PV_X + 20, 15, up=True, n=5); time.sleep(0.9)
+        caps = lambda pane: [c[c.index("-S") + 1] for c in self.calls("capture-pane") if c[c.index("-t") + 1] == pane]
+        a1 = self.panes["a1"]
+        self.assertNotEqual(caps(a1)[-1], caps(a1)[0], f"5 notches up must have moved the capture window: {caps(a1)}")
+        self.assertTrue(wait(lambda: "line 200" not in "\n".join(self.pv_text()), 3), "scrolled: the bottom line is out of view")
+        S = json.loads((self.env.fake / "show.json").read_text())
+        self.env.write_show([s for s in S if s["id"] != "a1"]); self.poll_twice(); time.sleep(0.8)  # the focus falls back to the first remaining card: a2
+        a2 = self.panes["a2"]; self.assertTrue(wait(lambda: caps(a2), 3), f"the preview now follows a2; calls: {self.calls('capture-pane')[-4:]}")
+        self.assertEqual(set(caps(a2)), {caps(a1)[0]}, f"a2 is captured with the plain visible-rows window ({caps(a1)[0]}), not with a1's leftover offset: {caps(a2)}")
+        self.t.keys("C-]"); time.sleep(0.4); self.press("k", "j")  # the board is itself again; moving around keeps the plain window
+        self.assertEqual(set(caps(a2)), {caps(a1)[0]})
+
+    # ---- 3) the terminal narrower than 100 columns ----
+    def test_narrow_terminal_leaves_the_passthrough_with_its_own_message(self):
+        self.enter_passthrough_on_a3(); self.t.lit("ok"); time.sleep(0.4)
+        self.t.resize(99, 50); time.sleep(1.0)
+        text = self.t.text()
+        self.assertIn("preview closed: terminal too narrow", text, text)
+        self.assertNotIn("session is gone", text)
+        self.assertIsNone(self.pv(), "the preview is closed")
+        self.t.lit("q"); self.assertEqual(self.t.exit_status(4), 0, "back on the cards: q quits the board; it was not forwarded to the pane")
+        self.assertEqual(self.cat("a3"), "ok")

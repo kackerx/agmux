@@ -9,7 +9,7 @@ from test_t11 import PreviewBase, pane_text, CAT_CMD
 from test_t3 import ready, last_text_row, border_colours, STATUS_COLOUR, C_FOCUS, find_cards, by_name
 
 DEFAULT_KEYS = ["up", "down", "left", "right", "jump", "fold", "preview", "focus_preview", "leave_preview",
-                "reply", "handoff", "search", "flash", "restart", "kill", "review", "quit", "confirm"]
+                "reply", "handoff", "search", "flash", "restart", "kill", "review", "avatar", "quit", "confirm"]
 DEFAULT_COLOURS = ["working", "idle", "done", "attention", "focus", "name", "branch", "model", "effort", "dir",
                    "bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled"]
 
@@ -54,7 +54,7 @@ class Defaults(Base):
     def test_config_prints_the_defaults_and_path(self):
         r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(r.stdout.startswith("[keys]\n"), r.stdout)
-        keys = r.stdout.split("[colors]")[0]; cols = r.stdout.split("[colors]")[1]
+        keys = r.stdout.split("[colors]")[0]; cols = r.stdout.split("[colors]")[1].split("[avatars]")[0]  # [avatars] (T18) follows the colours
         self.assertEqual([l.split(" = ")[0] for l in keys.splitlines()[1:] if l], DEFAULT_KEYS)
         self.assertEqual([l.split(" = ")[0] for l in cols.splitlines() if l], DEFAULT_COLOURS)
         for line in ('down = ["j", "down"]', 'reply = ["i"]', 'flash = ["s"]', 'leave_preview = ["ctrl+]"]', 'quit = ["q", "esc"]', 'working = "#ffb86c"', 'name = "5"'):
@@ -119,6 +119,43 @@ class Keys(Base):
         self.assertEqual(self.jump_target(t), ["switch", "a2"])
 
 
+class KeysReview(Base):
+    """T17 review (f24bbe5): an explicit binding takes the key from the default of another action; the one rule left is a conflict between two explicit ones."""
+
+    def test_up_j_takes_j_from_down_and_the_footer_follows(self):
+        self.write('[keys]\nup = ["j"]\n')
+        out = self.cli("config"); self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn('up = ["j"]', out.stdout); self.assertIn('down = ["down"]', out.stdout, "down lost its j, kept the arrow")
+        t = self.board(); bar = last_text_row(t.snap())
+        self.assertIn("down/j h/l move", bar, bar); self.assertNotIn("j/k", bar)
+        t.keys("Down"); time.sleep(0.2); t.keys("Down"); time.sleep(0.2)  # a3
+        t.keys("k"); time.sleep(0.2)  # k is nothing any more (up was replaced, not extended)
+        t.keys("j"); time.sleep(0.2)  # now moves UP: a2
+        self.assertEqual(self.jump_target(t), ["switch", "a2"])
+
+    def test_two_explicit_bindings_of_one_key_still_conflict(self):
+        for text, bad in (('[keys]\nup = ["n"]\ndown = ["n"]\n', '"n" is already bound to up'), ('[keys]\nup = ["j", "k"]\ndown = ["j"]\n', '"j" is already bound to up')):
+            with self.subTest(text):
+                self.write(text); r = self.cli("config"); self.assertEqual(r.returncode, 1); self.assertIn(bad, r.stderr)
+
+    def test_confirm_enter_is_valid_and_confirms(self):
+        self.write('[keys]\nconfirm = ["enter"]\n')
+        t = self.board(); t.keys("x"); time.sleep(0.3); t.keys("y"); time.sleep(0.6)
+        self.assertEqual(self.env.actions(), [], "y is not the confirm key any more: it cancels")
+        t.keys("x"); time.sleep(0.3); t.keys("Enter")
+        self.assertTrue(wait(lambda: self.env.actions(), 3), t.text()); self.assertEqual(self.env.actions(), [["kill", "a1"]], "enter confirms the kill")
+        t.close(); self.env.calls() and (self.env.fake / "calls.log").unlink()
+        t = self.board(); self.assertEqual(self.jump_target(t), ["switch", "a1"], "outside the prompt enter is still jump")
+
+    def test_alt_space_binding_folds(self):
+        self.write('[keys]\nfold = ["alt+space"]\n')
+        t = self.board(); self.assertIn("alt+space fold", last_text_row(t.snap()))
+        t.keys("f"); time.sleep(0.4); self.assertIn("▾ ~/work/alpha (3)", t.text(), "f is no longer fold")
+        t.keys("M-Space"); time.sleep(0.5)
+        self.assertIn("▸ ~/work/alpha (3)", t.text(), t.text()); self.assertEqual(len(find_cards(t.snap())), 6, "the alpha group is folded: 3 cards gone")
+        t.keys("M-Space"); time.sleep(0.5); self.assertIn("▾ ~/work/alpha (3)", t.text())
+
+
 class Colours(Base):
     def test_working_border_colour(self):
         self.write('[colors]\nworking = "#123456"\n')
@@ -144,7 +181,14 @@ class Colours(Base):
 
 class Errors(Base):
     CASES = {
-        "duplicate": ('[keys]\ndown = ["x"]\n', "keys.kill", '"x" is already bound to down'),  # x is the default for kill
+        "duplicate": ('[keys]\nquit = ["j"]\ndown = ["j"]\n', "keys.quit", '"j" is already bound to down'),  # both are the user's own: that is the only conflict left
+        "default key left with nothing": ('[keys]\ndown = ["x"]\n', "keys.kill", 'no key left after "x" was taken by down; bind one'),  # x was kill's only default: the user's binding wins, kill has to be rebound
+        "ctrl+c": ('[keys]\nquit = ["ctrl+c"]\n', "keys.quit", "ctrl+c can't be bound (it always quits)"),
+        "ctrl+c on another action": ('[keys]\nfold = ["ctrl+c"]\n', "keys.fold", "ctrl+c can't be bound"),
+        "ctrl+i is tab": ('[keys]\nfold = ["ctrl+i"]\n', "keys.fold", 'write "tab"'),
+        "ctrl+m is enter": ('[keys]\nfold = ["ctrl+m"]\n', "keys.fold", 'write "enter"'),
+        "keys is not a table": ("keys = 3\n", "keys", "must be a table"),
+        "colors is not a table": ('colors = "dark"\n', "colors", "must be a table"),
         "duplicate-between-two-new-keys": ('[keys]\ndown = ["n"]\nup = ["n"]\n', "keys.down", '"n" is already bound to up'),
         "bad colour": ('[colors]\nworking = "#12345"\n', "colors.working", "#rrggbb"),
         "colour out of range": ('[colors]\nworking = "256"\n', "colors.working", "0-255"),
@@ -170,7 +214,7 @@ class Errors(Base):
                     self.assertEqual(r.stdout, "", "nothing on stdout (no alt-screen escape, no config dump)")
 
     def test_a_broken_config_never_takes_the_screen_over(self):
-        self.write('[keys]\ndown = ["x"]\n')
+        self.write('[keys]\nquit = ["j"]\ndown = ["j"]\n')
         t = Term(self.env, extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t.close)
         self.assertEqual(t.exit_status(), 1)
         self.assertEqual(tm("display", "-p", "-t", t.name, "#{alternate_on}").stdout.strip(), "0", "no alternate screen was entered")
@@ -257,6 +301,28 @@ class PreviewKeys(PreviewBase):
     def test_footer_in_the_passthrough_names_the_configured_leave_key(self):
         self.to_a3_passthrough()
         self.assertIn("ctrl+g back to the cards", last_text_row(self.t.snap()))
+
+
+class LeaveWithTab(PreviewBase):
+    """`leave_preview = ["tab"]` is valid (tab stays focus_preview on the cards): in the pass-through tab leaves, and ctrl+] is then just a key for the pane."""
+    PANES = (("a1", CAT_CMD), ("a2", CAT_CMD), ("a3", CAT_CMD))
+    cat, focused = PreviewKeys.cat, PreviewKeys.focused
+
+    def board(self, w, h):
+        cfg = self.env.tmp / "cfg"; (cfg / "agmux").mkdir(parents=True)
+        (cfg / "agmux" / "config.toml").write_text('[keys]\nleave_preview = ["tab"]\n')
+        t = Term(self.env, w=w, h=h, real_tmux=True, extra_env=f"XDG_CONFIG_HOME={cfg}"); self.addCleanup(t.close)
+        self.assertTrue(wait(lambda: "agmux ·" in t.text(), 8), t.text())
+        return t
+
+    def test_tab_goes_in_and_tab_comes_out(self):
+        self.press("j", "j", "p"); self.assertTrue(wait(lambda: self.pv() is not None, 4))
+        self.press("Tab"); self.assertTrue(wait(self.focused, 3), self.t.text())
+        self.assertIn("tab back to the cards", last_text_row(self.t.snap()))
+        self.press("C-]"); self.assertEqual(wait(lambda: self.cat() == "^]", 3), True, f"ctrl+] is forwarded now: {self.cat()!r}")
+        self.press("Tab"); self.assertTrue(wait(lambda: not self.focused(), 3), self.t.text())
+        self.assertEqual(self.cat(), "^]", "the tab that left was not forwarded")
+        self.assertIn("tab focus preview", last_text_row(self.t.snap()))
 
 
 if __name__ == "__main__":

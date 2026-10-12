@@ -91,7 +91,7 @@ class Board(unittest.TestCase):
 
     def test_binding_applies(self):
         a, b = self.ids[1], self.ids[4]
-        self.env.avatars_json({"a2": a, "c2": b})
+        self.env.avatars_json({NAMES["a2"]: a, NAMES["c2"]: b})  # since T18 the key is the name on the card, not the session id
         t, cs = self.board()
         ca, cb = by_name(cs, NAMES["a2"]), by_name(cs, NAMES["c2"])
         self.assertNotEqual(chars(ca), chars(cb))
