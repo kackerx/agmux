@@ -56,7 +56,7 @@ type Session struct {
  j/k 卡片 · h/l 跨列 · enter 跳转 · H 交接 · s 发送 · r 重启 · x 杀 · d review · q 退出   ← 底栏，ccmux 同款
 ```
 - 列 = GroupKey（cwd）。列最小宽 56，列数 = 终端宽度能放几个 56（含 2 列间距），各列均分撑满；放不下的组折到下一行，不横向滚动。组内卡片竖排。
-- 列标题沿用 ccmux：`▾ ~/缩写路径 (n)`，黄色（HUD 目录段同色），超宽时中间用 … 截断。
+- 列标题沿用 ccmux：`▾ ~/缩写路径 (n)`，路径黄色（HUD 目录段同色）、`(n)` 灰色，超宽时中间用 … 截断。
 - 卡片 = 列宽 × 5 行（边框 2 + 正文 3），圆角边框：
 ```
 ╭──────────────────────────────────────────────────────────╮
@@ -66,13 +66,16 @@ type Session struct {
 ╰──────────────────────────────────────────────────────────╯
 ```
 - 字段颜色和 ~/.config/bin/claude-hud 的段一一对应：名洋红、模型青、effort 紫、目录黄、分支橙红。
-- 状态（按 ccmux 1.4.3 的规则）：`⏵ working` 橙，后面接 pendingTool，只因子 agent 而 working 时接 `agents`；`⏸ idle` 蓝灰；`● done` 绿 = status idle 且 `attentionState` 非空；`⏳ waiting` 红 = status waiting。`attentionType` 非空或 waiting 时整张卡边框红。焦点卡片边框变亮。不单独拎出需要处理的会话。
+- 状态，照 ccmux 1.4.3 的 `getEffectiveStatus` 换算后再显示：原始 idle 且有子 agent 在 working / waiting → `⏵ working · agents`（不算 done，眼睛扫动）；原始 working → `⏵ working`，有 pendingTool 接 pendingTool，不接 agents；`⏸ idle` 蓝灰；`● done` 绿 = 原始 idle、无子 agent 在跑、`attentionState` 非空（"unread" 或 "read" 都算，ccmux 同样）；`⏳ waiting` 红 = status waiting（含 plan_approval，不像 ccmux 那样用青色）。`attentionType` 非空或 waiting 时整张卡边框红。焦点卡片边框变亮。不单独拎出需要处理的会话。
+- 换算放在 store 里做一次，view 只读结果。
+- 底栏或消息行的错误只取第一行（ccmux 的 stderr 常是多行），总行数永远等于终端高度。
 - 这些字段 T1 没解析（`attentionState`、`lastPrompt`），T3 补进 `ccmux.Session` / `store.Session`，T1 不返工。
 - 上下文条：■（U+25A0）10 格，空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 10 格全暗 + `--`。
 - 第 3 行左边：background 模式用 `backgroundDetail`，否则按 `lastPrompt` 的形态取一行再截断：
   - cross-session message → `← <from-name>: <正文第一行>`
   - task-notification → 其 `<summary>` 文本
-  - 其它 → 第一个非空行，去掉行内 `<…>` 标签
+  - 其它 → 第一个非空行，只去掉**成对出现**的小写标签（`<name …>…</name>`，name 为 `[a-z][a-z0-9_-]*`）；`<leader>`、`Vec<T>`、`a < b` 这类不动
+  - cross-session message 正文为空时显示 `← <from-name>:`，不要拿尾巴那句 "This came from another Claude session" 顶上
 - 子 agent / shell 为 0 时该段不显示。
 - PR 号（`branchPRs`）S1 不显示：真机全是 null / []，看到真实元素再接。
 - 卡片里不画按钮；所有操作走底栏键位。鼠标：点卡片 = 选中，再点 = 跳转。
