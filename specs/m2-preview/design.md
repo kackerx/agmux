@@ -15,6 +15,7 @@
 - 换焦点（键盘、鼠标、展开折叠组）都立即抓一次屏；抓屏在途时焦点变了，结果回来发现 pane 不是当前焦点就马上再抓一次。
 - 底栏放不下时从右侧截断加 …，不按优先级丢项（M3 的英文底栏已把 j/k h/l 合成一项）。
 - 预览标题行：会话名 · pane id · 状态。内容 = `tmux capture-pane -p -e -t <pane> -S -<N>`，N = 预览可用高度；预览开着时每 500ms 抓一次（卡片仍 2s 轮询）。
+- 光标（T24，dev 2026-10-12 在 tmux 3.7c 真 pane 实测）：抓屏时同一次 tmux 调用用 `;` 拼上 `display-message -p -t <pane> '#{cursor_x} #{cursor_y} #{cursor_flag} #{cursor_shape} #{pane_height}'`，输出第一行是光标、其余是屏幕（同一时刻、不多开进程）。实测事实：cursor_x / cursor_y 从 0 起、相对当前可见屏（不含历史），宽字符占 2 格；cursor_flag 1 显示 / 0 隐藏（tput civis、`\e[?25l`、copy-mode 都是 0）；cursor_shape 是文字 default / block / underline / bar（DECSCUSR 0→default，1、2→block，3、4→underline，5、6→bar；civis 不改 shape；nvim 普通态 block、插入态 bar）。捕获文本带历史，光标行 = 总行数 − pane_height + cursor_y。画法：flag=0 不画；block / default → 该格反色（空白格也反成块）；bar / underline → 该格 focus 色下划线（终端画不出细竖线）；预览滚动偏移非 0、或 cursor_x 超出预览宽度 → 不画；预览和直通态都画，随每次抓屏刷新。Claude Code 输入框未实测（ink 自己画反色块，真光标多半 flag=0），不特判。
 - 焦点换卡片，预览跟着换；焦点在折叠标题或 background 会话（无 pane）上时预览显示「没有 pane」。
 
 ## 按键直通（回复）
