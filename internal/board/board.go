@@ -503,14 +503,8 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		if action == "prev_match" {
 			step = -1
 		}
-		switch i := slices.Index(order, m.focus); {
-		case i >= 0:
-			m.focus = order[(i+step+len(order))%len(order)]
-		case step > 0: // on a card the filter hides: the first match, or the last going back
-			m.focus = order[0]
-		default:
-			m.focus = order[len(order)-1]
-		}
+		m.current() // from the card the screen shows the focus on, as j / k do
+		m.focus = order[(slices.Index(order, m.focus)+step+len(order))%len(order)]
 		m.msg = ""
 		return m, nil
 	}
@@ -915,8 +909,13 @@ func (m Model) View() string {
 	}
 	if m.query != "" { // a kept filter: what moves around it (the states below replace the whole line)
 		hint := "esc clear"
-		if n, p := m.cfg.First("next_match"), m.cfg.First("prev_match"); n != "" && p != "" {
+		switch n, p := m.cfg.First("next_match"), m.cfg.First("prev_match"); { // whichever keys there are
+		case n != "" && p != "":
 			hint = n + "/" + p + " next/prev · " + hint
+		case n != "":
+			hint = n + " next · " + hint
+		case p != "":
+			hint = p + " prev · " + hint
 		}
 		last := strings.LastIndexByte(out, '\n') + 1
 		out = out[:last] + ansi.Truncate(fg(cFocus, " "+hint)+fg(cMuted, " ·")+footer(ok && focused.TmuxPane == "", m.w), m.w, "…")

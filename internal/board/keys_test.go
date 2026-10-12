@@ -2447,8 +2447,8 @@ func TestNextPrevMatch(t *testing.T) {
 	}
 }
 
-// n / N are text in the box, keys for the pane in pass-through; on a card the filter hides, n goes
-// to the first match and N to the last.
+// n / N are text in the box, keys for the pane in pass-through; from a card the filter hides they
+// go on from the card the screen shows the focus on (the first shown), as j / k do.
 func TestNextPrevMatchEdges(t *testing.T) {
 	m, _ := press(t, psized(matchSrc, 232, 50), "/")
 	if m = typeKeys(t, m, "nN"); m.query != "nN" {
@@ -2456,13 +2456,13 @@ func TestNextPrevMatchEdges(t *testing.T) {
 	}
 	m, _ = press(t, psized(matchSrc, 232, 50), "j", "j", "j", "/") // focus b2 "other"
 	m = typeKeys(t, m, "x")
-	m, _ = press(t, m, "enter") // a1 (enter goes to the first)
-	m.focus = "b2"              // hidden by the filter
-	if m, _ = press(t, m, "n"); m.focus != "a1" {
+	m, _ = press(t, m, "enter")                   // a1 (enter goes to the first)
+	m.focus = "b2"                                // hidden by the filter
+	if m, _ = press(t, m, "n"); m.focus != "a2" { // the screen shows a1: the next one
 		t.Errorf("n from a hidden card: %q", m.focus)
 	}
 	m.focus = "b2"
-	if m, _ = press(t, m, "N"); m.focus != "b1" {
+	if m, _ = press(t, m, "N"); m.focus != "b1" { // the screen shows a1: back, around to the last
 		t.Errorf("N from a hidden card: %q", m.focus)
 	}
 	r := &fakeRunner{}
@@ -2899,6 +2899,67 @@ func TestFlashResize(t *testing.T) {
 	for _, h := range m.flash.ms {
 		if h.y < 0 || h.y >= 7 {
 			t.Errorf("hit %+v outside the window", h)
+		}
+	}
+}
+
+// A poll makes the focused card stop matching: the screen shows the focus on the first card
+// (current()'s fallback); n goes on from there, as j / k do.
+func TestNextFromDisplayedFocus(t *testing.T) {
+	mk := func(id, name string) store.Session {
+		return store.Session{ID: id, Name: name, GroupKey: "/g", CWD: "/g", TmuxPane: "%1", Status: "idle", ContextPct: -1}
+	}
+	src := &mutSrc{ss: []store.Session{mk("x1", "ab1"), mk("x2", "ab2"), mk("x3", "ab3"), mk("y", "zz")}}
+	m, _ := press(t, psized(src, 232, 50), "/")
+	m = typeKeys(t, m, "ab")
+	m, _ = press(t, m, "enter", "n") // x2
+	if m.focus != "x2" {
+		t.Fatalf("setup focus %q", m.focus)
+	}
+	src.ss[1].Name = "zz2" // a poll: x2 no longer matches; the screen puts the focus on x1
+	if nm, _ := press(t, m, "n"); nm.focus != "x3" {
+		t.Errorf("n: %q, want x3 (on from x1)", nm.focus)
+	}
+	if nm, _ := press(t, m, "N"); nm.focus != "x3" {
+		t.Errorf("N: %q, want x3 (back from x1, around)", nm.focus)
+	}
+}
+
+// n / N follow the layout, not the match scores.
+func TestNextPrevLayoutOrder(t *testing.T) {
+	ss := staticSrc{
+		{ID: "a1", Name: "x-o-r-c-h", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%1"},
+		{ID: "b1", Name: "orchestrator", GroupKey: "/b", CWD: "/b", ContextPct: -1, TmuxPane: "%2"},
+		{ID: "a2", Name: "zz-orch", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%3"},
+	}
+	m, _ := press(t, psized(ss, 232, 50), "/")
+	m = typeKeys(t, m, "orch")
+	m, _ = press(t, m, "enter") // b1, the best
+	var got []string
+	for range 3 {
+		m, _ = press(t, m, "n")
+		got = append(got, m.focus)
+	}
+	if want := []string{"a1", "a2", "b1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("n from b1: %v, want layout order %v", got, want)
+	}
+}
+
+// The footer names the n / N keys there are.
+func TestMatchHintNamesWhatThereIs(t *testing.T) {
+	for toml, want := range map[string]string{
+		"": " n/N next/prev · esc clear · ", "[keys]\nprev_match = [\"ctrl+p\"]\n": " n/ctrl+p next/prev · esc clear · ",
+		"[keys]\nnext_match = [\"n\"]\nfold = [\"N\"]\n": " n next · esc clear · ", "[keys]\nfold = [\"n\"]\n": " N prev · esc clear · ",
+		"[keys]\nfold = [\"n\", \"N\"]\n": " esc clear · ",
+	} {
+		m := withConfig(t, toml)
+		m.src = psized(sessions, 232, 50).src
+		m, _ = press(t, m, "/")
+		m = typeKeys(t, m, "o")
+		m, _ = press(t, m, "enter")
+		v := strings.Split(ansi.Strip(m.View()), "\n")
+		if f := v[len(v)-1]; !strings.HasPrefix(f, want) {
+			t.Errorf("%q: footer %q, want prefix %q", toml, f, want)
 		}
 	}
 }

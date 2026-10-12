@@ -87,7 +87,7 @@ agmux setup --write   # 改 ~/.claude/settings.json 的 statusLine.command，原
 
 ```toml
 [keys]          # 动作 = 一个或多个键名（j、ctrl+k、enter、tab、shift+tab、esc、space、f5…）
-down = ["n", "down"]
+down = ["ctrl+n", "down"]
 leave_preview = ["tab"]       # 默认和 focus_preview 同一个键（进出都是 tab）；想让 tab 也能到 pane 里，就改成 ["ctrl+]"]
 
 [colors]        # #rrggbb 或 ANSI 0–255
