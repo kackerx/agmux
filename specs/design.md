@@ -25,6 +25,8 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
   - 原命令起不来：文件照写，stderr 一行 `agmux statusline: <错误>`，退出 127。
   - `agmux setup` 输出固定三行：`statusLine.command:` / `  before: <原值，无则 (none)>` / `  after:  <新值>`，然后一行 `dry run: add --write to apply` 或 `written (backup: <路径>)`；已经是 agmux statusline 时输出 `already set: <值>` 退出 0。
   - `--write`：settings.json 不存在 → 新建只含 statusLine 的文件；JSON 损坏或没写权限 → stderr 报错、退出 1、原文件不动。
+  - settings.json 是软链接（用户真机就是，指向 dotfiles 仓库）：解析到目标文件再写，软链接本身保留，`.bak` 放在目标文件旁边。
+  - `session_id` 只接受 `[A-Za-z0-9_-]+`，否则当作没有 session_id（不写文件），绝不写到状态目录之外。
 - 解析失败的文件按不存在处理；background 会话和非 Claude 的 agent 没有状态栏，永远 `--`。文件 S1 不清理。
 ### C. jsonl 兜底（只取模型）
 文件可达 16MB，不能整读：从末尾读最后 64KB，倒序找最后一条 `"type":"assistant"`，取 `message.model`。
