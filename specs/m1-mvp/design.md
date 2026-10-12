@@ -29,7 +29,7 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 
 ## 头像
 - `internal/avatar`：一组手绘 sprite，**6 像素宽 × 4 像素高**（半块字符渲染成 6 列 × 2 行；第二轮验收：4×4 太小，且要和上下文条同宽；M1 的 6×6 版用户嫌喧宾夺主，M1 验收改版改小），每个有 `ID`（如 `bot-01`）和 `Name`。6 个，像素风。底边一行像素是 agentType 色带（claude #ffb86c、codex #50fa7b、其它 #6272a4）。
-- agent 图标放在名字前面，和色带同色：claude  U+EC82（nf-cod-claude）、codex  U+EC81（nf-cod-openai）、其它  U+EC20（nf-cod-robot）。Nerd Fonts 3.5 起才有前两个，用户的 Maple Mono NF CN 已核实有。
+- agent 图标：第五轮验收去掉了（曾用 nf-cod-claude / nf-cod-openai / nf-cod-robot）；agentType 只靠头像底边色带。
 - 分配：`Bindings` 接口 `Get(sessionID) (id string, ok bool)` / `Set(sessionID, id)`，M1 实现存 `$XDG_STATE_HOME/agmux/avatars.json`；没绑定时按会话 ID 的 hash 取模默认分配。M1 不做选头像 UI。
 - 眼睛表达状态，优先级从高到低：需要处理（`attentionType` 非空或 status waiting）闪红 → working 扫动 → done 正常 → idle 变暗。
 - `avatars.json` 损坏：绑定按全无处理，错误文案（带路径和修复提示）显示在底栏，不退出。
@@ -49,15 +49,16 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 - 折叠：`f` 收起 / 展开焦点所在的组；收起的组只剩标题行 `▸ ~/路径 (n)`，仍占一个列位、标题可被焦点选中（j/k/h/l 把它当一张高度 1 的卡片），再按 `f` 或 enter 展开。折叠状态只在本次运行内记住。
 - 列 = GroupKey（cwd）。列最小宽 **40**，**最多 4 列**（第三轮验收：5 列时分支名放不下），列数 = min(4, 终端宽度能放几个 40（含 2 列间距）)，各列均分撑满（232 列 → 4 列各 56；200 列 → 4 列各 48；120 列 → 2 列各 59）；宽高变化时实时重排（bubbletea WindowSizeMsg）；放不下的组折到下一行，不横向滚动。组内卡片竖排。
 - 列标题沿用 ccmux：`▾ ~/缩写路径 (n)`，路径黄色（HUD 目录段同色）、`(n)` 灰色，超宽时中间用 … 截断。
-- 卡片 = 列宽 × 5 行（边框 2 + 正文 3），圆角边框（44 列示例）：
+- 卡片 = 列宽 × 5 行（边框 2 + 正文 3），圆角边框（48 列示例，第五轮验收定稿：名字和分支各独占一行）：
 ```
-╭──────────────────────────────────────────╮
-│ ▄▀▀▀▀▄   mods-tmux          ⏸ idle  2h │   头像 6×4（6 列 × 2 行）· agent 图标 · 名（洋红）· 状态 · 上次活动相对时间
-│ ▀▄▄▄▄▀  ⑂ master            Opus 5.5·hi │   分支（橙红，可截断）· 模型（青）·effort（紫），靠右
-│ ■■■□□□             ⚇ 2 agents  ⚙ 1 shell │   上下文条 6 格顶在头像下面 · 子 agent 数 · 后台 shell 数
-╰──────────────────────────────────────────╯
+╭──────────────────────────────────────────────╮
+│ ▄▀▀▀▀▄  qa-acceptance-pap-be-dev          3h │   名字（洋红）全宽 · 上次活动相对时间
+│ ▀▄▄▄▄▀   feature/qa-acceptance-pap-be-dev   │   分支（橙红）全宽，图标 nf-dev-git_branch U+E725
+│ ■■■□□□  ⏸ idle · Bash  ⚇ 2   Opus 5.5·high │   上下文条 · 状态 + pendingTool/agents · 子 agent / shell · 模型·effort 靠右
+╰──────────────────────────────────────────────╯
 ```
-- 窄时让位顺序：第 1 行状态词和时间永远在；名字是身份、优先完整显示，pendingTool 只拿名字之后剩下的宽度，放不下就截它（截到空时连 ` · ` 一起去掉）；pendingTool 已经没了还放不下，才截名字（尽量留 12 格，最窄的 40 列卡片上可能只剩 10–11 格，状态词和时间优先）。第 2 行先截分支，模型·effort 永远在。
+- 名字前不再放 agent 图标（头像色带已区分 agentType）。
+- 让位顺序：第 1 行时间永远在，名字放不下才截；第 2 行分支放不下截；第 3 行状态词永远在，先截 `· pendingTool`，再截 ⚇/⚙，最后截模型。
 - 字段颜色和用户的 claude-hud 段一一对应：名洋红、模型青、effort 紫、目录黄、分支橙红。
 - 状态，照 ccmux 1.4.3 的 `getEffectiveStatus` 换算后再显示：原始 idle 且有子 agent 在 working / waiting → `⏵ working · agents`（不算 done，眼睛扫动）；原始 working → `⏵ working`，有 pendingTool 接 pendingTool，不接 agents；`⏸ idle` 蓝灰；`● done` 绿 = 原始 idle、无子 agent 在跑、`attentionState` 非空（"unread" 或 "read" 都算，ccmux 同样）；`⏳ waiting` 红 = status waiting（含 plan_approval，不像 ccmux 那样用青色）。**边框色 = 状态色**（working 橙、done 绿、idle 暗灰 #585b70、需要处理 / waiting 红）。焦点卡片边框换成 **#ff8ebe** 粗线（lipgloss ThickBorder），盖掉状态色——第二轮验收：只换粗线看不出焦点在哪。不单独拎出需要处理的会话。
 - 换算放在 store 里做一次，view 只读结果。
