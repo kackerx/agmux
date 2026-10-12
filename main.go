@@ -17,6 +17,9 @@ const usage = `usage: agmux <command>
 
 commands:
   board   full-screen session board (open it in a tmux popup)
+          enter switches the most recently active tmux client outside the board's own session;
+          set AGMUX_CLIENT=<client> (a name from tmux list-clients) to pick it exactly, e.g. from a
+          binding: run-shell 'tmux display-popup -E "AGMUX_CLIENT=#{client_name} agmux board"'
   show    print sessions one per line: id, name, group, status, model, context%
   avatars print every avatar sprite
   statusline [-- <command>]

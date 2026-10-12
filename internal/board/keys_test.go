@@ -20,9 +20,32 @@ func (s staticSrc) Sessions() []store.Session { return s }
 func (s staticSrc) Err() error                { return nil }
 
 type fakeRunner struct {
-	calls  [][]string
-	err    error
-	script string // what Interactive runs (sh -c); default: true
+	calls   [][]string
+	err     error
+	script  string            // what Interactive runs (sh -c); default: true
+	tmuxOut map[string]string // tmux subcommand → stdout; list-clients defaults to one client /dev/c
+}
+
+func (f *fakeRunner) Tmux(args ...string) (string, error) {
+	f.calls = append(f.calls, append([]string{"tmux"}, args...))
+	if out, ok := f.tmuxOut[args[0]]; ok {
+		return out, f.err
+	}
+	if args[0] == "list-clients" {
+		return "1\t/dev/c\tmain\n", f.err
+	}
+	return "", f.err
+}
+
+var listClients = []string{"tmux", "list-clients", "-F", clientsFormat}
+
+// switched is what enter on a card with pane runs by default: pick the one client, switch it.
+func switched(pane string) [][]string {
+	return [][]string{listClients, {"tmux", "switch-client", "-c", "/dev/c", "-t", pane}}
+}
+
+func sent(pane, text string) [][]string {
+	return [][]string{{"tmux", "send-keys", "-t", pane, "-l", "--", text}, {"tmux", "send-keys", "-t", pane, "Enter"}}
 }
 
 func (f *fakeRunner) Run(args ...string) error {
@@ -103,6 +126,7 @@ func press(t *testing.T, m Model, keys ...string) (Model, bool) {
 
 func newModel(r *fakeRunner) Model {
 	m := New(sessions, r)
+	m.getenv = func(string) string { return "" } // never the test process's own $TMUX_PANE / $AGMUX_CLIENT
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	return tm.(Model)
 }
@@ -114,28 +138,28 @@ func TestKeys(t *testing.T) {
 		calls [][]string
 		quit  bool
 	}{
-		{"enter switches and quits", []string{"enter"}, [][]string{{"switch", "a1"}}, true},
-		{"l moves to next column", []string{"l", "enter"}, [][]string{{"switch", "b1"}}, true},
+		{"enter switches and quits", []string{"enter"}, switched("%1"), true},
+		{"l moves to next column", []string{"l", "enter"}, switched("%3"), true},
 		{"l then h comes back", []string{"l", "h", "r"}, [][]string{{"restart", "a1"}}, false},
 		{"j/k within column", []string{"j", "j", "r", "k", "r"}, [][]string{{"restart", "a2"}, {"restart", "a1"}}, false},
-		{"H sends /handoff", []string{"H"}, [][]string{{"send", "a1", "--", "/handoff"}}, false},
+		{"H sends /handoff", []string{"H"}, sent("%1", "/handoff"), false},
 		{"d reviews interactively", []string{"d"}, [][]string{{"(interactive)", "review", "a1"}}, false},
 		{"x y kills", []string{"x", "y"}, [][]string{{"kill", "a1"}}, false},
 		{"x other cancels", []string{"x", "n", "x", "q"}, nil, false},
-		{"s types and sends", []string{"s", "hi", " ", "你好", "enter"}, [][]string{{"send", "a1", "--", "hi 你好"}}, false},
+		{"s types and sends", []string{"s", "hi", " ", "你好", "enter"}, sent("%1", "hi 你好"), false},
 		{"s esc cancels", []string{"s", "hi", "esc"}, nil, false},
 		{"s empty cancels", []string{"s", " ", "enter"}, nil, false},
-		{"q in s mode is text", []string{"s", "q", "enter"}, [][]string{{"send", "a1", "--", "q"}}, false},
+		{"q in s mode is text", []string{"s", "q", "enter"}, sent("%1", "q"), false},
 		{"background: enter / H / s refused", []string{"j", "enter", "H", "s", "x", "y"}, [][]string{{"kill", "a2"}}, false},
 		{"q quits", []string{"q"}, nil, true},
 		{"arrow keys move", []string{"down", "r", "up", "right", "r"}, [][]string{{"restart", "a2"}, {"restart", "b1"}}, false},
-		{"text starting with - stays text", []string{"s", "--help", "enter"}, [][]string{{"send", "a1", "--", "--help"}}, false},
+		{"text starting with - stays text", []string{"s", "--help", "enter"}, sent("%1", "--help"), false},
 		{"burst of keys = one by one", []string{"lr"}, [][]string{{"restart", "b1"}}, false},
 		{"unfolding focuses the group's first card", []string{"l", "f", "f", "r"}, [][]string{{"restart", "b1"}}, false},
-		{"burst keeps typed order", []string{"Hr"}, [][]string{{"send", "a1", "--", "/handoff"}, {"restart", "a1"}}, false},
+		{"burst keeps typed order", []string{"Hr"}, append(sent("%1", "/handoff"), []string{"restart", "a1"}), false},
 		{"ctrl+c quits from the prompt", []string{"s", "hi", "ctrl+c"}, nil, true},
-		{"pasted newlines become spaces", []string{"s", "a\nb", "enter"}, [][]string{{"send", "a1", "--", "a b"}}, false},
-		{"burst into the prompt", []string{"shi", "enter"}, [][]string{{"send", "a1", "--", "hi"}}, false},
+		{"pasted newlines become spaces", []string{"s", "a\nb", "enter"}, sent("%1", "a b"), false},
+		{"burst into the prompt", []string{"shi", "enter"}, sent("%1", "hi"), false},
 	}
 	for _, c := range cases {
 		r := &fakeRunner{}
@@ -152,7 +176,7 @@ func TestErrorsGoToMessageLine(t *testing.T) {
 	if quit || !strings.Contains(m.View(), "ccmux restart a1: session not found") || strings.Contains(m.View(), "more") {
 		t.Errorf("want the first stderr line in the message line")
 	}
-	r.err = errors.New("ccmux switch a1: no pane")
+	r.err = errors.New("tmux switch-client -c /dev/c -t %1: can't find pane: %1")
 	if _, quit := press(t, newModel(r), "enter"); quit {
 		t.Error("a failed switch must not quit")
 	}
@@ -181,7 +205,7 @@ func TestMouse(t *testing.T) {
 		t.Fatal("second click should jump")
 	}
 	cmd()
-	if !reflect.DeepEqual(r.calls, [][]string{{"switch", "b1"}}) {
+	if !reflect.DeepEqual(r.calls, switched("%3")) {
 		t.Errorf("calls %q", r.calls)
 	}
 	tm, _ = m.Update(tea.MouseMsg{X: 0, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
@@ -398,5 +422,57 @@ func TestSpatialNav(t *testing.T) {
 func TestNearestEmpty(t *testing.T) {
 	if nearest(nil, "x", directions["j"]) != "" || nearest([]rect{{"a", 0, 0, 10, 5}}, "zz", directions["j"]) != "" {
 		t.Error("unknown focus or no rects: stay")
+	}
+}
+
+// Which client enter switches, and whether agmux's own session is detached afterwards.
+func TestSwitchTo(t *testing.T) {
+	const pane = "%7"
+	for _, c := range []struct {
+		name    string
+		env     map[string]string
+		clients string // list-clients output: activity \t name \t session
+		want    [][]string
+		err     string
+	}{
+		{"AGMUX_CLIENT wins over activity", map[string]string{"AGMUX_CLIENT": "/dev/x"},
+			"5\t/dev/a\tmain\n9\t/dev/b\tother\n",
+			[][]string{listClients, {"tmux", "switch-client", "-c", "/dev/x", "-t", pane}}, ""},
+		{"direct popup: most recent client", nil,
+			"5\t/dev/a\tmain\n9\t/dev/b\tother\n3\t/dev/c\tmain\n",
+			[][]string{listClients, {"tmux", "switch-client", "-c", "/dev/b", "-t", pane}}, ""},
+		{"nested fl-* float: skip own session, then detach it", map[string]string{"TMUX_PANE": "%2"},
+			"5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n",
+			[][]string{
+				{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients,
+				{"tmux", "switch-client", "-c", "/dev/outer", "-t", pane},
+				{"tmux", "detach-client", "-s", "fl-1"},
+			}, ""},
+		{"in a pane no other client shows: no detach", map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/outer"},
+			"5\t/dev/outer\tmain\n",
+			[][]string{
+				{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients,
+				{"tmux", "switch-client", "-c", "/dev/outer", "-t", pane},
+			}, ""},
+		{"no usable client: error, nothing switched", map[string]string{"TMUX_PANE": "%2"},
+			"9\t/dev/nested\tfl-1\n",
+			[][]string{{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients}, "AGMUX_CLIENT"},
+	} {
+		r := &fakeRunner{tmuxOut: map[string]string{"list-clients": c.clients, "display-message": "fl-1\n"}}
+		err := switchTo(r, func(k string) string { return c.env[k] }, pane)
+		if !reflect.DeepEqual(r.calls, c.want) || (err == nil) != (c.err == "") || err != nil && !strings.Contains(err.Error(), c.err) {
+			t.Errorf("%s:\n calls %q\n want  %q\n err %v", c.name, r.calls, c.want, err)
+		}
+	}
+}
+
+// No client to switch: the reason shows on the board and agmux keeps running.
+func TestSwitchNoClientStays(t *testing.T) {
+	r := &fakeRunner{tmuxOut: map[string]string{"list-clients": "9\t/dev/nested\tfl-1\n", "display-message": "fl-1\n"}}
+	m := newModel(r)
+	m.getenv = func(k string) string { return map[string]string{"TMUX_PANE": "%2"}[k] }
+	m, quit := press(t, m, "enter")
+	if quit || !strings.Contains(ansi.Strip(m.View()), "AGMUX_CLIENT") {
+		t.Errorf("quit=%v, want the AGMUX_CLIENT hint on the message line", quit)
 	}
 }

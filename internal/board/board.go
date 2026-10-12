@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kackerx/agmux/internal/ccmux"
+	"github.com/kackerx/agmux/internal/execx"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -25,20 +27,26 @@ type Source interface {
 	Err() error
 }
 
-// Runner runs ccmux subcommands; tests swap in one that records them.
+// Runner runs ccmux and tmux; tests swap in one that records them.
 type Runner interface {
-	Run(args ...string) error             // error carries ccmux's stderr
-	Interactive(args ...string) *exec.Cmd // gets the terminal via tea.ExecProcess
+	Run(args ...string) error             // ccmux; error carries its stderr
+	Interactive(args ...string) *exec.Cmd // ccmux, given the terminal via tea.ExecProcess
+	Tmux(args ...string) (string, error)  // tmux from $PATH, reaching the server through the inherited $TMUX
 }
 
-type ccmuxRunner struct{}
+type realRunner struct{}
 
-func (ccmuxRunner) Run(args ...string) error {
+func (realRunner) Run(args ...string) error {
 	_, err := ccmux.Run(args...)
 	return err
 }
 
-func (ccmuxRunner) Interactive(args ...string) *exec.Cmd { return exec.Command("ccmux", args...) }
+func (realRunner) Interactive(args ...string) *exec.Cmd { return exec.Command("ccmux", args...) }
+
+func (realRunner) Tmux(args ...string) (string, error) {
+	out, err := execx.Run("tmux", args...)
+	return string(out), err
+}
 
 const frameEvery = 500 * time.Millisecond
 
@@ -54,6 +62,7 @@ type Model struct {
 	src    Source
 	run    Runner
 	now    func() time.Time
+	getenv func(string) string // AGMUX_CLIENT, TMUX_PANE
 	w, h   int
 	frame  int
 	focus  string // session ID; follows the session across polls
@@ -65,7 +74,7 @@ type Model struct {
 }
 
 func New(src Source, run Runner) Model {
-	return Model{src: src, run: run, now: time.Now, folded: map[string]bool{}}
+	return Model{src: src, run: run, now: time.Now, getenv: os.Getenv, folded: map[string]bool{}}
 }
 
 // Run polls p in the background and runs the board until the user quits.
@@ -73,7 +82,7 @@ func Run(p *store.Poller) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go p.Run(ctx)
-	_, err := tea.NewProgram(New(p, ccmuxRunner{}), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	_, err := tea.NewProgram(New(p, realRunner{}), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }
 
@@ -372,8 +381,64 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	if s.TmuxPane == "" {
 		return m, nil // msgLine already shows noPane
 	}
-	r := m.run
-	return m, func() tea.Msg { return doneMsg{err: r.Run("switch", s.ID), quit: true} }
+	r, getenv := m.run, m.getenv
+	return m, func() tea.Msg { return doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true} }
+}
+
+// switchTo points the user's tmux client at pane. Inside a popup tmux has no current client
+// (a bare switch-client moves whichever was active last, and in a nested fl-* float that is the
+// float's own client), so the client is chosen explicitly: $AGMUX_CLIENT, else the most recently
+// active client not attached to agmux's own session. When agmux sits in a session that other
+// clients show (the nested float), that session is detached afterwards so the float closes.
+const clientsFormat = "#{client_activity}\t#{client_name}\t#{client_session}"
+
+func switchTo(r Runner, getenv func(string) string, pane string) error {
+	own := ""
+	if p := getenv("TMUX_PANE"); p != "" {
+		out, err := r.Tmux("display-message", "-p", "-t", p, "#{session_name}")
+		if err != nil {
+			return err
+		}
+		own = strings.TrimSpace(out)
+	}
+	out, err := r.Tmux("list-clients", "-F", clientsFormat)
+	if err != nil {
+		return err
+	}
+	type cl struct {
+		activity      int
+		name, session string
+	}
+	var clients []cl
+	for l := range strings.Lines(out) {
+		f := strings.SplitN(strings.TrimRight(l, "\n"), "\t", 3)
+		if len(f) == 3 {
+			n, _ := strconv.Atoi(f[0])
+			clients = append(clients, cl{n, f[1], f[2]})
+		}
+	}
+	client := getenv("AGMUX_CLIENT")
+	if client == "" {
+		best := -1
+		for _, c := range clients {
+			if c.session != own && c.activity > best {
+				client, best = c.name, c.activity
+			}
+		}
+	}
+	if client == "" {
+		return errors.New("没有可切换的 tmux client：设 AGMUX_CLIENT=<client>（tmux list-clients 里的名字）")
+	}
+	if _, err := r.Tmux("switch-client", "-c", client, "-t", pane); err != nil {
+		return err
+	}
+	for _, c := range clients {
+		if own != "" && c.session == own && c.name != client {
+			_, err := r.Tmux("detach-client", "-s", own)
+			return err
+		}
+	}
+	return nil
 }
 
 func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
@@ -383,7 +448,14 @@ func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
 	case !m.alive(s.ID):
 		return m.say(cRed, s.Name+" 已经不在了，没有发送"), nil
 	}
-	return m, m.ccmux(ok, "send", s.ID, "--", text) // ccmux reads text starting with - as options
+	r, pane := m.run, s.TmuxPane
+	return m, func() tea.Msg {
+		_, err := r.Tmux("send-keys", "-t", pane, "-l", "--", text) // -l: literal, -- : text may start with -
+		if err == nil {
+			_, err = r.Tmux("send-keys", "-t", pane, "Enter")
+		}
+		return doneMsg{ok: ok, err: err}
+	}
 }
 
 func (m Model) kill(s store.Session) (tea.Model, tea.Cmd) {

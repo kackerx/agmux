@@ -2,14 +2,13 @@
 package ccmux
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
+
+	"github.com/kackerx/agmux/internal/execx"
 )
 
 // Session is one entry of `ccmux show --json`, only the fields agmux reads.
@@ -41,34 +40,14 @@ type Subagent struct {
 	PendingTool string `json:"pendingTool"`
 }
 
-const timeout = 10 * time.Second
-
 // Run execs `ccmux args...` and returns stdout. On failure the error carries
 // ccmux's stderr so callers can show it as-is.
 func Run(args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "ccmux", args...)
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	cmd.WaitDelay = time.Second // don't hang on children that keep the pipes open after a timeout kill
-	err := cmd.Run()
-	switch {
-	case errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState.Success():
-		// ccmux exited 0 but left a background child holding stdout; what it printed is complete
-		return stdout.Bytes(), nil
-	case errors.Is(err, exec.ErrNotFound):
+	out, err := execx.Run("ccmux", args...)
+	if errors.Is(err, exec.ErrNotFound) {
 		return nil, fmt.Errorf("ccmux not found in $PATH: install ccmux and make sure `ccmux show --json` works")
-	case err != nil && ctx.Err() != nil:
-		return nil, fmt.Errorf("ccmux %s: timed out after %s", strings.Join(args, " "), timeout)
-	case err != nil:
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return nil, fmt.Errorf("ccmux %s: %s", strings.Join(args, " "), msg)
 	}
-	return stdout.Bytes(), nil
+	return out, err
 }
 
 // Show runs `ccmux show --json`.
