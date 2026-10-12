@@ -70,6 +70,12 @@ func sent(pane, text string) [][]string {
 	return [][]string{{"tmux", "send-keys", "-t", pane, "-l", "--", text}, {"tmux", "send-keys", "-t", pane, "Enter"}}
 }
 
+func (f *fakeRunner) reset() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = nil
+}
+
 func (f *fakeRunner) TmuxIn(stdin string, args ...string) error {
 	_, err := f.Tmux(append(args, "<stdin:"+stdin+">")...)
 	return err
@@ -1202,15 +1208,142 @@ func TestLockedOutEsc(t *testing.T) {
 	}
 }
 
-// Keys go to the pane pass-through was entered on, whatever card the focus is on.
+// The preview shows whoever has the focus: once the focus is off the session pass-through was
+// entered on, keys go nowhere (locked out) until ctrl+] / esc.
 func TestForwardGoesToLockedPane(t *testing.T) {
 	r := &fakeRunner{}
 	m, _ := press(t, wide(r, 232, 50), "i") // locked on a1 / %1
-	m.focus = "b1"                          // however the focus moved, the lock holds
+	m.focus = "b1"                          // however the focus moved
 	r.calls = nil
 	m, _ = press(t, m, "x")
-	if len(r.calls) == 0 || !reflect.DeepEqual(r.calls[0], []string{"tmux", "send-keys", "-t", "%1", "-l", "--", "x"}) {
-		t.Errorf("forwarded %q, want send-keys to %%1", r.calls)
+	if m.passThrough() || !m.pvFocus || len(r.calls) != 0 || m.mode != browsing {
+		t.Errorf("locked out: passThrough %v pvFocus %v calls %q", m.passThrough(), m.pvFocus, r.calls)
+	}
+}
+
+// sentKeys lists the panes keys and pastes went to.
+func sentKeys(r *fakeRunner) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, c := range r.calls {
+		if c[1] == "send-keys" || c[1] == "paste-buffer" {
+			out = append(out, c[len(c)-2]+" "+c[len(c)-1])
+		}
+	}
+	return out
+}
+
+// The target misses one poll (ccmux restarting returns nothing): the focus falls back to the first
+// card. When it is back, the preview shows that first card, so keys must not go to the target.
+func TestLockedOutAfterTargetReappears(t *testing.T) {
+	all := append([]store.Session(nil), sessions...)
+	src := &mutSrc{ss: all}
+	r := &fakeRunner{}
+	m := New(src, r)
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	m, _ = press(t, tm.(Model), "l", "i") // locked on b1 / %3
+	m.capturing = false
+	src.ss = all[:2]
+	tm, _ = m.Update(frameMsg{})
+	m = tm.(Model)
+	src.ss = all
+	r.reset() // a frame's capture may still be running on the key queue
+	m, _ = press(t, m, "hi")
+	v := m.View()
+	if m.focus == m.pvID || m.passThrough() || len(sentKeys(r)) != 0 || !strings.Contains(ansi.Strip(v), "session is gone") {
+		t.Errorf("focus %s pvID %s, keys → %q", m.focus, m.pvID, sentKeys(r))
+	}
+	if m, _ = press(t, m, "ctrl+]"); m.pvFocus {
+		t.Error("ctrl+] takes the keys back")
+	}
+}
+
+// The target moves into a folded group (same pane, still alive): the focus leaves it, keys stop.
+func TestLockedOutWhenTargetFolds(t *testing.T) {
+	all := append([]store.Session(nil), sessions...)
+	src := &mutSrc{ss: all}
+	r := &fakeRunner{}
+	m := New(src, r)
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	m, _ = press(t, tm.(Model), "f", "l", "i") // fold /a, lock on b1
+	moved := append([]store.Session(nil), all...)
+	moved[2].GroupKey = "/a"
+	src.ss = moved
+	m.capturing = false
+	tm, _ = m.Update(frameMsg{})
+	m = tm.(Model)
+	r.reset() // a frame's capture may still be running on the key queue
+	m, _ = press(t, m, "hi")
+	if m.passThrough() || len(sentKeys(r)) != 0 {
+		t.Errorf("focus %q, keys → %q", m.focus, sentKeys(r))
+	}
+}
+
+// An empty paste is nothing: no tmux at all (load-buffer with no input keeps the old buffer).
+func TestEmptyPasteIgnored(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "i")
+	r.reset() // a frame's capture may still be running on the key queue
+	tm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Paste: true})
+	if m = tm.(Model); cmd != nil || len(r.calls) != 0 || strings.Contains(ansi.Strip(m.View()), "buffer") {
+		t.Errorf("calls %q", r.calls)
+	}
+}
+
+// A failed paste-buffer deletes the buffer: -d only deletes after pasting, and the text would
+// otherwise wait there for the next paste into another pane.
+func TestFailedPasteDeletesBuffer(t *testing.T) {
+	r := &fakeRunner{tmuxFail: map[string]error{"paste-buffer": errors.New("can't find pane: %1")}}
+	m, _ := press(t, wide(r, 232, 50), "i")
+	r.reset() // a frame's capture may still be running on the key queue
+	tm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("secret token"), Paste: true})
+	tm, _ = tm.(Model).Update(cmd())
+	want := [][]string{
+		{"tmux", "load-buffer", "-b", "agmux", "-", "<stdin:secret token>"},
+		{"tmux", "paste-buffer", "-p", "-d", "-b", "agmux", "-t", "%1"},
+		{"tmux", "delete-buffer", "-b", "agmux"},
+	}
+	if !reflect.DeepEqual(r.calls, want) || !strings.Contains(ansi.Strip(tm.(Model).View()), "can't find pane: %1") {
+		t.Errorf("calls\n %q\nwant\n %q", r.calls, want)
+	}
+}
+
+// The terminal shrinks under 100 columns: the preview closes and pass-through ends, saying why.
+func TestNarrowEndsPassThrough(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "i")
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 90, Height: 50})
+	m = tm.(Model)
+	v := ansi.Strip(m.View())
+	if m.pvFocus || !strings.Contains(v, "preview closed: terminal too narrow") || strings.Contains(v, "session is gone") {
+		t.Errorf("pvFocus %v\n%s", m.pvFocus, v)
+	}
+	r.reset() // a frame's capture may still be running on the key queue
+	if m, _ = press(t, m, "x"); m.mode != confirmKill || len(r.calls) != 0 {
+		t.Error("keys are the board's again")
+	}
+}
+
+// A poll drops the focused card: the focus falls back and the new card starts at the bottom.
+func TestScrollResetsWhenPollMovesFocus(t *testing.T) {
+	all := append([]store.Session(nil), sessions...)
+	src := &mutSrc{ss: all}
+	r := &fakeRunner{}
+	m := New(src, r)
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	m, _ = press(t, tm.(Model), "p", "l") // preview, focus b1
+	m.capturing, m.scroll = false, 9
+	src.ss = all[:2]
+	r.reset() // a frame's capture may still be running on the key queue
+	tm, cmd := m.Update(frameMsg{})
+	m = tm.(Model)
+	runAll(cmd)
+	if m.scroll != 0 || !slices.ContainsFunc(r.calls, func(c []string) bool { return c[1] == "capture-pane" && c[len(c)-1] == "-44" }) {
+		t.Errorf("scroll %d, calls %q", m.scroll, r.calls)
 	}
 }
 
@@ -1498,8 +1631,8 @@ func TestAvatarPicker(t *testing.T) {
 		for _, l := range lines {
 			if strings.Contains(l, sp.ID+"  "+sp.Name) {
 				found = true
-				if strings.Contains(l, "▸") != (sp.ID == "bot-01") {
-					t.Errorf("cursor starts on the first sprite: %q", l)
+				if strings.Contains(l, "▸") != (sp.ID == "bot-04") {
+					t.Errorf("cursor starts on the sprite the card wears: %q", l)
 				}
 			}
 		}
@@ -1514,33 +1647,36 @@ func TestAvatarPicker(t *testing.T) {
 	if last := lines[len(lines)-1]; !strings.Contains(last, "j/k move · enter bind · q cancel") {
 		t.Errorf("footer %q", last)
 	}
-	m, quit := press(t, m, "x", "f", "p", "i", "H", "r", "d", "j", "j", "enter")
+	m, quit := press(t, m, "x", "f", "p", "i", "H", "r", "d", "k", "k", "enter") // bot-04 → bot-02
 	if quit || m.mode != browsing || m.preview || m.folded["/a"] || len(r.calls) != 0 {
 		t.Fatalf("keys acted while the list was open: mode %v preview %v folded %v calls %q", m.mode, m.preview, m.folded, r.calls)
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "one wears Sprout") {
+	if !strings.Contains(ansi.Strip(m.View()), "one wears Boxy") {
 		t.Error("the bind is confirmed on the message line")
 	}
-	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "bot-03"`) {
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "bot-02"`) {
 		t.Errorf("avatars.json: %s", data)
 	}
-	if strings.Contains(ansi.Strip(m.View()), "avatar for") || av("a1") != "bot-03" {
-		t.Errorf("list closed and card shows bot-03: %v", p.Sessions())
+	if strings.Contains(ansi.Strip(m.View()), "avatar for") || av("a1") != "bot-02" {
+		t.Errorf("list closed and card shows bot-02: %v", p.Sessions())
+	}
+	if m, _ = press(t, m, "a", "j", "j", "enter"); av("a1") != "bot-04" {
+		t.Error("j j enter: two below the current one")
 	}
 	for _, cancel := range []string{"esc", "q"} {
 		m, quit = press(t, m, "a", "j", cancel)
-		if quit || m.mode != browsing || av("a1") != "bot-03" {
+		if quit || m.mode != browsing || av("a1") != "bot-04" {
 			t.Errorf("%s cancels, keeps the board: quit %v mode %v", cancel, quit, m.mode)
 		}
 	}
-	if m, _ = press(t, m, "a", "k", "k", "k", "k", "enter"); av("a1") != "bot-01" {
+	if m, _ = press(t, m, "a", "k", "k", "k", "k", "k", "enter"); av("a1") != "bot-01" {
 		t.Error("k stops at the first sprite")
 	}
 	if m, _ = press(t, m, "a", "j", "j", "j", "j", "j", "j", "j", "enter"); av("a1") != "bot-06" {
 		t.Error("j stops at the last sprite")
 	}
 	m, _ = press(t, m, "k", "a", "j", "enter") // a2: no name
-	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"a2": "bot-02"`) || !strings.Contains(ansi.Strip(m.View()), "bound to session id (name missing)") {
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"a2": "bot-05"`) || !strings.Contains(ansi.Strip(m.View()), "bound to session id (name missing)") {
 		t.Errorf("no name: by ID, said so: %s", data)
 	}
 	// pass-through: a goes to the pane

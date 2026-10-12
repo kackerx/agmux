@@ -131,6 +131,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		if m.pvFocus && !m.previewOn() { // not "session is gone": it isn't
+			m.pvFocus = false
+			m = m.say(cMuted, "preview closed: terminal too narrow")
+		}
 	case frameMsg:
 		m.frame++
 		cmd := m.capture() // the preview refreshes on the 500ms frame; called first: it marks m.capturing
@@ -211,6 +215,7 @@ func (m *Model) current() (gs []group, gi int, s store.Session, ok bool) {
 		}
 	}
 	if gi < 0 {
+		m.scroll = 0 // the focused card is gone (or there was none): a new card starts at the bottom
 		if len(gs) == 0 {
 			m.focus = ""
 			return gs, 0, s, false
@@ -234,10 +239,11 @@ func (m Model) alive(id string) bool {
 	return false
 }
 
-// passThrough: keys go to the pane — the preview is on and the session pass-through was entered
-// on still exists with the same pane. Keys, the footer and the border all ask this one question.
+// passThrough: keys go to the pane — the preview is on, the focus is still on the session
+// pass-through was entered on (the preview shows whoever has the focus), and that session still
+// exists with the same pane. Keys, the footer and the border all ask this one question.
 func (m Model) passThrough() bool {
-	if !m.pvFocus || !m.previewOn() {
+	if !m.pvFocus || !m.previewOn() || m.focus != m.pvID {
 		return false
 	}
 	for _, s := range m.src.Sessions() {
@@ -381,6 +387,11 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "avatar":
 		m.mode, m.target, m.msg, m.pick = pickAvatar, s, "", 0
+		for i, sp := range avatar.Sprites { // on the one it wears: enter right away changes nothing
+			if sp.ID == s.AvatarID {
+				m.pick = i
+			}
+		}
 		return m, nil
 	case "restart":
 		m.msg = fg(cMuted, " restarting "+s.Name+"…")

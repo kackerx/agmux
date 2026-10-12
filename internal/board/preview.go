@@ -195,12 +195,18 @@ func (m *Model) forward(k tea.KeyMsg) tea.Cmd {
 	pane := m.pvPane
 	var send func(r Runner) error
 	if k.Paste {
+		if len(k.Runes) == 0 { // load-buffer with nothing keeps the old buffer, which would be pasted
+			return nil
+		}
 		text := string(k.Runes)
 		send = func(r Runner) error {
 			if err := r.TmuxIn(text, "load-buffer", "-b", "agmux", "-"); err != nil {
 				return err
 			}
 			_, err := r.Tmux("paste-buffer", "-p", "-d", "-b", "agmux", "-t", pane)
+			if err != nil { // -d only deletes after a paste: don't leave the text for the next one
+				r.Tmux("delete-buffer", "-b", "agmux")
+			}
 			return err
 		}
 	} else {

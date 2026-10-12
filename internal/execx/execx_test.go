@@ -13,3 +13,9 @@ func TestNotFound(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+func TestRunInFeedsStdin(t *testing.T) {
+	if out, err := RunIn([]byte("x"), "cat"); err != nil || string(out) != "x" {
+		t.Errorf("%q %v", out, err)
+	}
+}
