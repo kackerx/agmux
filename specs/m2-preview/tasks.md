@@ -20,6 +20,6 @@
 - `s`：预览没开就开，焦点切进预览（和 `P` + `tab` 等价）；焦点卡无 pane 时底栏提示、不动作。删掉旧的 `s` 输入提示及其测试；底栏 `s 发送` 改成 `s 回复`。`H` 不变。
 - 验收：单测 s → 预览开 + 获焦 + 后续按键转发；预览已开时 s 只切焦点；无 pane 不动作；黑盒 s 后直接打字 pane 收到。
 
-### T15 AGMUX_CLIENT 也从 session 环境读（复审退回 1 条测试：session 环境值校验要有用例；README 补跳转分支命令）
+### T15 AGMUX_CLIENT 也从 session 环境读（补测试 5e45a49 复审中；测试通过）
 - 进程环境没有 `AGMUX_CLIENT` 时，`tmux show-environment -h -t <own session> AGMUX_CLIENT`（输出 `AGMUX_CLIENT=xxx`；`-AGMUX_CLIENT` 或出错当没有）。值要校验（在 list-clients 里且不在自己 session）。README 的浮窗段：`tmux set-environment -h -t "$target" AGMUX_CLIENT "$(tmux display -p "#{client_name}")"`，并注明从另一个浮窗跳过来的分支不能用 `#{client_name}`（那是浮窗内部的 client），要把当前浮窗环境里的值抄过去。
 - 验收：单测 假 tmux 返回 `AGMUX_CLIENT=/dev/outer` → 选它并 detach 自己 session 里的其它 client；返回 `-AGMUX_CLIENT` → 走启发式；进程环境优先于 session 环境。
