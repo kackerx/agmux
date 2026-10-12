@@ -3,7 +3,7 @@
 Everything runs against a temporary HOME / XDG_STATE_HOME. The real ~/.claude/settings.json is never written; setUpModule
 records its hash and tearDownModule proves it is unchanged.
 """
-import hashlib, json, os, pathlib, subprocess, tempfile, threading, time, unittest
+import hashlib, json, os, pathlib, stat, subprocess, tempfile, threading, time, unittest
 from lib import BIN
 
 REAL_SETTINGS = pathlib.Path(os.path.expanduser("~/.claude/settings.json"))
@@ -250,6 +250,7 @@ class Setup(Base):
     def test_write_creates_missing_file(self):
         self.assertFalse(self.sb.settings.exists())
         r = self.sb.run("setup", "--write"); self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(r.stdout.decode().splitlines()[-1], f"written (new file: {self.sb.settings})", "no backup line for a brand-new file")
         self.assertEqual(list(json.loads(self.sb.settings.read_text())), ["statusLine"], "new file holds only statusLine")
         self.assertEqual(self.sb.run("setup").stdout.decode().splitlines()[0], "already set: agmux statusline")
 
@@ -276,6 +277,30 @@ class Setup(Base):
         self.sb.settings.parent.chmod(0o755); self.sb.settings.chmod(0o644)
         self.assertEqual(self.sb.settings.read_bytes(), raw, "original untouched")
         self.assertEqual([p.name for p in self.sb.settings.parent.iterdir()], ["settings.json"], "no stray backup / tmp files")
+
+    def test_read_only_file_in_a_writable_dir(self):  # review: the file itself is 0444 but the directory is writable -> must not be replaced
+        raw = self.sb.write_settings({"theme": "dark", "statusLine": {"type": "command", "command": "mine.sh"}})
+        self.sb.settings.chmod(0o444)
+        for args in (("setup", "--write"),):
+            r = self.sb.run(*args)
+            self.assertEqual(r.returncode, 1, f"{r.stdout!r} {r.stderr!r}"); self.assertTrue(r.stderr.strip(), "error on stderr")
+            self.assertNotIn("written", r.stdout.decode())
+        self.assertEqual(self.sb.settings.read_bytes(), raw, "file untouched")
+        self.assertEqual(stat.S_IMODE(self.sb.settings.stat().st_mode), 0o444, "mode untouched")
+        self.assertEqual([p.name for p in self.sb.settings.parent.iterdir()], ["settings.json"], "no .bak, no tmp file")
+        self.assertEqual(self.sb.run("setup").returncode, 0, "a dry run still works on a read-only file")
+
+    def test_number_and_key_text_preserved(self):  # design f994c2b: semantics kept: key order, number spelling, non-ASCII unescaped
+        raw = ('{"zeta": 1.50, "alpha": {"big": 12345678901234567890123, "exp": 1e3, "neg": -0.0}, "名字": "值", '
+               '"statusLine": {"type": "command", "command": "hud.sh", "padding": 0}, "list": [3, 2, 1]}')
+        self.sb.write_settings(raw)
+        r = self.sb.run("setup", "--write"); self.assertEqual(r.returncode, 0, r.stderr)
+        txt = self.sb.settings.read_text()
+        for lit in ("1.50", "12345678901234567890123", "1e3", "-0.0", "名字", "值"):
+            self.assertIn(lit, txt, f"{lit!r} must survive verbatim")
+        keys = [k for k in ("zeta", "alpha", "名字", "statusLine", "list") if k in txt]
+        self.assertEqual(sorted(keys, key=txt.index), ["zeta", "alpha", "名字", "statusLine", "list"], "key order kept")
+        self.assertIn("agmux statusline -- 'hud.sh'", txt)
 
     def test_second_write_keeps_the_original_backup(self):
         raw = self.sb.write_settings({"statusLine": {"type": "command", "command": "mine.sh"}})

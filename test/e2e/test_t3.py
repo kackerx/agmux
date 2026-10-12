@@ -266,7 +266,7 @@ class Wide232(unittest.TestCase):
 
 
 class Narrow(unittest.TestCase):
-    """40-wide columns (82 cols, 2 columns): status and time always stay; branch gives way first, then the name."""
+    """40-wide columns (82 cols, 2 columns): status word and time always stay; on line 1 the name stays whole and the detail yields; on line 2 the branch is cut first."""
 
     def test_yielding_order(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
@@ -276,8 +276,11 @@ class Narrow(unittest.TestCase):
         for c in cs:
             l1 = c.line(1); sid = l1
             self.assertRegex(l1, r"(⏵ working|⏸ idle|● done|⏳ waiting)( · \w+)?\s+\d+[smhd] [│┃]$", f"{sid}: status and time are always the right end of line 1: {l1!r}")
+        for c in cs:
+            self.assertNotRegex(c.line(1), r"· …", "no bare `· …` stub: the detail disappears entirely when nothing fits")
         a1 = sorted(cs, key=lambda c: (c.r, c.c))[0]  # alpha-main: first group, first card (its name is cut to "alph…" next to a long status)
-        self.assertIn("alp", a1.line(1)); self.assertIn("…", a1.line(1), "the name gives way")
+        self.assertIn("alpha-main", a1.line(1), "name first: it stays whole")
+        self.assertNotIn("·", a1.line(1), "the pendingTool detail (` · Bash`) yielded entirely instead of the name"); self.assertNotIn("…", a1.line(1))
         self.assertIn("⑂ feature", a1.line(2), "branch is cut (…) before the name is")
         self.assertIn("Opus 5.5", a1.line(2), "model stays while the branch is cut")
 
@@ -326,6 +329,58 @@ class ModelCache(unittest.TestCase):
         time.sleep(0.6)
         c = by_name(find_cards(t.snap()), "alpha-main")
         self.assertIn("opus", c.line(2).lower(), "model must be kept from the previous poll:\n" + t.text())
+
+
+class LongPendingTool(unittest.TestCase):
+    """design 6791155 (supersedes f994c2b's order): line 1 keeps the status word and the time always; the NAME comes first and stays whole; the detail after
+    the status (pendingTool, or `agents`) only gets the width that is left, is cut when it does not fit, and loses its ` · ` too once nothing of it is left;
+    only when the detail is gone is the name cut (keeping at least 10 cells; the spec says `try for 12`)."""
+
+    TOOL = "mcp__claude_ai_Claude_Docs__batch"
+    NAME_TOOL, NAME_AGENTS = "agmux-orchestrator", "agmux-agents-test1"  # 18 characters each
+
+    def setUp(self):
+        self.env = Env(); self.addCleanup(self.env.cleanup); build_fixture(self.env)
+        S = json.loads((self.env.fake / "show.json").read_text())
+        for s in S:
+            if s["id"] == "a2":
+                s.update(summary=self.NAME_TOOL, status="working", pendingTool=self.TOOL, agentType="claude")
+            if s["id"] == "a3":  # raw idle + a working subagent -> `⏵ working · agents`
+                s.update(summary=self.NAME_AGENTS, status="idle", pendingTool=None, attentionType=None, agentType="claude",
+                         subagents=[{"agentId": "x", "status": "working", "pendingTool": None}])
+        self.env.write_show(S)
+
+    def check(self, card, name, W):
+        row, l1 = card.rows[1], card.line(1)
+        self.assertGreaterEqual(row.find("\uec82"), 0, f"W={W}: agent icon survives: {l1!r}")
+        self.assertGreaterEqual(row.find("⏵ working"), 0, f"W={W}: status word survives: {l1!r}")
+        self.assertRegex(l1, r"\b\d+[smhd] [│┃]$", f"W={W}: time survives at the right edge: {l1!r}")
+        field = l1[l1.index("\uec82") + 2:].split()[0]  # the name field, `…` included
+        self.assertTrue(name.startswith(field.rstrip("…")), f"W={W}: name field {field!r} of {name!r}: {l1!r}")
+        self.assertGreaterEqual(disp_width(field), 10, f"W={W}: name keeps at least 10 cells (spec says 'try for 12'; the … counts): {l1!r}")
+        if field.endswith("…"):
+            self.assertNotIn("·", l1, f"W={W}: the name is only cut once the detail is gone entirely: {l1!r}")
+        if "·" in l1:
+            self.assertEqual(field, name, f"W={W}: while a detail is shown the name is whole: {l1!r}")
+            detail = l1.split("· ", 1)[1].split("  ")[0].strip()
+            self.assertRegex(detail, r"^\w", f"W={W}: a shown detail has real text, not a bare `…` stub: {l1!r}")
+        return l1
+
+    def test_status_and_time_survive_and_the_detail_yields_before_the_name(self):
+        for W in (40, 82, 124, 166, 200, 232, 300, 400):
+            with self.subTest(W=W):
+                t = Term(self.env, w=W, h=100); self.addCleanup(t.close)
+                cs = ready(t); self.assertTrue(cs, t.text())
+                c_tool = [x for x in cs if "agmux-orc" in x.line(1)]; c_ag = [x for x in cs if "agmux-agen" in x.line(1)]
+                self.assertEqual((len(c_tool), len(c_ag)), (1, 1), [x.line(1) for x in cs])
+                l_tool = self.check(c_tool[0], self.NAME_TOOL, W); l_ag = self.check(c_ag[0], self.NAME_AGENTS, W)
+                if "·" in l_tool:
+                    tool = l_tool.split("· ", 1)[1].split("  ")[0].strip()
+                    self.assertTrue(self.TOOL.startswith(tool.rstrip("…")), f"tool text {tool!r}")
+                if W >= 400:
+                    self.assertIn(self.TOOL, l_tool, "wide enough: the whole tool name shows"); self.assertIn(self.NAME_TOOL, l_tool)
+                    self.assertIn("· agents", l_ag)
+                t.close()
 
 
 class BarEdges(unittest.TestCase):
