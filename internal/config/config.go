@@ -117,16 +117,29 @@ func Parse(path string, data []byte) (*Config, error) {
 			Bind    map[string]string `toml:"bind"`
 		} `toml:"avatars"`
 	}
+	oneLine := func(err error) error {
+		msg, _, _ := strings.Cut(err.Error(), "\n")
+		return fmt.Errorf("%s: %s", path, msg)
+	}
+	// a section that isn't a table (layout = 3, [[layout]]) would be a Go type error, or for a map
+	// silently nothing: say it the same way for every section before decoding into the types
+	var generic map[string]any
+	if _, err := toml.Decode(string(data), &generic); err != nil {
+		return nil, oneLine(err)
+	}
+	for _, sec := range []string{"keys", "colors", "layout", "avatars"} {
+		if v, ok := generic[sec]; ok {
+			if _, isTable := v.(map[string]any); !isTable {
+				return nil, fmt.Errorf("%s: %s: must be a table, [%[2]s]", path, sec)
+			}
+		}
+	}
 	md, err := toml.Decode(string(data), &raw)
 	if err != nil {
-		msg, _, _ := strings.Cut(err.Error(), "\n")
-		return nil, fmt.Errorf("%s: %s", path, msg)
+		return nil, oneLine(err)
 	}
-	// toml decodes a non-table into a map as nothing at all, which would silently drop the setting
-	for _, sec := range [][]string{{"keys"}, {"colors"}, {"avatars", "bind"}} {
-		if md.IsDefined(sec...) && md.Type(sec...) != "Hash" {
-			return nil, fmt.Errorf("%s: %s: must be a table, [%[2]s]", path, strings.Join(sec, "."))
-		}
+	if md.IsDefined("avatars", "bind") && md.Type("avatars", "bind") != "Hash" {
+		return nil, fmt.Errorf("%s: avatars.bind: must be a table, [avatars.bind]", path)
 	}
 	if u := md.Undecoded(); len(u) > 0 {
 		return nil, fmt.Errorf("%s: %s: unknown setting (sections are [keys], [colors], [layout], [avatars] and [avatars.bind])", path, u[0])
@@ -166,7 +179,11 @@ func Parse(path string, data []byte) (*Config, error) {
 			continue
 		}
 		if n, err := strconv.Atoi(v); !colorRe.MatchString(v) && (err != nil || n < 0 || n > 255) {
-			return nil, fmt.Errorf("%s: colors.%s: %q is neither #rrggbb nor an ANSI color 0-255", path, name, v)
+			hint := ""
+			if name == "border" {
+				hint = ` or "" to follow the status`
+			}
+			return nil, fmt.Errorf("%s: colors.%s: %q is neither #rrggbb nor an ANSI color 0-255%s", path, name, v, hint)
 		}
 		c.Colors[name] = v
 	}

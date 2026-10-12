@@ -2725,8 +2725,8 @@ func TestFlashFrozenAndGone(t *testing.T) {
 	h, _ = hitOf(m, "b1")
 	src.ss = slices.DeleteFunc(slices.Clone(src.ss), func(s store.Session) bool { return s.ID == "b1" })
 	before := m.focus
-	if m, _ = press(t, m, h.label); m.mode != flashing || m.focus != before {
-		t.Errorf("Bravo left: ignored, still flashing; mode %v focus %s", m.mode, m.focus)
+	if m, _ = press(t, m, h.label); m.mode != flashing || m.focus != before || m.flash.pat != "b" {
+		t.Errorf("Bravo left: ignored, still flashing, pattern unchanged; mode %v focus %s pattern %q", m.mode, m.focus, m.flash.pat)
 	}
 }
 

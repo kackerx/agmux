@@ -79,7 +79,9 @@ func TestParseErrors(t *testing.T) {
 		{"[keys]\nkill = [\"ctrl+c\"]\n", "cfg: keys.kill: ctrl+c can't be bound (it always quits)"},
 		{"[keys]\nleave_preview = [\"ctrl+c\"]\n", "cfg: keys.leave_preview: ctrl+c can't be bound"},
 		{"colors = \"dark\"\n", "cfg: colors: must be a table, [colors]"},
-		{"avatars = 3\n", "cfg: toml:"},
+		{"avatars = 3\n", "cfg: avatars: must be a table, [avatars]"},
+		{"[[avatars]]\ndefault = \"hash\"\n", "cfg: avatars: must be a table, [avatars]"},
+		{"[[keys]]\nup = [\"k\"]\n", "cfg: keys: must be a table, [keys]"},
 		{"[colors]\nworking = \"-1\"\n", `"-1" is neither`},
 		{"[colors]\nworking = \"#12345\"\n", `cfg: colors.working: "#12345" is neither #rrggbb nor an ANSI color 0-255`},
 		{"[colors]\nworking = \"256\"\n", `"256" is neither`},
@@ -247,7 +249,8 @@ func TestMaxColumns(t *testing.T) {
 		"[layout]\nmax_columns = 4.5\n":   "cfg: toml:",
 		"[layout]\nmax_columns = \"5\"\n": "cfg: toml:",
 		"[layout]\nwidth = 5\n":           "cfg: layout.width: unknown setting",
-		"layout = 5\n":                    "cfg: toml:",
+		"layout = 5\n":                    "cfg: layout: must be a table, [layout]",
+		"[[layout]]\nmax_columns = 5\n":   "cfg: layout: must be a table, [layout]",
 	} {
 		_, err := Parse("cfg", []byte(toml))
 		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "\n") {
@@ -274,9 +277,10 @@ func TestBorderColor(t *testing.T) {
 	if back, err := Parse("cfg", []byte(Default().String())); err != nil || back.Colors["border"] != "" {
 		t.Errorf("the printed default loads back: %v", err)
 	}
-	for _, toml := range []string{"[colors]\nborder = \"gray\"\n", "[colors]\nworking = \"\"\n", "[colors]\nborder = \"300\"\n"} {
-		if _, err := Parse("cfg", []byte(toml)); err == nil || !strings.Contains(err.Error(), "is neither #rrggbb nor an ANSI color") {
-			t.Errorf("%q: %v", toml, err)
+	for toml, hint := range map[string]bool{"[colors]\nborder = \"gray\"\n": true, "[colors]\nborder = \"300\"\n": true, "[colors]\nworking = \"\"\n": false} {
+		_, err := Parse("cfg", []byte(toml))
+		if err == nil || !strings.Contains(err.Error(), "is neither #rrggbb nor an ANSI color 0-255") || strings.Contains(err.Error(), `or "" to follow the status`) != hint {
+			t.Errorf("%q: %v (the hint only for border)", toml, err)
 		}
 	}
 }
