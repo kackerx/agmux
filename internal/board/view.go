@@ -505,6 +505,16 @@ func put(line string, x int, s string) string {
 	return pad(ansi.Truncate(line, x, ""), x) + "\x1b[0m" + s + "\x1b[0m" + right
 }
 
+// scrollOff is how many body lines scroll off the top so the focused card shows in bodyH lines.
+func scrollOff(rects []rect, focus string, bodyH int) int {
+	for _, r := range rects {
+		if r.id == focus && r.y+r.h > bodyH {
+			return r.y + r.h - bodyH
+		}
+	}
+	return 0
+}
+
 // flashAlphabet: home row first, as flash.tmux and sqlmux; then the same in upper case.
 const flashAlphabet = "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM"
 
@@ -556,12 +566,7 @@ func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, 
 	top := " " + lipgloss.NewStyle().Bold(true).Render("agmux") + fg(cMuted, fmt.Sprintf(" · %d sessions", len(ss)))
 	body, rects := layout(groups(ss), cw, focus, frame, now, folded, hits)
 	bodyH := max(h-3, 1) // top bar, message line, footer
-	off := 0
-	for _, r := range rects {
-		if r.id == focus && r.y+r.h > bodyH {
-			off = r.y + r.h - bodyH
-		}
-	}
+	off := scrollOff(rects, focus, bodyH)
 	vis := body[min(off, len(body)):]
 	vis = vis[:min(bodyH, len(vis))]
 	for len(vis) < bodyH {
@@ -578,7 +583,11 @@ func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, 
 	return strings.Join(out, "\n"), rects, off
 }
 
-// flashLabel: like a yank highlight, the focus color behind dark text.
+// flashLabel: like a yank highlight, the focus color behind dark text (light text on a dark focus color).
 func flashLabel(l string) string {
-	return lipgloss.NewStyle().Background(cFocus).Foreground(lipgloss.Color("#282a36")).Bold(true).Render(l)
+	text := lipgloss.Color("#282a36")
+	if r, g, b, _ := cFocus.RGBA(); (299*r+587*g+114*b)/1000 < 0x8000 {
+		text = "#f8f8f2"
+	}
+	return lipgloss.NewStyle().Background(cFocus).Foreground(text).Bold(true).Render(l)
 }

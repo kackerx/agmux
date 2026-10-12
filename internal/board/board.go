@@ -343,7 +343,10 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.kill(m.target)
 	case flashing: // a label moves the focus and ends it, esc just ends it; other keys do nothing
-		if id, ok := m.labels[k.String()]; ok {
+		id, ok := m.labels[k.String()]
+		gs, _, _, _ := m.current()
+		// a card gone since s (a poll) is no target: the key is ignored like any non-label
+		if ok && slices.ContainsFunc(m.items(gs), func(ids []string) bool { return slices.Contains(ids, id) }) {
 			m.mode, m.focus, m.msg = browsing, id, ""
 		} else if k.Type == tea.KeyEsc {
 			m.mode = browsing
@@ -370,7 +373,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if k.Type == tea.KeyEsc && m.query != "" && m.keymap["esc"] == "quit" { // a kept filter goes first
+	if k.String() == "esc" && m.query != "" { // a kept filter goes first (alt+esc, two quick escs, doesn't)
 		m.query = ""
 		return m, nil
 	}
@@ -422,8 +425,11 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		if m.w == 0 {
 			return m, nil
 		}
-		// ponytail: labels cards scrolled off screen too; fine while a board fits a screen or two.
+		// only what is on screen: a card whose top border is in the window
 		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.folded, nil)
+		bodyH := max(m.h-3, 1)
+		off := scrollOff(rects, m.focus, bodyH)
+		rects = slices.DeleteFunc(rects, func(r rect) bool { return r.y < off || r.y >= off+bodyH })
 		m.mode, m.labels, m.msg = flashing, flashLabels(rects, m.focus, m.cardsW()), ""
 		return m, nil
 	case "search": // with a filter on, / edits it
