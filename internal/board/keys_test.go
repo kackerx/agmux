@@ -441,6 +441,7 @@ func TestSwitchTo(t *testing.T) {
 	display := []string{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}
 	sw := func(c string) []string { return []string{"tmux", "switch-client", "-c", c, "-t", pane} }
 	detach := func(c string) []string { return []string{"tmux", "detach-client", "-t", c} }
+	showEnv := []string{"tmux", "show-environment", "-t", "fl-1", "AGMUX_CLIENT"}
 	for _, c := range []struct {
 		name    string
 		env     map[string]string
@@ -457,7 +458,7 @@ func TestSwitchTo(t *testing.T) {
 			[][]string{listClients, sw("/dev/b")}, ""},
 		{"nested float without AGMUX_CLIENT: switch the outer one, detach nothing", map[string]string{"TMUX_PANE": "%2"}, "fl-1\n",
 			"5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n",
-			[][]string{display, listClients, sw("/dev/outer")}, ""},
+			[][]string{display, listClients, showEnv, sw("/dev/outer")}, ""},
 		{"nested float with AGMUX_CLIENT: detach each other client of own session", map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/outer"}, "fl-1\n",
 			"5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n4\t/dev/nested2\tfl-1\n",
 			[][]string{display, listClients, sw("/dev/outer"), detach("/dev/nested"), detach("/dev/nested2")}, ""},
@@ -472,14 +473,53 @@ func TestSwitchTo(t *testing.T) {
 			[][]string{display, listClients, sw("/dev/outer"), detach("/dev/nested")}, ""},
 		{"ordinary pane: only own-session clients → most recent of them, no detach", map[string]string{"TMUX_PANE": "%2"}, "fl-1\n",
 			"4\t/dev/old\tfl-1\n9\t/dev/mine\tfl-1\n",
-			[][]string{display, listClients, sw("/dev/mine")}, ""},
+			[][]string{display, listClients, showEnv, sw("/dev/mine")}, ""},
 		{"no client at all: error, nothing switched", map[string]string{"TMUX_PANE": "%2"}, "fl-1\n",
 			"",
-			[][]string{display, listClients}, "AGMUX_CLIENT"},
+			[][]string{display, listClients, showEnv}, "AGMUX_CLIENT"},
 	} {
 		r := &fakeRunner{tmuxOut: map[string]string{"list-clients": c.clients, "display-message": c.own}}
 		err := switchTo(r, func(k string) string { return c.env[k] }, pane)
 		if !reflect.DeepEqual(r.calls, c.want) || (err == nil) != (c.err == "") || err != nil && !strings.Contains(err.Error(), c.err) {
+			t.Errorf("%s:\n calls %q\n want  %q\n err %v", c.name, r.calls, c.want, err)
+		}
+	}
+}
+
+// AGMUX_CLIENT from the float session's environment (set by the launcher with set-environment):
+// used like the process variable, which still wins when both are set.
+func TestSwitchSessionEnv(t *testing.T) {
+	const pane = "%7"
+	clients := "5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n3\t/dev/old\tother\n"
+	display := []string{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}
+	showEnv := []string{"tmux", "show-environment", "-t", "fl-1", "AGMUX_CLIENT"}
+	for _, c := range []struct {
+		name    string
+		env     map[string]string
+		sessEnv string
+		envErr  error
+		want    [][]string
+	}{
+		{"session env names the client: use it, detach the nested one", nil, "AGMUX_CLIENT=/dev/old\n", nil,
+			[][]string{display, listClients, showEnv, {"tmux", "switch-client", "-c", "/dev/old", "-t", pane}, {"tmux", "detach-client", "-t", "/dev/nested"}}},
+		{"-AGMUX_CLIENT (removed): heuristic, no detach", nil, "-AGMUX_CLIENT\n", nil,
+			[][]string{display, listClients, showEnv, {"tmux", "switch-client", "-c", "/dev/outer", "-t", pane}}},
+		{"show-environment fails: heuristic", nil, "", errors.New("unknown variable: AGMUX_CLIENT"),
+			[][]string{display, listClients, showEnv, {"tmux", "switch-client", "-c", "/dev/outer", "-t", pane}}},
+		{"unexpected output is not a client", nil, "something else\n", nil,
+			[][]string{display, listClients, showEnv, {"tmux", "switch-client", "-c", "/dev/outer", "-t", pane}}},
+		{"process env wins: session env not even read", map[string]string{"AGMUX_CLIENT": "/dev/outer"}, "AGMUX_CLIENT=/dev/old\n", nil,
+			[][]string{display, listClients, {"tmux", "switch-client", "-c", "/dev/outer", "-t", pane}, {"tmux", "detach-client", "-t", "/dev/nested"}}},
+	} {
+		env := map[string]string{"TMUX_PANE": "%2"}
+		for k, v := range c.env {
+			env[k] = v
+		}
+		r := &fakeRunner{tmuxOut: map[string]string{"list-clients": clients, "display-message": "fl-1\n", "show-environment": c.sessEnv}}
+		if c.envErr != nil {
+			r.tmuxFail = map[string]error{"show-environment": c.envErr}
+		}
+		if err := switchTo(r, func(k string) string { return env[k] }, pane); err != nil || !reflect.DeepEqual(r.calls, c.want) {
 			t.Errorf("%s:\n calls %q\n want  %q\n err %v", c.name, r.calls, c.want, err)
 		}
 	}

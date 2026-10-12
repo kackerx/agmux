@@ -403,7 +403,8 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 // (a bare switch-client moves whichever was active last, and in a nested fl-* float that is the
 // float's own client), so the client is chosen explicitly: $AGMUX_CLIENT, else the most recently
 // active client not attached to agmux's own session (or, when that leaves none, agmux runs in an
-// ordinary pane: the most recent client of its own session).
+// ordinary pane: the most recent client of its own session). AGMUX_CLIENT comes from agmux's
+// environment, else from its tmux session's environment.
 const clientsFormat = "#{client_activity}\t#{client_name}\t#{client_session}"
 
 func switchTo(r Runner, getenv func(string) string, pane string) error {
@@ -431,6 +432,15 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 		}
 	}
 	exact := getenv("AGMUX_CLIENT")
+	if exact == "" && own != "" {
+		// fl-* floats attach to a long-lived session whose shell started long ago, so the launcher
+		// can't reach agmux's process environment; it sets the session's environment instead
+		if out, err := r.Tmux("show-environment", "-t", own, "AGMUX_CLIENT"); err == nil {
+			if v, ok := strings.CutPrefix(strings.TrimSuffix(out, "\n"), "AGMUX_CLIENT="); ok { // "-AGMUX_CLIENT" = unset
+				exact = v
+			}
+		}
+	}
 	client := exact
 	if client == "" {
 		best := -1
