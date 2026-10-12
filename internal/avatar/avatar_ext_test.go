@@ -38,7 +38,7 @@ func TestExtRenderShape(t *testing.T) {
 						t.Fatalf("%s/%s/mood%d/f%d: %d lines", s.ID, at, m, f, len(lines))
 					}
 					for _, l := range lines {
-						if n := len([]rune(l)); n != 4 || strings.Trim(l, " ▀▄") != "" {
+						if n := len([]rune(l)); n != 6 || strings.Trim(l, " ▀▄") != "" {
 							t.Fatalf("%s/%s/mood%d/f%d: line %q is %d cells", s.ID, at, m, f, l, n)
 						}
 					}

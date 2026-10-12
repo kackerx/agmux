@@ -148,11 +148,12 @@ func TestCardStatus(t *testing.T) {
 				}
 			}
 		}
-		// border = status color; focus keeps it and switches to the thick line
+		// border = status color; focus = a thick line in the focus color, whatever the status
 		for corner, focused := range map[string]bool{"╭": false, "┏": true} {
-			want, _, _ := strings.Cut(fg(c.border, corner), corner)
+			color := map[bool]lipgloss.Color{false: c.border, true: cFocus}[focused]
+			want, _, _ := strings.Cut(fg(color, corner), corner)
 			if cd := card(s, 44, 5, focused, 0, now); !strings.HasPrefix(cd, want+corner) {
-				t.Errorf("%s focused=%v: border should start %q in %s", c.name, focused, corner, c.border)
+				t.Errorf("%s focused=%v: border should start %q in %s", c.name, focused, corner, color)
 			}
 		}
 	}
@@ -210,7 +211,7 @@ func TestCardLines(t *testing.T) {
 	}{{0, 0, ""}, {2, 0, "⚇ 2 agents"}, {0, 1, "⚙ 1 shell"}, {1, 2, "⚇ 1 agent  ⚙ 2 shells"}} {
 		s := store.Session{ContextPct: 41, Subagents: make([]ccmux.Subagent, c.agents), Shells: c.shells}
 		l := ansi.Strip(line3(s, 40))
-		if ansi.StringWidth(l) != 40 || !strings.HasPrefix(l, "■■■■■■■■■■ 41%") || !strings.HasSuffix(l, c.right) ||
+		if ansi.StringWidth(l) != 40 || !strings.HasPrefix(l, "■■■■■■ 41%") || !strings.HasSuffix(l, c.right) ||
 			(c.shells == 0 && strings.Contains(l, "⚙")) || (c.agents == 0 && strings.Contains(l, "⚇")) {
 			t.Errorf("agents=%d shells=%d line 3 %q, want %q on the right", c.agents, c.shells, l, c.right)
 		}
@@ -240,11 +241,13 @@ func TestContextBar(t *testing.T) {
 		color  string
 		text   string
 	}{
-		{-1, 0, "", " --"}, {0, 0, "166;227;161", " 0%"}, {1, 1, "166;227;161", " 1%"}, {29, 3, "166;227;161", " 29%"},
-		{30, 3, "249;226;175", " 30%"}, {41, 4, "249;226;175", " 41%"}, {60, 6, "255;97;136", " 60%"}, {100, 10, "255;97;136", " 100%"},
+		// 6 cells, rounded: 29% → 1.74 → 2, 41% → 2.46 → 2, 42% → 2.52 → 3; any non-zero shows at least one
+		{-1, 0, "", " --"}, {0, 0, "166;227;161", " 0%"}, {1, 1, "166;227;161", " 1%"}, {29, 2, "166;227;161", " 29%"},
+		{30, 2, "249;226;175", " 30%"}, {41, 2, "249;226;175", " 41%"}, {42, 3, "249;226;175", " 42%"},
+		{60, 4, "255;97;136", " 60%"}, {100, 6, "255;97;136", " 100%"},
 	} {
 		bar := contextBar(c.pct)
-		if plain := ansi.Strip(bar); plain != strings.Repeat("■", 10)+c.text {
+		if plain := ansi.Strip(bar); plain != strings.Repeat("■", 6)+c.text {
 			t.Errorf("%d: %q", c.pct, plain)
 		}
 		if c.filled > 0 && !strings.Contains(bar, c.color+"m"+strings.Repeat("■", c.filled)+"\x1b") {

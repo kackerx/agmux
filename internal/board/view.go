@@ -19,7 +19,7 @@ const (
 	minColW  = 40
 	colGap   = 2
 	cardH    = 5
-	barCells = 10
+	barCells = avatar.Width // the bar sits right under the avatar, same width
 )
 
 // Colors: ANSI slots match claude-hud's segments, so they follow the terminal theme like the HUD does;
@@ -37,6 +37,7 @@ var (
 	cDim     = lipgloss.Color("#585b70")
 	cGreen   = lipgloss.Color("#a6e3a1")
 	cYellow  = lipgloss.Color("#f9e2af")
+	cFocus   = lipgloss.Color("#ff8ebe")
 	cOff     = lipgloss.Color("#45475a") // disabled footer keys: visible on #221e1e, darker than cMuted
 )
 
@@ -153,9 +154,9 @@ func midTrunc(s string, w int) string {
 // S1 only draws 5 (3 body lines), smaller heights keep the first h-2 lines.
 //
 //	╭──────────────────────────────────────────╮
-//	│ ▄▀▀▄   mods-tmux            ⏸ idle  2h │   avatar · agent icon + name · status · time
-//	│ ▀▄▄▀  ⑂ master                 Opus 5.5·high │   branch · model·effort
-//	│ ■■■■■■■■■■ --         ⚇ 2 agents  ⚙ 1 shell │   context bar · subagents · shells
+//	│ ▄▀▀▀▀▄   mods-tmux          ⏸ idle  2h │   avatar · agent icon + name · status · time
+//	│ ▀▄▄▄▄▀  ⑂ master          Opus 5.5·high │   branch · model·effort
+//	│ ■■■■■■ 41%         ⚇ 2 agents  ⚙ 1 shell │   context bar (avatar-wide) · subagents · shells
 //	╰──────────────────────────────────────────╯
 func card(s store.Session, w, h int, focused bool, frame int, now time.Time) string {
 	alert := s.Attention != "" || s.Status == "waiting"
@@ -171,14 +172,14 @@ func card(s store.Session, w, h int, focused bool, frame int, now time.Time) str
 		mood = avatar.Normal
 	}
 	bs := lipgloss.RoundedBorder()
-	if focused { // focus keeps the status color, only the line gets heavier
-		bs = lipgloss.ThickBorder()
+	if focused { // a thick line in its own color: a status-colored thick line was too easy to miss
+		bs, border = lipgloss.ThickBorder(), cFocus
 	}
 	sp, _ := avatar.ByID(s.AvatarID)
 	face := strings.Split(avatar.Render(sp, s.AgentType, mood, frame), "\n")
 
-	x := w - 4      // inside the border and its one-cell margins
-	tw := x - 4 - 2 // right of the avatar
+	x := w - 4                 // inside the border and its one-cell margins
+	tw := x - avatar.Width - 2 // right of the avatar
 	body := []string{
 		face[0] + "  " + line1(s, tw, now),
 		face[1] + "  " + line2(s, tw),

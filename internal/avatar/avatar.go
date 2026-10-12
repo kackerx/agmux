@@ -1,5 +1,5 @@
-// Package avatar draws 4×4 pixel-art agent heads with half-block characters
-// (4 columns × 2 rows) and remembers which head a session wears.
+// Package avatar draws 6×4 pixel-art agent heads with half-block characters
+// (6 columns × 2 rows) and remembers which head a session wears.
 package avatar
 
 import (
@@ -15,48 +15,51 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// size is the sprite's width and height in pixels; it renders as size columns × size/2 rows.
-const size = 4
+// Width × Height pixels; renders as Width columns × Height/2 rows.
+const (
+	Width  = 6
+	Height = 4
+)
 
 // Sprite pixels: '.' transparent, 'B' body, 'E' eye, 'b' agentType band (the bottom row).
 // Eyes need body on both sides so Scan can sweep them.
 type Sprite struct {
 	ID, Name string
 	Body     lipgloss.Color
-	Pixels   [size]string
+	Pixels   [Height]string
 }
 
 var Sprites = []Sprite{
-	{"bot-01", "Clawd", "#d97757", [size]string{
-		".BB.",
-		"BEEB",
-		"BBBB",
-		"bbbb"}},
-	{"bot-02", "Boxy", "#8be9fd", [size]string{
-		"BBBB",
-		"BEEB",
-		"B..B",
-		"bbbb"}},
-	{"bot-03", "Sprout", "#bd93f9", [size]string{
-		".B..",
-		"BEEB",
-		"BBBB",
-		"bbbb"}},
-	{"bot-04", "Boo", "#f8f8f2", [size]string{
-		".BB.",
-		"BEEB",
-		"B.B.",
-		"bbbb"}},
-	{"bot-05", "Mochi", "#f1fa8c", [size]string{
-		"B..B",
-		"BEEB",
-		".BB.",
-		"bbbb"}},
-	{"bot-06", "Cyclops", "#ff79c6", [size]string{
-		".BB.",
-		"BEBB",
-		"BBBB",
-		"bbbb"}},
+	{"bot-01", "Clawd", "#d97757", [Height]string{
+		".BBBB.",
+		"BEBBEB",
+		"BBBBBB",
+		"bbbbbb"}},
+	{"bot-02", "Boxy", "#8be9fd", [Height]string{
+		"BBBBBB",
+		"BEBBEB",
+		"B.BB.B",
+		"bbbbbb"}},
+	{"bot-03", "Sprout", "#bd93f9", [Height]string{
+		"..BB..",
+		"BEBBEB",
+		"BBBBBB",
+		"bbbbbb"}},
+	{"bot-04", "Boo", "#f8f8f2", [Height]string{
+		".BBBB.",
+		"BEBBEB",
+		"BB..BB",
+		"bbbbbb"}},
+	{"bot-05", "Mochi", "#f1fa8c", [Height]string{
+		"B....B",
+		"BEBBEB",
+		".BBBB.",
+		"bbbbbb"}},
+	{"bot-06", "Cyclops", "#ff79c6", [Height]string{
+		".BBBB.",
+		"BBEEBB",
+		"BBBBBB",
+		"bbbbbb"}},
 }
 
 // Mood is what the eyes say.
@@ -85,15 +88,15 @@ func BandColor(agentType string) lipgloss.Color {
 	return "#6272a4"
 }
 
-// Render returns size/2 lines of size cells. frame drives the Scan / Alert animation.
+// Render returns Height/2 lines of Width cells. frame drives the Scan / Alert animation.
 func Render(s Sprite, agentType string, mood Mood, frame int) string {
-	var px [size][size]lipgloss.Color
+	var px [Height][Width]lipgloss.Color
 	shift := 0
 	if mood == Scan {
 		shift = []int{0, 1, 0, -1}[frame%4]
 		for _, row := range s.Pixels { // only sweep if every eye lands on the head
 			for x := range row {
-				if row[x] == 'E' && (x+shift < 0 || x+shift >= size || row[x+shift] == '.' || row[x+shift] == 'b') {
+				if row[x] == 'E' && (x+shift < 0 || x+shift >= Width || row[x+shift] == '.' || row[x+shift] == 'b') {
 					shift = 0
 				}
 			}
@@ -127,10 +130,10 @@ func Render(s Sprite, agentType string, mood Mood, frame int) string {
 			}
 		}
 	}
-	lines := make([]string, size/2)
+	lines := make([]string, Height/2)
 	for r := range lines {
 		var b strings.Builder
-		for x := range size {
+		for x := range Width {
 			top, bot := px[2*r][x], px[2*r+1][x]
 			st := lipgloss.NewStyle()
 			ch := "▀"

@@ -23,7 +23,7 @@ func TestRenderShape(t *testing.T) {
 					t.Fatalf("%s mood %d: %d lines", s.ID, m, len(lines))
 				}
 				for i, l := range lines {
-					if w := ansi.StringWidth(l); w != 4 {
+					if w := ansi.StringWidth(l); w != 6 {
 						t.Errorf("%s mood %d frame %d line %d: width %d", s.ID, m, f, i, w)
 					}
 				}
