@@ -41,5 +41,10 @@
 - 按 design.md「数据源 B」做。statusline：echo 一份假 payload 进去，文件落盘且原命令的 stdout 原样出来、退出码透传；写目录不可写时仍透传。setup：对临时 HOME 下的 settings.json 三种情况（无 statusLine / 有 X / 已是 agmux）打印正确，`--write` 后 JSON 其它键原样、有 .bak。
 - 验收：store 读到 `model.display_name` 显示在卡片；effort 字段等用户跑 `agmux setup --write` 后抓到真实 payload 再接（dev 不能改用户的 settings.json）。
 
+### T7 固定排序 + 折叠分组（待做，用户 2026-10-12 第二轮验收意见）
+- 组按 cwd 字典序、组内按名字字典序（同名按 id），和 `ccmux show --json` 的数组顺序无关。
+- `f` 折叠 / 展开焦点所在的组；收起只剩 `▸ ~/路径 (n)` 标题行，标题可获焦点，再按 f 或 enter 展开；状态只在本次运行内。底栏加 `f 折叠`。
+- 验收：单测把 fixture 数组打乱两种顺序喂进去，渲染结果逐字节相同；折叠后该组卡片不渲染、标题变 ▸、其它组位置不变；黑盒：`-L agmux-test` 里连续 3 次轮询（假 ccmux 每次输出不同顺序）capture-pane 一致；按 f 后标题变 ▸、再按 f 恢复。
+
 ## 待用户定
 - [ ] T6 做完后用户自己跑 `agmux setup --write`，然后把 `~/.local/state/agmux/<自己会话 id>.json` 给 dev 核实 model / effort 字段名。

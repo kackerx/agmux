@@ -43,8 +43,10 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
                                ╭─ card ─╮
  ▾ ~/proj/sqlmux (5)           ▾ ~/proj/sqlmux-e2e (1)
  …
- j/k 卡片 · h/l 跨列 · enter 跳转 · H 交接 · s 发送 · r 重启 · x 杀 · d review · q 退出   ← 底栏，ccmux 同款
+ j/k 卡片 · h/l 跨列 · enter 跳转 · f 折叠 · H 交接 · s 发送 · r 重启 · x 杀 · d review · q 退出   ← 底栏，ccmux 同款
 ```
+- 排序固定，只由数据决定，轮询不会让卡片来回跳：组按 GroupKey（cwd 字符串）字典序；组内按会话名字典序，同名按 id。`ccmux show --json` 的数组顺序不参与排序。
+- 折叠：`f` 收起 / 展开焦点所在的组；收起的组只剩标题行 `▸ ~/路径 (n)`，仍占一个列位、标题可被焦点选中（j/k/h/l 把它当一张高度 1 的卡片），再按 `f` 或 enter 展开。折叠状态只在本次运行内记住。
 - 列 = GroupKey（cwd）。列最小宽 **40**（用户 232 列的浮窗 → 5 列各 44；200 列 → 4 列各 48），列数 = 终端宽度能放几个 40（含 2 列间距），各列均分撑满；放不下的组折到下一行，不横向滚动。组内卡片竖排。
 - 列标题沿用 ccmux：`▾ ~/缩写路径 (n)`，路径黄色（HUD 目录段同色）、`(n)` 灰色，超宽时中间用 … 截断。
 - 卡片 = 列宽 × 5 行（边框 2 + 正文 3），圆角边框（44 列示例）：
@@ -72,5 +74,6 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 - enter 或双击 / 单击已选中的卡片：`ccmux switch <id>` 然后退出 TUI（popup 关掉才能看到目标 pane）。
 - `H`：`ccmux send <id> /handoff`（agent 正在 working 时会排到下一轮，这是 ccmux 的行为）。
 - `r` = `ccmux restart <id>`，`x` = `ccmux kill <id>`（按 y 执行，其它键取消），`d` = `ccmux review <id>`——它是交互式 TUI（内部起 hunk），用 `tea.ExecProcess` 把终端交给它，退出后回看板；`s` = 提示输入一行后 `ccmux send <id> <text>`。
+- `f` 折叠 / 展开焦点所在的组（见「布局与卡片」）。
 - `q` / esc 退出。`ccmux` 子命令的 stderr 显示在底栏一行，不弹窗。
 - `tmuxPane` 为 null（background）的会话：switch / send 置灰，底栏提示。
