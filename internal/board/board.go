@@ -137,10 +137,10 @@ func (m Model) items(gs []group) [][]string {
 
 // current resolves focus against the live sessions, falling back to the first item.
 // s is the focused session; ok is false when there is none (nothing to show, or a folded title).
-func (m *Model) current() (gs []group, items [][]string, gi, ci int, s store.Session, ok bool) {
+func (m *Model) current() (gs []group, gi int, s store.Session, ok bool) {
 	gs = groups(m.src.Sessions())
-	items = m.items(gs)
-	gi, ci = -1, -1
+	items := m.items(gs)
+	gi, ci := -1, -1
 	for g := range items {
 		for c, id := range items[g] {
 			if id == m.focus {
@@ -151,15 +151,15 @@ func (m *Model) current() (gs []group, items [][]string, gi, ci int, s store.Ses
 	if gi < 0 {
 		if len(gs) == 0 {
 			m.focus = ""
-			return gs, items, 0, 0, s, false
+			return gs, 0, s, false
 		}
 		gi, ci = 0, 0
 		m.focus = items[0][0]
 	}
 	if m.folded[gs[gi].key] {
-		return gs, items, gi, ci, s, false
+		return gs, gi, s, false
 	}
-	return gs, items, gi, ci, gs[gi].sessions[ci], true
+	return gs, gi, gs[gi].sessions[ci], true
 }
 
 // alive reports whether a session is still in the latest poll.
@@ -223,22 +223,20 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.String() == "q" || k.Type == tea.KeyEsc {
 		return m, tea.Quit
 	}
-	gs, items, gi, ci, s, ok := m.current()
+	gs, gi, s, ok := m.current()
 	if len(gs) == 0 {
 		return m, nil
 	}
 	key := gs[gi].key
+	if d, ok := directions[k.String()]; ok {
+		// ponytail: lays the board out again per key press; fine for tens of sessions.
+		_, rects := layout(gs, m.w, m.focus, m.frame, m.now(), m.folded)
+		if id := nearest(rects, m.focus, d); id != "" {
+			m.focus, m.msg = id, ""
+		}
+		return m, nil
+	}
 	switch k.String() {
-	case "j", "down":
-		ci = min(ci+1, len(items[gi])-1)
-	case "k", "up":
-		ci = max(ci-1, 0)
-	case "l", "right":
-		gi = min(gi+1, len(gs)-1)
-		ci = min(ci, len(items[gi])-1)
-	case "h", "left":
-		gi = max(gi-1, 0)
-		ci = min(ci, len(items[gi])-1)
 	case "f": // fold / unfold the focused group; the focus stays on it
 		m.folded[key] = !m.folded[key]
 		m.focus, m.msg = m.items(gs)[gi][0], ""
@@ -252,11 +250,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.jump(s)
 	}
 	if !ok { // the rest act on a session; a folded title has none
-		m.focus = items[gi][ci]
 		return m, nil
 	}
 	switch k.String() {
-	case "j", "down", "k", "up", "l", "right", "h", "left":
 	case "H":
 		return m.send(s, "/handoff", "已发送 /handoff → "+s.Name)
 	case "s":
@@ -273,11 +269,68 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.ccmux("已重启 "+s.Name, "restart", s.ID)
 	case "d":
 		return m, tea.ExecProcess(m.review(s))
-	default:
-		return m, nil
 	}
-	m.focus, m.msg = items[gi][ci], ""
 	return m, nil
+}
+
+// directions maps the movement keys to a unit step on screen.
+var directions = map[string][2]int{
+	"j": {0, 1}, "down": {0, 1}, "k": {0, -1}, "up": {0, -1},
+	"l": {1, 0}, "right": {1, 0}, "h": {-1, 0}, "left": {-1, 0},
+}
+
+// nearest finds where the focus moves from rect id in direction d ("" = at the edge, stay):
+// among the rects entirely on that side, the closest one that overlaps it across the direction of
+// travel, ties going to the most overlap. Sideways (h/l) a card may overlap nothing there (a folded
+// title sits on the title row, columns differ in height); then the nearest column's vertically
+// closest one is taken, so h/l never strands the focus. Up/down stays strict.
+func nearest(rects []rect, id string, d [2]int) string {
+	var cur rect
+	for _, r := range rects {
+		if r.id == id {
+			cur = r
+		}
+	}
+	if cur.id == "" {
+		return ""
+	}
+	// overlap of two intervals; negative = the gap between them
+	overlap := func(a1, a2, b1, b2 int) int { return min(a2, b2) - max(a1, b1) }
+	best, bestKey := "", [4]int{}
+	for _, r := range rects {
+		var gap, ov int
+		switch d {
+		case [2]int{0, 1}:
+			gap, ov = r.y-(cur.y+cur.h), overlap(cur.x, cur.x+cur.w, r.x, r.x+r.w)
+		case [2]int{0, -1}:
+			gap, ov = cur.y-(r.y+r.h), overlap(cur.x, cur.x+cur.w, r.x, r.x+r.w)
+		case [2]int{1, 0}:
+			gap, ov = r.x-(cur.x+cur.w), overlap(cur.y, cur.y+cur.h, r.y, r.y+r.h)
+		case [2]int{-1, 0}:
+			gap, ov = cur.x-(r.x+r.w), overlap(cur.y, cur.y+cur.h, r.y, r.y+r.h)
+		}
+		if r.id == id || gap < 0 || ov <= 0 && d[0] == 0 {
+			continue
+		}
+		miss := 0 // 1 = no overlap (sideways fallback): always loses to an overlapping one
+		if ov <= 0 {
+			miss = 1
+		}
+		key := [4]int{miss, gap, max(-ov, 0), -ov}
+		if best == "" || less(key, bestKey) {
+			best, bestKey = r.id, key
+		}
+	}
+	return best
+}
+
+func less(a, b [4]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
 }
 
 const noPane = "后台会话没有 tmux pane：不能跳转 / 发送"
@@ -391,7 +444,7 @@ func (m Model) View() string {
 	if m.w == 0 {
 		return ""
 	}
-	_, _, _, _, focused, ok := m.current()
+	_, _, focused, ok := m.current()
 	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded)
 	return out
 }

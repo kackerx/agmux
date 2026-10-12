@@ -57,6 +57,10 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyDown}
 	case "right":
 		return tea.KeyMsg{Type: tea.KeyRight}
+	case "left":
+		return tea.KeyMsg{Type: tea.KeyLeft}
+	case "up":
+		return tea.KeyMsg{Type: tea.KeyUp}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
@@ -124,7 +128,7 @@ func TestKeys(t *testing.T) {
 		{"q in s mode is text", []string{"s", "q", "enter"}, [][]string{{"send", "a1", "--", "q"}}, false},
 		{"background: enter / H / s refused", []string{"j", "enter", "H", "s", "x", "y"}, [][]string{{"kill", "a2"}}, false},
 		{"q quits", []string{"q"}, nil, true},
-		{"arrow keys move", []string{"down", "r", "right", "r"}, [][]string{{"restart", "a2"}, {"restart", "b1"}}, false},
+		{"arrow keys move", []string{"down", "r", "up", "right", "r"}, [][]string{{"restart", "a2"}, {"restart", "b1"}}, false},
 		{"text starting with - stays text", []string{"s", "--help", "enter"}, [][]string{{"send", "a1", "--", "--help"}}, false},
 		{"burst of keys = one by one", []string{"lr"}, [][]string{{"restart", "b1"}}, false},
 		{"unfolding focuses the group's first card", []string{"l", "f", "f", "r"}, [][]string{{"restart", "b1"}}, false},
@@ -337,5 +341,62 @@ func TestFoldMouse(t *testing.T) {
 	tm, _ = m.Update(click)
 	if m = tm.(Model); m.folded["/a"] || m.focus != "a1" {
 		t.Errorf("second click unfolds: folded=%v focus=%q", m.folded["/a"], m.focus)
+	}
+}
+
+// Spatial hjkl over the laid-out rectangles: 2 columns × 2 bands at 120 columns
+// (band 1: /a with 3 cards, /b with 2; band 2: /c with 1, under /a).
+func TestSpatialNav(t *testing.T) {
+	ss := staticSrc{}
+	for _, s := range []struct{ id, group string }{{"a1", "/a"}, {"a2", "/a"}, {"a3", "/a"}, {"b1", "/b"}, {"b2", "/b"}, {"c1", "/c"}} {
+		ss = append(ss, store.Session{ID: s.id, Name: s.id, GroupKey: s.group, TmuxPane: "%1", Status: "idle", ContextPct: -1})
+	}
+	start := func(focus string, keys ...string) string {
+		m := New(ss, &fakeRunner{})
+		tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 60})
+		m = tm.(Model)
+		m.focus = focus
+		m, _ = press(t, m, keys...)
+		return m.focus
+	}
+	for _, c := range []struct {
+		from string
+		keys []string
+		want string
+	}{
+		{"a3", []string{"j"}, "c1"}, // down across bands
+		{"c1", []string{"k"}, "a3"}, // and back
+		{"c1", []string{"j"}, "c1"}, // bottom edge: stay
+		{"a1", []string{"k"}, "a1"}, // top edge
+		{"a1", []string{"h"}, "a1"}, // left edge
+		{"b2", []string{"h"}, "a2"}, // the left card overlapping most
+		{"b1", []string{"h"}, "a1"},
+		{"a2", []string{"l"}, "b2"},
+		{"a3", []string{"l"}, "b2"},                // nothing level with a3: the closest one over there
+		{"b2", []string{"j"}, "b2"},                // nothing below in the right column
+		{"a1", []string{"j", "j", "j", "j"}, "c1"}, // walks the whole left column, then stops
+		{"a1", []string{"down", "right", "left"}, "a2"},
+	} {
+		if got := start(c.from, c.keys...); got != c.want {
+			t.Errorf("from %s %v: focus %s, want %s", c.from, c.keys, got, c.want)
+		}
+	}
+	// a folded title is a one-row stop: reachable sideways and back
+	m := New(ss, &fakeRunner{})
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 60})
+	m = tm.(Model)
+	m.focus = "b1"
+	m, _ = press(t, m, "f", "h") // fold /b, focus on its title, then left
+	if m.focus != "a1" {
+		t.Errorf("h from the folded /b title: %s, want a1", m.focus)
+	}
+	if m, _ = press(t, m, "l"); m.focus != headerID("/b") {
+		t.Errorf("l back to the folded title: %q", m.focus)
+	}
+}
+
+func TestNearestEmpty(t *testing.T) {
+	if nearest(nil, "x", directions["j"]) != "" || nearest([]rect{{"a", 0, 0, 10, 5}}, "zz", directions["j"]) != "" {
+		t.Error("unknown focus or no rects: stay")
 	}
 }
