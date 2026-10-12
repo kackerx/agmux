@@ -1792,6 +1792,9 @@ func TestEveryColorWired(t *testing.T) {
 	waiting := idle
 	waiting.Status = "waiting"
 	has("waiting word", card(waiting, 48, 5, false, 0, now, hit{}), "attention", "⏳ waiting")
+	if !strings.Contains(matched("x"), strings.Replace(sgr["match"], "38;", "48;", 1)) {
+		t.Errorf("match: %q", matched("x"))
+	}
 	has("bar low", contextBar(10), "bar_low")
 	has("bar mid", contextBar(40), "bar_mid")
 	has("bar high", contextBar(70), "bar_high")
@@ -1893,14 +1896,14 @@ func TestHilite(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	defer lipgloss.SetColorProfile(old)
 	got := hilite("éx你", []int{1, 3}, cName) // the combining accent, and 你
-	if want := fg(cFocus, "é") + fg(cName, "x") + fg(cFocus, "你"); got != want {
+	if want := matched("é") + fg(cName, "x") + matched("你"); got != want {
 		t.Errorf("%q\nwant %q", got, want)
 	}
 	if hilite("ab", nil, cName) != fg(cName, "ab") {
 		t.Error("no hits: plain")
 	}
 	g := group{key: "/proj/agmux", sessions: []store.Session{{ID: "x"}}}
-	if h := header(g, 40, false, false, dirHits(g, map[string]hit{"x": {dir: []int{6}}})); !strings.Contains(h, fg(cFocus, "a")) {
+	if h := header(g, 40, false, false, dirHits(g, map[string]hit{"x": {dir: []int{6}}})); !strings.Contains(h, matched("a")) {
 		t.Errorf("the group title shows its cards' path hits: %q", h)
 	}
 }
@@ -1937,7 +1940,7 @@ func TestBranchHilite(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	defer lipgloss.SetColorProfile(old)
-	if l := line2(store.Session{Branch: "cd"}, 36, []int{1}); !strings.Contains(l, fg(cFocus, "d")) || strings.Contains(l, fg(cFocus, "c")) {
+	if l := line2(store.Session{Branch: "cd"}, 36, []int{1}); !strings.Contains(l, matched("d")) || strings.Contains(l, matched("c")) {
 		t.Errorf("%q", l)
 	}
 }
@@ -2361,7 +2364,7 @@ func TestSearchHighlightsOnScreen(t *testing.T) {
 	trueColor(t)
 	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "/")
 	m = typeKeys(t, m, "'thr")
-	if !strings.Contains(m.View(), fg(cFocus, "t")+fg(cFocus, "h")+fg(cFocus, "r")+fg(cName, "e")) {
+	if !strings.Contains(m.View(), matched("t")+matched("h")+matched("r")+fg(cName, "e")) {
 		t.Errorf("name letters not highlighted:\n%s", ansi.Strip(m.View()))
 	}
 	home, _ := os.UserHomeDir()
@@ -2373,19 +2376,19 @@ func TestSearchHighlightsOnScreen(t *testing.T) {
 	mm := psized(ss, 200, 40)
 	mm.query = "'agmux"
 	title := strings.Split(mm.View(), "\n")[1]
-	if !strings.Contains(title, fg(cFocus, "a")+fg(cFocus, "g")+fg(cFocus, "m")+fg(cFocus, "u")+fg(cFocus, "x")) {
+	if !strings.Contains(title, matched("a")+matched("g")+matched("m")+matched("u")+matched("x")) {
 		t.Errorf("open title: %q", ansi.Strip(title))
 	}
 	if g := (group{key: home + "/proj/agmux", sessions: []store.Session{{ID: "b"}}}); true { // b has no hit but a does: the union
 		h := header(g, 60, false, false, dirHits(group{sessions: ss[:2]}, map[string]hit{"a": {dir: []int{7, 8}}}))
-		if !strings.Contains(h, fg(cFocus, "g")) {
+		if !strings.Contains(h, matched("g")) {
 			t.Errorf("union of the cards' hits: %q", ansi.Strip(h))
 		}
 	}
 	mm.folded[home+"/proj/agmux"] = true
 	mm.query = ""
 	mm.focus = "c"
-	if h := header(group{key: home + "/proj/agmux", sessions: ss[:2]}, 60, true, false, []int{7}); !strings.Contains(h, fg(cFocus, "a")) {
+	if h := header(group{key: home + "/proj/agmux", sessions: ss[:2]}, 60, true, false, []int{7}); !strings.Contains(h, matched("a")) {
 		t.Errorf("folded title: %q", ansi.Strip(h))
 	}
 }
@@ -2408,7 +2411,7 @@ func TestMidTruncKeepsHighlight(t *testing.T) {
 	r := []rune(path)
 	g := group{key: path, sessions: []store.Session{{ID: "x"}}}
 	h := header(g, 30, false, false, []int{len(r) - 3, len(r) - 2})
-	if w := ansi.StringWidth(h); w != 30 || !strings.Contains(h, fg(cFocus, "d")+fg(cFocus, "i")) {
+	if w := ansi.StringWidth(h); w != 30 || !strings.Contains(h, matched("d")+matched("i")) {
 		t.Errorf("width %d: %q", w, ansi.Strip(h))
 	}
 	if got := midTrunc("abcdef", 2); got != "ab" || ansi.StringWidth(midTrunc("abcdefgh", 5)) != 5 {
@@ -2658,5 +2661,87 @@ func TestLeavePreviewRebound(t *testing.T) {
 	}
 	if m, _ = press(t, m, "ctrl+]"); m.pvFocus || !m.previewOn() {
 		t.Error("ctrl+] leaves, the preview stays")
+	}
+}
+
+// Search hits: the match color behind dark text (like nvim's Search), the color is configurable.
+func TestMatchStyle(t *testing.T) {
+	trueColor(t)
+	if s := matched("x"); !strings.Contains(s, "48;2;242;208;107") || !strings.Contains(s, "38;2;44;42;46") { // lipgloss rounds #2d2a2e
+		t.Errorf("default: %q", s)
+	}
+	c, _ := config.Parse("cfg", []byte("[colors]\nmatch = \"#00ff00\"\n"))
+	useConfig(c)
+	defer useConfig(config.Default())
+	if s := matched("x"); !strings.Contains(s, "48;2;0;255;0") || !strings.Contains(s, "38;2;44;42;46") {
+		t.Errorf("configured: %q", s)
+	}
+	if h := hilite("abc", []int{1}, cName); !strings.Contains(h, matched("b")) || strings.Contains(h, matched("a")) {
+		t.Errorf("only the hit: %q", h)
+	}
+}
+
+var matchSrc = staticSrc{
+	{ID: "a1", Name: "x1", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%1"},
+	{ID: "a2", Name: "x2", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%2"},
+	{ID: "b1", Name: "x3", GroupKey: "/b", CWD: "/b", ContextPct: -1, TmuxPane: "%3"},
+	{ID: "b2", Name: "other", GroupKey: "/b", CWD: "/b", ContextPct: -1, TmuxPane: "%4"},
+}
+
+// A kept filter: n / N walk its cards in layout order and wrap; with no filter they do nothing;
+// the footer says so.
+func TestNextPrevMatch(t *testing.T) {
+	m, _ := press(t, psized(matchSrc, 232, 50), "n", "N") // no filter: nothing
+	if m.focus != "" && m.focus != "a1" {
+		t.Errorf("n without a filter moved the focus: %q", m.focus)
+	}
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "x")
+	m, _ = press(t, m, "enter") // a1
+	foot := func() string { v := strings.Split(ansi.Strip(m.View()), "\n"); return v[len(v)-1] }
+	if f := foot(); !strings.HasPrefix(f, " n/N next/prev · esc clear · ") || !strings.Contains(f, "enter jump") {
+		t.Errorf("footer %q", f)
+	}
+	var got []string
+	for _, k := range []string{"n", "n", "n", "N", "N", "N", "N"} {
+		m, _ = press(t, m, k)
+		got = append(got, m.focus)
+	}
+	if want := []string{"a2", "b1", "a1", "b1", "a2", "a1", "b1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("walk %v, want %v", got, want)
+	}
+	m, _ = press(t, m, "esc", "n")
+	if m.query != "" || m.focus != "b1" {
+		t.Errorf("after esc n does nothing: focus %q", m.focus)
+	}
+	if f := foot(); strings.Contains(f, "next/prev") {
+		t.Errorf("footer after esc %q", f)
+	}
+}
+
+// n / N are text in the box, keys for the pane in pass-through; on a card the filter hides, n goes
+// to the first match and N to the last.
+func TestNextPrevMatchEdges(t *testing.T) {
+	m, _ := press(t, psized(matchSrc, 232, 50), "/")
+	if m = typeKeys(t, m, "nN"); m.query != "nN" {
+		t.Errorf("in the box: %q", m.query)
+	}
+	m, _ = press(t, psized(matchSrc, 232, 50), "j", "j", "j", "/") // focus b2 "other"
+	m = typeKeys(t, m, "x")
+	m, _ = press(t, m, "enter") // a1 (enter goes to the first)
+	m.focus = "b2"              // hidden by the filter
+	if m, _ = press(t, m, "n"); m.focus != "a1" {
+		t.Errorf("n from a hidden card: %q", m.focus)
+	}
+	m.focus = "b2"
+	if m, _ = press(t, m, "N"); m.focus != "b1" {
+		t.Errorf("N from a hidden card: %q", m.focus)
+	}
+	r := &fakeRunner{}
+	m, _ = press(t, wide(r, 232, 50), "tab") // pass-through
+	r.reset()
+	m, _ = press(t, m, "n")
+	if !slices.ContainsFunc(r.calls, func(c []string) bool { return c[len(c)-1] == "n" && c[1] == "send-keys" }) {
+		t.Errorf("n goes to the pane: %q", r.calls)
 	}
 }

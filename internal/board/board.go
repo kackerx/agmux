@@ -457,6 +457,34 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 	case "search": // even when the filter shows nothing: / edits it
 		m.searching, m.searchFrom, m.msg = true, m.focus, ""
 		return m, nil
+	case "next_match", "prev_match": // around the cards a kept filter shows, in layout order
+		if m.query == "" {
+			return m, nil
+		}
+		ss, _ := m.shown()
+		var order []string
+		for _, g := range groups(ss) {
+			for _, s := range g.sessions {
+				order = append(order, s.ID)
+			}
+		}
+		if len(order) == 0 {
+			return m, nil
+		}
+		step := 1
+		if action == "prev_match" {
+			step = -1
+		}
+		switch i := slices.Index(order, m.focus); {
+		case i >= 0:
+			m.focus = order[(i+step+len(order))%len(order)]
+		case step > 0: // on a card the filter hides: the first match, or the last going back
+			m.focus = order[0]
+		default:
+			m.focus = order[len(order)-1]
+		}
+		m.msg = ""
+		return m, nil
 	}
 	gs, gi, s, ok := m.current()
 	if len(gs) == 0 {
@@ -860,6 +888,14 @@ func (m Model) View() string {
 			}
 		}
 		out = strings.Join(lines, "\n")
+	}
+	if m.query != "" { // a kept filter: what moves around it (the states below replace the whole line)
+		hint := "esc clear"
+		if n, p := m.cfg.First("next_match"), m.cfg.First("prev_match"); n != "" && p != "" {
+			hint = n + "/" + p + " next/prev · " + hint
+		}
+		last := strings.LastIndexByte(out, '\n') + 1
+		out = out[:last] + ansi.Truncate(fg(cFocus, " "+hint)+fg(cMuted, " ·")+footer(ok && focused.TmuxPane == "", m.w), m.w, "…")
 	}
 	switch { // the footer is always the last line
 	case m.mode == flashing:

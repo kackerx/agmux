@@ -200,3 +200,24 @@ func TestActionLeftWithNoKey(t *testing.T) {
 		t.Errorf("round trip: %v\n%s", err, c.String())
 	}
 }
+
+// T22: match color and the n / N actions.
+func TestMatchColorAndKeys(t *testing.T) {
+	d := Default()
+	if d.Colors["match"] != "#f2d06b" || !reflect.DeepEqual(d.Keys["next_match"], []string{"n"}) || !reflect.DeepEqual(d.Keys["prev_match"], []string{"N"}) {
+		t.Errorf("defaults: %v %v %v", d.Colors["match"], d.Keys["next_match"], d.Keys["prev_match"])
+	}
+	if s := d.String(); !strings.Contains(s, `match = "#f2d06b"`) || !strings.Contains(s, `next_match = ["n"]`) || !strings.Contains(s, `prev_match = ["N"]`) {
+		t.Errorf("printed:\n%s", s)
+	}
+	c, err := Parse("cfg", []byte("[colors]\nmatch = \"#112233\"\n[keys]\nnext_match = [\"ctrl+n\"]\n"))
+	if err != nil || c.Colors["match"] != "#112233" || c.KeyMap()["ctrl+n"] != "next_match" || c.KeyMap()["n"] != "" {
+		t.Errorf("%v %v", err, c.Colors["match"])
+	}
+	if _, err := Parse("cfg", []byte("[colors]\nmatch = \"yellow\"\n")); err == nil || !strings.Contains(err.Error(), "colors.match") {
+		t.Errorf("a bad match color is an error: %v", err)
+	}
+	if _, err := Parse("cfg", []byte("[keys]\nnext_match = [\"j\"]\n")); err != nil {
+		t.Errorf("taking j from down is allowed: %v", err) // the file's own bindings win
+	}
+}

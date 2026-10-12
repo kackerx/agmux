@@ -23,26 +23,26 @@ import (
 // Actions, in the order `agmux config` prints them.
 var Actions = []string{
 	"up", "down", "left", "right", "jump", "fold", "preview", "focus_preview", "leave_preview",
-	"reply", "handoff", "search", "flash", "restart", "kill", "review", "avatar", "quit", "confirm",
+	"reply", "handoff", "search", "next_match", "prev_match", "flash", "restart", "kill", "review", "avatar", "quit", "confirm",
 }
 
 var defaultKeys = map[string][]string{
 	"up": {"k", "up"}, "down": {"j", "down"}, "left": {"h", "left"}, "right": {"l", "right"},
 	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"tab"},
 	// search / flash are T19 / T20
-	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "flash": {"s"},
+	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "flash": {"s"},
 	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"},
 	"quit": {"q", "esc"}, "confirm": {"y"},
 }
 
 // Colors, in print order.
 var Colors = []string{
-	"working", "idle", "done", "attention", "focus", "name", "branch", "model", "effort", "dir",
+	"working", "idle", "done", "attention", "focus", "match", "name", "branch", "model", "effort", "dir",
 	"bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled",
 }
 
 var defaultColors = map[string]string{
-	"working": "#ffb86c", "idle": "#585b70", "done": "#50fa7b", "attention": "#ff6188", "focus": "#ff8ebe",
+	"working": "#ffb86c", "idle": "#585b70", "done": "#50fa7b", "attention": "#ff6188", "focus": "#ff8ebe", "match": "#f2d06b",
 	"name": "5", "branch": "12", "model": "14", "effort": "13", "dir": "11",
 	"bar_low": "#a6e3a1", "bar_mid": "#f9e2af", "bar_high": "#ff6188", "bar_empty": "#585b70",
 	"muted": "#6272a4", "disabled": "#45475a",

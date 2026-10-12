@@ -44,13 +44,14 @@ var (
 	cBarHigh  = lipgloss.Color("#ff6188") // ≥ 60%
 	cBarEmpty = lipgloss.Color("#585b70")
 	cFocus    = lipgloss.Color("#ff8ebe")
+	cMatch    = lipgloss.Color("#f2d06b") // search hits: this background, dark text, like nvim's Search
 	cOff      = lipgloss.Color("#45475a") // disabled footer keys
 )
 
 // useConfig applies config.toml: colors, and the footer built from the key bindings.
 func useConfig(c *config.Config) {
 	for name, v := range map[string]*lipgloss.Color{
-		"working": &cWorking, "idle": &cDim, "done": &cDone, "attention": &cRed, "focus": &cFocus,
+		"working": &cWorking, "idle": &cDim, "done": &cDone, "attention": &cRed, "focus": &cFocus, "match": &cMatch,
 		"name": &cName, "branch": &cBranch, "model": &cModel, "effort": &cEffort, "dir": &cDir,
 		"bar_low": &cGreen, "bar_mid": &cYellow, "bar_high": &cBarHigh, "bar_empty": &cBarEmpty,
 		"muted": &cMuted, "disabled": &cOff,
@@ -169,7 +170,15 @@ func dirHits(g group, hits map[string]hit) []int {
 	return pos
 }
 
-// hilite draws text in c, the grapheme clusters holding a rune at pos (rune offsets) in the focus color.
+// matchText is the text on a search hit's background: dark, whatever the match color is.
+const matchText = lipgloss.Color("#2d2a2e")
+
+// hit draws s as a search hit: the match color behind dark text.
+func matched(s string) string {
+	return lipgloss.NewStyle().Background(cMatch).Foreground(matchText).Render(s)
+}
+
+// hilite draws text in c, the grapheme clusters holding a rune at pos (rune offsets) as search hits.
 func hilite(text string, pos []int, c lipgloss.Color) string {
 	if len(pos) == 0 {
 		return fg(c, text)
@@ -178,11 +187,12 @@ func hilite(text string, pos []int, c lipgloss.Color) string {
 	i := 0
 	g := uniseg.NewGraphemes(text)
 	for g.Next() {
-		n, col := len(g.Runes()), c
+		n := len(g.Runes())
 		if slices.ContainsFunc(pos, func(p int) bool { return p >= i && p < i+n }) {
-			col = cFocus
+			b.WriteString(matched(g.Str()))
+		} else {
+			b.WriteString(fg(c, g.Str()))
 		}
-		b.WriteString(fg(col, g.Str()))
 		i += n
 	}
 	return b.String()
