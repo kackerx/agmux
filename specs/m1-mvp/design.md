@@ -6,8 +6,8 @@
 ## 数据源
 ### A. `ccmux show --json`【已实测】每 2s 轮询
 数组，每项用到的字段：`id`、`summary`（会话名，可能为 null → 退回 `project`）、`agentType`、`cwd`、`project`、`mainRepoRoot`、`gitBranch`、
-`status`（idle / working / waiting）、`attentionType`、`attentionState`、`lastPrompt`、`pendingTool`、`tmuxPane`（background 模式下 null）、`trackingMode`、
-`subagents[]`（agentId / status / pendingTool）、`nativeSessionId`、`logPath`、`lastActivityAt`、`updatedAt`、`backgroundDetail`。
+`status`（idle / working / waiting）、`attentionType`、`attentionState`、`pendingTool`、`tmuxPane`（background 模式下 null）、`trackingMode`、
+`subagents[]`（agentId / status / pendingTool）、`nativeSessionId`、`logPath`、`lastActivityAt`、`updatedAt`。
 ### B. 状态栏透传 `agmux statusline`【M1 验收改版】
 Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 payload 喂给 `statusLine.command`（hooks 里没有这份数据，jsonl 里没有模型窗口大小），所以这是唯一出口。agmux 自己提供包装，不依赖任何第三方状态栏脚本：
 - `agmux statusline [-- <原命令> [args…]]`：读完 stdin，原子写（tmp + rename）到 `$XDG_STATE_HOME/agmux/<session_id>.json`（session_id 取 payload 的 `session_id`，就是 ccmux 的 nativeSessionId），再把同一份 payload 喂给原命令的 stdin，透传它的 stdout 和退出码；没给原命令就什么都不输出、退出 0。写文件失败不影响透传（状态栏不能因为 agmux 挂掉）。
@@ -54,7 +54,7 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 ╭──────────────────────────────────────────╮
 │ ▄▀▀▀▀▄   mods-tmux          ⏸ idle  2h │   头像 6×4（6 列 × 2 行）· agent 图标 · 名（洋红）· 状态 · 上次活动相对时间
 │ ▀▄▄▄▄▀  ⑂ master            Opus 5.5·hi │   分支（橙红，可截断）· 模型（青）·effort（紫），靠右
-│ ■■■□□□ 41%         ⚇ 2 agents  ⚙ 1 shell │   上下文条 6 格顶在头像下面 · 子 agent 数 · 后台 shell 数
+│ ■■■□□□ 42%         ⚇ 2 agents  ⚙ 1 shell │   上下文条 6 格顶在头像下面 · 子 agent 数 · 后台 shell 数
 ╰──────────────────────────────────────────╯
 ```
 - 窄时让位顺序：先截分支，再截名字；状态和时间永远在。
@@ -62,7 +62,7 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 - 状态，照 ccmux 1.4.3 的 `getEffectiveStatus` 换算后再显示：原始 idle 且有子 agent 在 working / waiting → `⏵ working · agents`（不算 done，眼睛扫动）；原始 working → `⏵ working`，有 pendingTool 接 pendingTool，不接 agents；`⏸ idle` 蓝灰；`● done` 绿 = 原始 idle、无子 agent 在跑、`attentionState` 非空（"unread" 或 "read" 都算，ccmux 同样）；`⏳ waiting` 红 = status waiting（含 plan_approval，不像 ccmux 那样用青色）。**边框色 = 状态色**（working 橙、done 绿、idle 暗灰 #585b70、需要处理 / waiting 红）。焦点卡片边框换成 **#ff8ebe** 粗线（lipgloss ThickBorder），盖掉状态色——第二轮验收：只换粗线看不出焦点在哪。不单独拎出需要处理的会话。
 - 换算放在 store 里做一次，view 只读结果。
 - 底栏或消息行的错误只取第一行（ccmux 的 stderr 常是多行），总行数永远等于终端高度。
-- 上下文条：■（U+25A0）**6 格**，和头像同宽、顶在头像正下方；百分比数字跟在后面。空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 10 格全暗 + `--`。格数四舍五入到 6 格（29% → 2 格，数字仍显示截断后的 29）。
+- 上下文条：■（U+25A0）**6 格**，和头像同宽、顶在头像正下方；百分比数字跟在后面。空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 6 格全暗 + `--`。格数四舍五入到 6 格（29% → 2 格，数字仍显示截断后的 29）。
 - 最近 prompt 那一行 M1 验收改版去掉（初版曾有，用户嫌挤；`lastPrompt` / `backgroundDetail` 的取行代码一并删，M2 的预览窗口另起）。
 - 子 agent / shell 为 0 时该段不显示。
 - PR 号（`branchPRs`）M1 不显示：真机全是 null / []，看到真实元素再接。
