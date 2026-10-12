@@ -17,9 +17,9 @@ class Base(unittest.TestCase):
     def calls(self, n=None, timeout=3):
         """Wait for n recorded ccmux calls (or return what is there after a quiet 0.8s when n is None)."""
         if n is None:
-            time.sleep(0.8); return self.env.calls()
-        wait(lambda: len(self.env.calls()) >= n, timeout)
-        return self.env.calls()
+            time.sleep(0.8); return self.env.actions()
+        wait(lambda: len(self.env.actions()) >= n, timeout)
+        return self.env.actions()
 
     def footer(self):
         return last_text_row(self.t.snap())
@@ -45,7 +45,7 @@ class Keys(Base):
 
     def test_navigation(self):
         cases = [("j", "a2"), ("j j", "a3"), ("j j j j j", "e1"), ("k", "a1"), ("l", "b1"), ("l l", "c1"), ("l l l", "d1"), ("l l l l", "d1"),
-                 ("l l l l l", "d1"), ("j j l l", "c2"), ("j j j l", "b2"), ("Down", "a2"), ("Right", "b1"), ("Right Left", "a1"),
+                 ("l l l l l", "d1"), ("j j l l", "c2"), ("j j j l", "e1"), ("j l", "b2"), ("Down", "a2"), ("Right", "b1"), ("Right Left", "a1"),
                  ("j Up", "a1"), ("l h", "a1"), ("h", "a1"), ("l l l h h", "b1")]
         for keys, want in cases:
             with self.subTest(keys=keys):
@@ -54,11 +54,11 @@ class Keys(Base):
                 for k in keys.split():
                     t.keys(k); time.sleep(0.15)
                 t.keys("Enter")
-                wait(lambda: env.calls(), 3)
+                wait(lambda: env.actions(), 3)
                 if want == "b2":  # background session: switch is greyed
-                    self.assertEqual(env.calls(), [], f"after keys {keys!r} (b2 is background)")
+                    self.assertEqual(env.actions(), [], f"after keys {keys!r} (b2 is background)")
                 else:
-                    self.assertEqual(env.calls(), [["switch", want]], f"after keys {keys!r}")
+                    self.assertEqual(env.actions(), [["switch", want]], f"after keys {keys!r}")
 
     def test_burst_keys_not_dropped(self):
         """Several keys arriving in one read (bubbletea hands them over as one message)."""
@@ -67,9 +67,9 @@ class Keys(Base):
         env2 = Env(); self.addCleanup(env2.cleanup); build_fixture(env2)
         t2 = Term(env2, w=200, h=50); self.addCleanup(t2.close); self.assertTrue(ready(t2))
         t2.lit("jjxy")  # a3, x, confirm
-        wait(lambda: env2.calls(), 3); self.assertEqual(env2.calls(), [["kill", "a3"]])
-        t2.lit("HHr"); wait(lambda: len(env2.calls()) >= 4, 3)
-        self.assertEqual(sorted(map(tuple, env2.calls()[1:])), sorted([("send", "a3", "--", "/handoff")] * 2 + [("restart", "a3")]))
+        wait(lambda: env2.actions(), 3); self.assertEqual(env2.actions(), [["kill", "a3"]])
+        t2.lit("HHr"); wait(lambda: len(env2.actions()) >= 4, 3)
+        self.assertEqual(sorted(map(tuple, env2.actions()[1:])), sorted([("send", "a3", "--", "/handoff")] * 2 + [("restart", "a3")]))
 
     def test_H_hjkl_letters(self):
         self.t.keys("l"); time.sleep(0.2)
@@ -95,34 +95,10 @@ class Keys(Base):
         self.assertEqual(self.calls(), [], "any non-y key cancels")
         self.t.keys("r"); self.assertEqual(self.calls(1), [["restart", "a1"]], "TUI back to normal mode after cancel")
 
-    def test_s_send(self):
-        self.t.keys("s"); time.sleep(0.2); self.t.lit("hello world")
-        self.assertTrue(wait(lambda: "hello world" in "\n".join(r.text for r in self.t.snap()[-3:]), 3), "typed text visible near the footer:\n" + self.t.text())
-        self.t.keys("Enter"); c = self.calls(1)
-        self.assertEqual(c, [["send", "a1", "--", "hello world"]], "text is ONE argv element after `--`")
-        self.assertTrue(self.t.alive())
-
-    def test_s_chinese_and_burst(self):
-        self.t.keys("s"); time.sleep(0.2); self.t.lit("你好 世界，请继续")
-        self.assertTrue(wait(lambda: "你好 世界，请继续" in "\n".join(r.text for r in self.t.snap()[-3:]), 3), "CJK echoed in the prompt:\n" + self.t.text())
-        self.t.keys("BSpace"); self.t.keys("BSpace"); self.t.lit("完成"); self.t.keys("Enter"); c = self.calls(1)
-        self.assertEqual(c[0], ["send", "a1", "--", "你好 世界，请完成"], "backspace removes a whole CJK char")
-        self.t.lit("sabc"); self.t.keys("Enter"); c = self.calls(2)  # 's' and the text arrive in one read
-        self.assertEqual(c[1], ["send", "a1", "--", "abc"])
-        self.t.keys("s"); time.sleep(0.2); self.t.lit("   "); self.t.keys("Enter")
-        self.assertEqual(len(self.calls()), 2, "blank text cancels")
-
-    def test_s_text_starting_with_dash(self):
-        for i, text in enumerate(("--help", "- 修一下", "-n")):
-            self.t.keys("s"); time.sleep(0.2); self.t.lit(text); self.t.keys("Enter")
-            self.assertEqual(self.calls(i + 1)[i], ["send", "a1", "--", text], f"{text!r} must stay text, after `--`")
-
     def test_paste_is_not_commands(self):
         self.t.lit("\x1b[200~xyHr\x1b[201~")  # bracketed paste while browsing
         self.assertEqual(self.calls(), [], "pasted letters must not trigger x / y / H / r")
         self.assertTrue(self.t.alive()); self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 9)
-        self.t.keys("s"); time.sleep(0.2); self.t.lit("\x1b[200~xyHr\x1b[201~"); self.t.keys("Enter")  # paste into the prompt is plain text
-        self.assertEqual(self.calls(1), [["send", "a1", "--", "xyHr"]])
 
     def test_review_failure_shows_last_stderr_line(self):
         self.env.flag("review.fail"); self.t.keys("d")
@@ -135,7 +111,7 @@ class Keys(Base):
         mouse_on = lambda: tm("display", "-p", "-t", self.t.name, "#{mouse_any_flag}").stdout.strip()
         self.assertEqual(mouse_on(), "1", "board enables mouse reporting")
         self.env.flag("review.hold"); self.t.keys("d")
-        self.assertTrue(wait(lambda: "agmux · 9 sessions" in self.t.text() and self.env.calls() and "REVIEW-RUNNING" not in self.t.text(), 8))
+        self.assertTrue(wait(lambda: "agmux · 9 sessions" in self.t.text() and self.env.actions() and "REVIEW-RUNNING" not in self.t.text(), 8))
         self.assertTrue(wait(lambda: mouse_on() == "1", 3), "mouse reporting must be back on after review (bubbletea v1 leaves it off)")
         c = by_name(find_cards(self.t.snap()), NAMES["a2"]); self.t.click(c.c + c.w // 2, c.r + 2); time.sleep(0.4)
         self.t.keys("H"); self.assertEqual(self.calls(2)[1:], [["send", "a2", "--", "/handoff"]], "click after review selects a2")
@@ -145,18 +121,11 @@ class Keys(Base):
         self.assertTrue(wait(lambda: "REVIEW-RUNNING" in self.t.text(), 3), "review should own the terminal:\n" + self.t.text())
         self.assertNotIn("agmux · 9 sessions", self.t.text(), "board is suspended while review runs")
         self.assertTrue(wait(lambda: "agmux · 9 sessions" in self.t.text(), 6), "board must come back after review exits")
-        self.assertEqual(self.env.calls(), [["review", "a1"]])
+        self.assertEqual(self.env.actions(), [["review", "a1"]])
         self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 9)
         self.assertRegex("\n".join(r.text for r in self.t.snap()[-3:]), "review 结束", "footer reports the finished review")
         self.t.keys("j"); time.sleep(0.2); self.t.keys("Enter")
         self.assertEqual(self.calls(2)[1:], [["switch", "a2"]], "board keeps working after review")
-
-    def test_s_cancel(self):
-        self.t.keys("s"); time.sleep(0.2); self.t.lit("abc"); self.t.esc()
-        self.assertEqual(self.calls(), []); self.assertTrue(self.t.alive(), "esc in the prompt cancels it, not quits")
-        self.t.keys("s"); time.sleep(0.2); self.t.keys("Enter")
-        self.assertEqual(self.calls(), [], "empty text cancels")
-        self.t.keys("r"); self.assertEqual(self.calls(1), [["restart", "a1"]], "prompt closed after cancel")
 
     def test_ccmux_stderr_in_footer_no_popup(self):
         self.env.flag("fail"); self.t.keys("r")
@@ -170,12 +139,12 @@ class Keys(Base):
         self.assertTrue(wait(lambda: hint in "\n".join(r.text for r in self.t.snap()[-3:]), 3), "footer hint when a background card is focused:\n" + self.t.text())
         for k in ("Enter", "H"):
             self.t.keys(k); time.sleep(0.4)
-            self.assertEqual(self.env.calls(), [], f"{k} on background session must not call ccmux")
+            self.assertEqual(self.env.actions(), [], f"{k} on background session must not call ccmux")
             self.assertTrue(self.t.alive(), f"{k}: TUI must stay open")
             self.assertEqual(self.t.text().count(hint), 1, f"after {k}: the hint is shown exactly once")
         self.t.keys("s"); time.sleep(0.4)
         self.assertEqual(self.t.text().count(hint), 1, "after s: the hint is shown exactly once")
-        self.assertEqual(self.env.calls(), [], "s on background session must not open the prompt / send")
+        self.assertEqual(self.env.actions(), [], "s on background session must not open the prompt / send")
         self.t.lit("x"); self.t.keys("Enter"); time.sleep(0.3)  # (an `x` then lands on the kill confirm, Enter cancels it)
         self.assertIn(hint, "\n".join(r.text for r in self.t.snap()[-3:]))
         self.t.keys("h"); time.sleep(0.2)  # a2 (native) again: hint gone
@@ -201,20 +170,13 @@ class Races(Base):
         self.env.write_show([x for x in json.loads((self.env.fake / "show.json").read_text()) if x["id"] != "a2"]); self.poll_twice()
         self.assertTrue(self.t.alive()); self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 8)
         self.t.keys("Enter"); self.assertEqual(len(self.calls(1)), 1)
-        self.assertIn(self.env.calls()[0][0], ("switch",)); self.assertNotEqual(self.env.calls()[0][1], "a2", "must not act on the vanished session")
-
-    def test_prompt_target_vanishes_before_enter(self):
-        self.t.keys("s"); time.sleep(0.2); self.t.lit("hi")
-        self.env.write_show([x for x in json.loads((self.env.fake / "show.json").read_text()) if x["id"] != "a1"]); self.poll_twice()
-        self.t.keys("Enter"); time.sleep(0.8)
-        self.assertEqual(self.env.calls(), [], "no send to a session that is gone")
-        self.assertRegex("\n".join(r.text for r in self.t.snap()[-3:]), "已经不在了"); self.assertTrue(self.t.alive())
+        self.assertIn(self.env.actions()[0][0], ("switch",)); self.assertNotEqual(self.env.actions()[0][1], "a2", "must not act on the vanished session")
 
     def test_kill_confirm_target_vanishes(self):
         self.t.keys("x"); time.sleep(0.2)
         self.env.write_show([x for x in json.loads((self.env.fake / "show.json").read_text()) if x["id"] != "a1"]); self.poll_twice()
         self.t.keys("y"); time.sleep(0.8)
-        self.assertEqual(self.env.calls(), [], "no kill of a session that is gone"); self.assertTrue(self.t.alive())
+        self.assertEqual(self.env.actions(), [], "no kill of a session that is gone"); self.assertTrue(self.t.alive())
 
 
 class BackgroundWithError(Base):
@@ -246,7 +208,7 @@ class Mouse(Base):
 
     def test_click_selects_then_second_click_switches(self):
         x, y = self.centre("a2"); self.t.click(x, y); time.sleep(0.4)
-        self.assertEqual(self.env.calls(), [], "first click only selects"); self.assertTrue(self.t.alive())
+        self.assertEqual(self.env.actions(), [], "first click only selects"); self.assertTrue(self.t.alive())
         self.t.keys("H"); self.assertEqual(self.calls(1), [["send", "a2", "--", "/handoff"]], "click moved focus to a2")
         self.t.click(x, y)
         self.assertEqual(self.calls(2)[1:], [["switch", "a2"]]); self.assertEqual(self.t.exit_status(), 0)
@@ -257,11 +219,11 @@ class Mouse(Base):
 
     def test_click_empty_area_noop(self):
         self.t.click(150, 44); time.sleep(0.5)
-        self.assertEqual(self.env.calls(), []); self.assertTrue(self.t.alive())
+        self.assertEqual(self.env.actions(), []); self.assertTrue(self.t.alive())
 
     def test_click_background_card_greyed(self):
         x, y = self.centre("b2"); self.t.click(x, y); time.sleep(0.3); self.t.click(x, y); time.sleep(0.5)
-        self.assertEqual(self.env.calls(), [], "switch is greyed for tmuxPane == null"); self.assertTrue(self.t.alive())
+        self.assertEqual(self.env.actions(), [], "switch is greyed for tmuxPane == null"); self.assertTrue(self.t.alive())
 
 
 class Polling(unittest.TestCase):
@@ -318,11 +280,11 @@ class PopupMouse(unittest.TestCase):
         time.sleep(1.0)
         sgr = lambda b: os.write(fd, f"\x1b[<0;{x + 1};{y + 1}{b}".encode())
         sgr("M"); sgr("m"); time.sleep(0.5)
-        self.assertEqual(env.calls(), [], "first click only selects")
-        os.write(fd, b"H"); self.assertTrue(wait(lambda: env.calls(), 3), "no ccmux call: click did not reach the app (or H did not)")
-        self.assertEqual(env.calls(), [["send", "a2", "--", "/handoff"]], "click in popup selected a2")
-        sgr("M"); sgr("m"); self.assertTrue(wait(lambda: len(env.calls()) >= 2, 3))
-        self.assertEqual(env.calls()[1], ["switch", "a2"])
+        self.assertEqual(env.actions(), [], "first click only selects")
+        os.write(fd, b"H"); self.assertTrue(wait(lambda: env.actions(), 3), "no ccmux call: click did not reach the app (or H did not)")
+        self.assertEqual(env.actions(), [["send", "a2", "--", "/handoff"]], "click in popup selected a2")
+        sgr("M"); sgr("m"); self.assertTrue(wait(lambda: len(env.actions()) >= 2, 3))
+        self.assertEqual(env.actions()[1], ["switch", "a2"])
         self.assertTrue(wait(lambda: pop.poll() == 0, 3), "popup must close after switch (board exits 0)")
 
 

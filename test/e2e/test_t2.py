@@ -51,7 +51,8 @@ class AvatarsCmd(unittest.TestCase):
         r = subprocess.run(f"{self.env.prefix} {shlex.quote(BIN)} avatars", shell=True, capture_output=True, text=True)
         self.assertNotIn("\x1b", r.stdout, "piped output must carry no ANSI")
         t = Term(self.env, args="avatars; sleep 8", w=80, h=40); self.addCleanup(t.close)
-        raw = wait(lambda: (lambda x: x if x.count("▀") + x.count("▄") >= 12 else None)(t.raw()), 5)
+        raw = wait(lambda: (lambda x: x if len(re.findall(r"bot-0\d  ", strip_ansi(x))) >= 6 and strip_ansi(x).rstrip().count("\n") >= 17 else None)(t.raw()), 5)
+        time.sleep(0.2); raw = t.raw()  # all six blocks (header + 2 rows + blank) are on screen
         self.assertTrue(raw, t.text())
         self.assertRegex(raw, r"\x1b\[[0-9;]*38;2;\d+;\d+;\d+", "capture-pane -e must show truecolor fg escapes")
         snap = parse_screen(raw)

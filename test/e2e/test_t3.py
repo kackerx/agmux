@@ -26,7 +26,7 @@ def group_cards(snap, cards):
     return out
 
 
-BAR_KEYS = ("j/k", "h/l", "enter", "H 交接", "s 发送", "r 重启", "x 杀", "d review", "q 退出")
+BAR_KEYS = ("j/k", "h/l", "enter", "H 交接", "s 回复", "r 重启", "x 杀", "d review", "q 退出")
 
 
 def last_text_row(snap):
@@ -88,7 +88,6 @@ class Layout(unittest.TestCase):
 
 
 BAND = {"claude": (255, 184, 108), "codex": (80, 250, 123), "other": (98, 114, 164)}  # #ffb86c #50fa7b #6272a4
-ICON = {"claude": "\uec82", "codex": "\uec81", "other": "\uec20"}
 STATUS_COLOUR = {"working": ("rgb", 255, 184, 108), "done": ("rgb", 80, 250, 123), "idle": C_DIM, "alert": C_RED}  # border = status colour
 C_FOCUS = ("rgb", 255, 142, 190)  # #ff8ebe: the focused card's thick border, overriding the status colour
 PROMPT_TEXT = ("先修折行", "构建完成", "修 折行", "<leader>", "后台任务", "← orch", "← peer", "cross-session", "task-notification")
@@ -139,45 +138,44 @@ class Content(unittest.TestCase):
         for gone in PROMPT_TEXT + ("\U000f0b7b",):
             self.assertNotIn(gone, scr, "S1.1 dropped the lastPrompt / backgroundDetail row")
 
-    def test_line1_icon_name_status_time(self):
-        for sid, agent in (("a1", "claude"), ("b1", "codex"), ("c1", "other"), ("a2", "claude")):
-            c = self.card(sid); row = c.rows[1]
-            i = row.find(ICON[agent]); self.assertGreaterEqual(i, 0, f"{sid}: agent icon {ICON[agent]!r} in {c.line(1)!r}")
-            got = rgb(row.cells[i][1])  # +-1: lipgloss/termenv truncates floats, so #6272a4 arrives as (97,113,163)
-            self.assertTrue(got and all(abs(g - w) <= 1 for g, w in zip(got, BAND[agent])), f"{sid}: icon has the band colour {BAND[agent]}, got {got}")
-            self.assertTrue(row.text.index(ICON[agent]) < row.text.index(NAMES[sid][:4]), "icon before the name")
-            j = row.find(NAMES[sid]); self.assertTrue(is_magenta(row.cells[j][1]), f"{sid}: name magenta")
-            self.assertRegex(c.line(1), r"\b1m [│┃]$", f"{sid}: relative time is the last thing before the border")
-        self.assertIn("⏵ working · Bash", self.card("a1").line(1))
-        self.assertIn("⏸ idle", self.card("a2").line(1))
-        self.assertIn("⏵ working · agents", self.card("b1").line(1), "raw idle + working subagent")
-        self.assertIn("● done", self.card("c2").line(1)); self.assertIn("● done", self.card("e1").line(1), "attentionState read also counts")
-        self.assertIn("⏳ waiting", self.card("d1").line(1))
-        self.assertIn("working", self.card("a3").line(1))
-        i = self.card("a1").rows[1].find("working"); self.assertTrue(is_orange(self.card("a1").rows[1].cells[i][1]))
-        i = self.card("d1").rows[1].find("waiting"); self.assertTrue(is_red(self.card("d1").rows[1].cells[i][1]))
-        i = self.card("c2").rows[1].find("done"); self.assertTrue(is_green(self.card("c2").rows[1].cells[i][1]))
-        i = self.card("a2").rows[1].find("idle"); r = rgb(self.card("a2").rows[1].cells[i][1]); self.assertTrue(r and r[2] >= r[0], "idle blue-grey")
-        self.assertNotIn("agents", self.card("a1").line(1).replace("⚇ 2 agents", ""), "raw working: pendingTool, never `agents`")
+    def test_line1_name_and_time_only(self):
+        scr = self.t.text()
+        for icon in ("\uec82", "\uec81", "\uec20"):
+            self.assertNotIn(icon, scr, "T13: the agent icon in front of the name is gone (the avatar's band colour says the agent type)")
+        for sid, name in NAMES.items():
+            c = self.card(sid); row = c.rows[1]; l1 = c.line(1)
+            j = row.find(name[:4]); self.assertGreaterEqual(j, 0, l1)
+            self.assertTrue(is_magenta(row.cells[j][1]), f"{sid}: name magenta")
+            self.assertRegex(l1, r"\b1m [│┃]$", f"{sid}: the relative time is the last thing before the border: {l1!r}")
+            for word in ("working", "idle", "done", "waiting", "⚇", "⑂"):
+                self.assertNotIn(word, l1, f"{sid}: line 1 is name + time only")
+        self.assertEqual(self.card("a1").rows[1].width_text(8, 10), "  ")
 
-    def test_line2_branch_model(self):
+    def test_line2_is_the_branch_alone(self):
         a1, a2 = self.card("a1"), self.card("a2")
-        self.assertIn("⑂ feature/qa", a1.line(2)); self.assertIn("…", a1.line(2), "long branch truncated")
-        self.assertIn("⑂ main", a2.line(2))
-        self.assertRegex(a1.line(2), r"Opus 5\.5 [│┃]$", "model sits at the right edge (jsonl fallback: claude-opus-5-5)")
-        self.assertNotRegex(a2.line(2), r"Opus|Sonnet|Fable", "no model known -> nothing on the right")
+        self.assertIn("\ue725 feature/qa", a1.line(2)); self.assertIn("…", a1.line(2), "a long branch is cut with …")
+        self.assertIn("\ue725 main", a2.line(2))
+        self.assertGreaterEqual(a2.rows[2].find("\ue725"), 10, "the branch icon U+E725 sits right after the avatar columns")
+        self.assertNotIn("⑂", self.t.text(), "the old branch glyph is gone")
+        for card in self.cards:
+            self.assertNotRegex(card.line(2), r"Opus|Sonnet|Fable|⚇|⏵|⏸|●|⏳", "line 2 holds the branch only")
 
-    def test_line3_bar_and_counts(self):
-        a1, b1 = self.card("a1"), self.card("b1")
+    def test_line3_bar_status_counts_model(self):
+        a1, b1, c2, d1, a2 = self.card("a1"), self.card("b1"), self.card("c2"), self.card("d1"), self.card("a2")
         self.assertEqual(a1.rows[3].find("■"), 2, "the bar starts under the avatar, at the left edge of the body")
-        self.assertEqual(a1.rows[3].width_text(2, 8), "■" * 6, "6 cells: exactly as wide as the avatar above it")
-        self.assertEqual(a1.rows[3].width_text(8, 10), "  ", "no percentage number after the bar")
-        self.assertIn("⚇ 2 agents", a1.line(3)); self.assertRegex(a1.line(3), r"agents [│┃]$")
-        self.assertIn("⚇ 1 agent", b1.line(3)); self.assertNotIn("1 agents", b1.line(3))
+        self.assertEqual(a1.rows[3].width_text(2, 8), "■" * 6); self.assertEqual(a1.rows[3].width_text(8, 10), "  ")
+        self.assertRegex(a1.line(3), r"■{6}  ⏵ working · Bash  ⚇ 2 +Opus 5\.5 [│┃]$", "bar · status · detail · count · model flush right")
+        self.assertIn("⏵ working · agents  ⚇ 1", b1.line(3)); self.assertNotIn("Opus", b1.line(3))
+        self.assertRegex(c2.line(3), r"■{6}  ● done +[│┃]$"); self.assertRegex(d1.line(3), r"■{6}  ⏳ waiting +[│┃]$")
+        self.assertRegex(a2.line(3), r"■{6}  ⏸ idle +[│┃]$", "idle: no detail, no counts, no model")
         for sid in NAMES:
             if sid not in ("a1", "b1"):
-                self.assertNotIn("agent", self.card(sid).line(3), f"{sid}: 0 subagents -> segment hidden")
-            self.assertNotIn("shell", self.card(sid).line(3), "S1 shells fixed 0 -> hidden")
+                self.assertNotIn("⚇", self.card(sid).line(3), f"{sid}: 0 subagents -> segment hidden")
+            self.assertNotIn("⚙", self.card(sid).line(3), "M1 shells fixed 0 -> hidden")
+        i = a1.rows[3].find("working"); self.assertTrue(is_orange(a1.rows[3].cells[i][1]), "working is orange")
+        i = d1.rows[3].find("waiting"); self.assertTrue(is_red(d1.rows[3].cells[i][1]), "waiting is red")
+        i = c2.rows[3].find("done"); self.assertTrue(is_green(c2.rows[3].cells[i][1]), "done is green")
+        i = a2.rows[3].find("idle"); r = rgb(a2.rows[3].cells[i][1]); self.assertTrue(r and r[2] >= r[0], "idle is blue-grey")
 
     def test_context_bar(self):
         exp = {"alpha-main": C_YELLOW, "bravo-29": C_GREEN, "charlie-30": C_YELLOW, "charlie-59": C_YELLOW, "delta-60": C_RED}
@@ -266,7 +264,7 @@ class Wide232(unittest.TestCase):
 
 
 class Narrow(unittest.TestCase):
-    """40-wide columns (82 cols, 2 columns): status word and time always stay; on line 1 the name stays whole and the detail yields; on line 2 the branch is cut first."""
+    """40-wide columns (82 cols): line 1 keeps the time and only cuts a name that does not fit; line 3 keeps the status word and gives way detail -> counts -> model."""
 
     def test_yielding_order(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
@@ -274,15 +272,14 @@ class Narrow(unittest.TestCase):
         cs = ready(t); self.assertTrue(cs, t.text())
         self.assertEqual({c.w for c in cs}, {40})
         for c in cs:
-            l1 = c.line(1); sid = l1
-            self.assertRegex(l1, r"(⏵ working|⏸ idle|● done|⏳ waiting)( · \w+)?\s+\d+[smhd] [│┃]$", f"{sid}: status and time are always the right end of line 1: {l1!r}")
-        for c in cs:
-            self.assertNotRegex(c.line(1), r"· …", "no bare `· …` stub: the detail disappears entirely when nothing fits")
-        a1 = sorted(cs, key=lambda c: (c.r, c.c))[0]  # alpha-main: first group, first card (its name is cut to "alph…" next to a long status)
-        self.assertIn("alpha-main", a1.line(1), "name first: it stays whole")
-        self.assertNotIn("·", a1.line(1), "the pendingTool detail (` · Bash`) yielded entirely instead of the name"); self.assertNotIn("…", a1.line(1))
-        self.assertIn("⑂ feature", a1.line(2), "branch is cut (…) before the name is")
-        self.assertIn("Opus 5.5", a1.line(2), "model stays while the branch is cut")
+            self.assertRegex(c.line(1), r"\b\d+[smhd] [│┃]$", f"time is always the right end of line 1: {c.line(1)!r}")
+            self.assertRegex(c.line(3), r"(⏵ working|⏸ idle|● done|⏳ waiting)", f"the status word is always on line 3: {c.line(3)!r}")
+        a1 = sorted(cs, key=lambda c: (c.r, c.c))[0]  # alpha-main
+        self.assertIn("alpha-main", a1.line(1), "the name fits: whole")
+        self.assertIn("…", a1.line(2), "the branch is cut")
+        self.assertIn("Opus 5.5", a1.line(3), "model stays at 40 columns"); self.assertIn("⚇ 2", a1.line(3))
+        cjk = [c for c in cs if "告警" in c.line(1)][0]
+        self.assertIn("…", cjk.line(1), "a name that does not fit is cut"); self.assertTrue(cjk.ok)
 
 
 class StderrFooter(unittest.TestCase):
@@ -320,7 +317,7 @@ class ModelCache(unittest.TestCase):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs)
-        self.assertIn("opus", by_name(cs, "alpha-main").line(2).lower())
+        self.assertIn("opus", by_name(cs, "alpha-main").line(3).lower())
         log = env.tmp / "a1.jsonl"
         with open(log, "a") as f:  # a big attachment line: the assistant entry is now outside the 64KB tail
             f.write('{"type":"attachment","content":"' + "A" * (200 << 10) + '"}\n')
@@ -328,58 +325,51 @@ class ModelCache(unittest.TestCase):
         self.assertTrue(wait(lambda: env.show_calls() >= n0 + 2, 8), "board should have polled again")
         time.sleep(0.6)
         c = by_name(find_cards(t.snap()), "alpha-main")
-        self.assertIn("opus", c.line(2).lower(), "model must be kept from the previous poll:\n" + t.text())
+        self.assertIn("opus", c.line(3).lower(), "model must be kept from the previous poll:\n" + t.text())
 
 
 class LongPendingTool(unittest.TestCase):
-    """design 6791155 (supersedes f994c2b's order): line 1 keeps the status word and the time always; the NAME comes first and stays whole; the detail after
-    the status (pendingTool, or `agents`) only gets the width that is left, is cut when it does not fit, and loses its ` · ` too once nothing of it is left;
-    only when the detail is gone is the name cut (keeping at least 10 cells; the spec says `try for 12`)."""
+    """design T13: line 3 keeps the status word always; what gives way first is the `· pendingTool` detail, then the ⚇ / ⚙ counts, then the model.
+    Line 1 keeps the time and cuts the name only when it does not fit; line 2 cuts the branch."""
 
     TOOL = "mcp__claude_ai_Claude_Docs__batch"
-    NAME_TOOL, NAME_AGENTS = "agmux-orchestrator", "agmux-agents-test1"  # 18 characters each
+    NAME = "agmux-orchestrator-extra24"  # 26 characters
+    BRANCH = "feature/qa-acceptance-pap-be-dev"
 
     def setUp(self):
         self.env = Env(); self.addCleanup(self.env.cleanup); build_fixture(self.env)
         S = json.loads((self.env.fake / "show.json").read_text())
         for s in S:
-            if s["id"] == "a2":
-                s.update(summary=self.NAME_TOOL, status="working", pendingTool=self.TOOL, agentType="claude")
-            if s["id"] == "a3":  # raw idle + a working subagent -> `⏵ working · agents`
-                s.update(summary=self.NAME_AGENTS, status="idle", pendingTool=None, attentionType=None, agentType="claude",
-                         subagents=[{"agentId": "x", "status": "working", "pendingTool": None}])
+            if s["id"] == "a1":
+                s.update(summary=self.NAME, gitBranch=self.BRANCH, pendingTool=self.TOOL)
         self.env.write_show(S)
 
-    def check(self, card, name, W):
-        row, l1 = card.rows[1], card.line(1)
-        self.assertGreaterEqual(row.find("\uec82"), 0, f"W={W}: agent icon survives: {l1!r}")
-        self.assertGreaterEqual(row.find("⏵ working"), 0, f"W={W}: status word survives: {l1!r}")
-        self.assertRegex(l1, r"\b\d+[smhd] [│┃]$", f"W={W}: time survives at the right edge: {l1!r}")
-        field = l1[l1.index("\uec82") + 2:].split()[0]  # the name field, `…` included
-        self.assertTrue(name.startswith(field.rstrip("…")), f"W={W}: name field {field!r} of {name!r}: {l1!r}")
-        self.assertGreaterEqual(disp_width(field), 10, f"W={W}: name keeps at least 10 cells (spec says 'try for 12'; the … counts): {l1!r}")
-        if field.endswith("…"):
-            self.assertNotIn("·", l1, f"W={W}: the name is only cut once the detail is gone entirely: {l1!r}")
-        if "·" in l1:
-            self.assertEqual(field, name, f"W={W}: while a detail is shown the name is whole: {l1!r}")
-            detail = l1.split("· ", 1)[1].split("  ")[0].strip()
-            self.assertRegex(detail, r"^\w", f"W={W}: a shown detail has real text, not a bare `…` stub: {l1!r}")
-        return l1
+    def test_names_and_branches_whole_on_48_columns(self):
+        t = Term(self.env, w=200, h=50); self.addCleanup(t.close)
+        cs = ready(t); self.assertTrue(cs, t.text())
+        c = [x for x in cs if "agmux-orc" in x.line(1)][0]
+        self.assertEqual(c.w, 48)
+        self.assertIn(self.NAME, c.line(1), "a 26-character name fits a 48-column card"); self.assertRegex(c.line(1), r"\b1m [│┃]$")
+        self.assertIn(self.BRANCH, c.line(2), "and so does `feature/qa-acceptance-pap-be-dev`")
 
-    def test_status_and_time_survive_and_the_detail_yields_before_the_name(self):
-        for W in (40, 82, 124, 166, 200, 232, 300, 400):
+    def test_line3_gives_way_detail_then_counts_then_model(self):
+        for W in (82, 124, 166, 200, 232, 300, 400):
             with self.subTest(W=W):
                 t = Term(self.env, w=W, h=100); self.addCleanup(t.close)
                 cs = ready(t); self.assertTrue(cs, t.text())
-                c_tool = [x for x in cs if "agmux-orc" in x.line(1)]; c_ag = [x for x in cs if "agmux-agen" in x.line(1)]
-                self.assertEqual((len(c_tool), len(c_ag)), (1, 1), [x.line(1) for x in cs])
-                l_tool = self.check(c_tool[0], self.NAME_TOOL, W); l_ag = self.check(c_ag[0], self.NAME_AGENTS, W)
-                if "·" in l_tool:
-                    tool = l_tool.split("· ", 1)[1].split("  ")[0].strip()
-                    self.assertTrue(self.TOOL.startswith(tool.rstrip("…")), f"tool text {tool!r}")
+                c = [x for x in cs if "agmux-orc" in x.line(1)][0]; l3 = c.line(3)
+                self.assertIn("⏵ working", l3, f"W={W}: the status word never gives way: {l3!r}")
+                detail, counts, model = "·" in l3, "⚇" in l3, "Opus" in l3
+                self.assertTrue(not detail or counts, f"W={W}: the detail is cut before the counts: {l3!r}")
+                self.assertTrue(not counts or model, f"W={W}: the counts are cut before the model: {l3!r}")
+                if detail:
+                    d = l3.split("· ", 1)[1].split("  ")[0].strip()
+                    self.assertRegex(d, r"^\w", f"W={W}: a shown detail has real text, not a bare `…`: {l3!r}")
+                if W >= 232:
+                    self.assertTrue(model and counts, f"W={W}: wide enough for counts and model: {l3!r}")
                 if W >= 400:
-                    self.assertIn(self.TOOL, l_tool, "wide enough: the whole tool name shows"); self.assertIn(self.NAME_TOOL, l_tool)
-                    self.assertIn("· agents", l_ag)
+                    self.assertIn(self.TOOL, l3); self.assertIn("Opus 5.5", l3)
+                self.assertRegex(c.line(1), r"\b\d+[smhd] [│┃]$", f"W={W}: time at the right edge of line 1")
                 t.close()
 
 
@@ -419,7 +409,7 @@ class HudModel(unittest.TestCase):
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs)
         b1 = by_name(cs, "bravo-29")
-        self.assertRegex(b1.line(2), r"Fancy Model 9 [│┃]$", b1.line(2)); self.assertNotIn("%", b1.line(3))
+        self.assertRegex(b1.line(3), r"Fancy Model 9 [│┃]$", b1.line(3)); self.assertNotIn("%", b1.line(3))
         sq = [x for x in b1.rows[3].cells if x[0] == "■"]
         self.assertEqual(len([x for x in sq if x[1] == C_RED]), (77 * 6 + 50) // 100, "77% -> red, 5 of 6 cells")
 
@@ -433,7 +423,7 @@ class HudModel(unittest.TestCase):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
         t = Term(env, w=200, h=50); self.addCleanup(t.close); self.assertTrue(ready(t))
         self.feed(env, "n-b1", "Late Model", pct=12)
-        self.assertTrue(wait(lambda: "Late Model" in by_name(find_cards(t.snap()), "bravo-29").line(2), 8), "board should pick the file up on the next poll")
+        self.assertTrue(wait(lambda: "Late Model" in by_name(find_cards(t.snap()), "bravo-29").line(3), 8), "board should pick the file up on the next poll")
 
 
 class FooterMessages(unittest.TestCase):

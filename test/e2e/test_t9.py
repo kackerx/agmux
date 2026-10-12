@@ -1,8 +1,9 @@
 """T9 spatial hjkl navigation. Spec: specs/m1-mvp/design.md「交互」, specs/m1-mvp/tasks.md T9.
 
 j/k: the card with the largest HORIZONTAL overlap below / above, crossing groups and bands, no fallback (stop at the edge).
-h/l: the card with the largest VERTICAL overlap on the left / right; when nothing overlaps in that direction, fall back to the nearest column
-there and its vertically nearest card. A folded group's title takes part as a one-row card.
+h/l (spec 1221aad / 33d146c): only inside the CURRENT BAND, in the nearest column on that side; in that column the card with the largest vertical overlap, or,
+when none overlaps, the vertically nearest one; no column on that side in this band -> stop (never jumps to another band).
+A folded group's title takes part as a one-row card, so it is always reachable by h/l from its neighbours.
 The focused card is the one with the #ff8ebe (thick) border, so the tests read focus from the screen and never need to press enter.
 
 Fixture layout at 120 columns (2 columns of 59), groups sorted by cwd:
@@ -20,6 +21,20 @@ def focus_sid(term):
     f = [c for c in cs if c.rows[0].cells[0][1] == C_FOCUS]
     assert len(f) == 1, f"{len(f)} cards with the focus border:\n{term.text()}"
     return sid_of(f[0])
+
+
+class StdoutRedirected(unittest.TestCase):
+    """33d146c: a key arriving before the first window-size message used to panic; run the board with stdout not on a terminal and press j / l."""
+
+    def test_board_with_redirected_stdout_survives_keys(self):
+        env = Env(); build_fixture(env); self.addCleanup(env.cleanup)
+        out = env.tmp / "board.out"
+        t = Term(env, args=f"board > {out} 2>&1"); self.addCleanup(t.close)
+        time.sleep(1.0); t.lit("jjjllhhkq")
+        st = t.exit_status(6)
+        self.assertIsNotNone(st, "the board should end on q")
+        self.assertNotIn(b"panic", out.read_bytes()); self.assertNotIn(b"goroutine", out.read_bytes())
+        self.assertEqual(st, 0)
 
 
 class Base(unittest.TestCase):
@@ -67,18 +82,21 @@ class TwoColumns(Base):
 
     def test_band_two_and_three(self):
         self.walk([("j", "a2"), ("j", "a3"), ("j", "c1"), ("l", "d1"), ("h", "c1"), ("j", "c2"), ("l", "d1"), ("h", "c1"),
-                   ("j", "c2"), ("j", "e1"), ("l", "d1"), ("h", "c1")])
+                   ("j", "c2"), ("j", "e1"), ("l", "e1"), ("h", "e1"), ("k", "c2")])  # e1 is alone in band 3: h / l stop, they do not reach into band 2
 
     def test_edges_stop(self):
         self.walk([("h", "a1"), ("k", "a1"), ("l", "b1"), ("l", "b1"), ("k", "b1")])
+
+    def test_h_l_never_leave_the_band(self):
+        self.walk([("j", "a2"), ("j", "a3"), ("l", "b2"), ("j", "d1"), ("l", "d1"), ("h", "c1"), ("h", "c1"), ("j", "c2"), ("j", "e1"), ("l", "e1"), ("h", "e1")])
 
     def test_arrow_keys_are_the_same(self):
         self.walk([("Down", "a2"), ("Right", "b2"), ("Down", "d1"), ("Left", "c1"), ("Up", "a3"), ("Left", "a3")])
 
     def test_enter_after_a_walk_switches_to_the_focused_card(self):
         self.press("j", "j", "j", "l")  # c1 -> d1
-        self.t.keys("Enter"); wait(lambda: self.env.calls(), 3)
-        self.assertEqual(self.env.calls(), [["switch", "d1"]])
+        self.t.keys("Enter"); wait(lambda: self.env.actions(), 3)
+        self.assertEqual(self.env.actions(), [["switch", "d1"]])
 
     def test_focus_survives_polls_and_resort(self):
         self.press("j", "j", "j")  # c1
@@ -102,13 +120,77 @@ class FourColumns(Base):
             self.press(k); self.assertEqual(focus_sid(self.t), want, f"after {k!r}")
 
     def test_second_band_to_the_right_falls_back_and_k_returns(self):
-        self.walk([("j", "a2"), ("j", "a3"), ("j", "e1"), ("l", "b2"),  # e1 (band 2, left) has nothing at its height on the right: b2 is the vertically nearest
-                   ("h", "a2")])
-        self.walk_from(["j", "j"], "e1", [("k", "a3")])  # from a2 (focus is a2 now): j j -> a3 -> e1, then k back to a3
+        self.walk([("j", "a2"), ("j", "a3"), ("j", "e1"),  # e1 is alone in band 2
+                   ("l", "e1"), ("h", "e1"),  # no column beside it in its band: h / l stop (they used to reach up into band 1)
+                   ("k", "a3")])
+
+
+class FoldedFourColumns(Base):
+    W = 200
+
+    def fold_b(self):
+        self.press("l", "f")
+        self.assertTrue(wait(lambda: [g[0][0] for g in structure(self.t)[0]][1] == "▸", 3))
+
+    def title_focused_then_unfold(self):
+        cs = [c for c in find_cards(self.t.snap()) if c.ok]
+        self.assertEqual([c for c in cs if c.rows[0].cells[0][1] == C_FOCUS], [], "no card carries the focus border: the folded title does")
+        self.t.keys("Enter")
+        self.assertTrue(wait(lambda: [g[0][0] for g in structure(self.t)[0]][1] == "▾", 3), "enter unfolds /b (the title had the focus)")
+        self.assertEqual(self.env.actions(), [])
+
+    def test_a1_l_lands_on_the_folded_title(self):
+        self.fold_b(); self.press("h"); self.assertEqual(focus_sid(self.t), "a1")
+        self.press("l"); self.title_focused_then_unfold()
+
+    def test_c1_h_lands_on_the_folded_title(self):
+        self.fold_b(); self.press("l"); self.assertEqual(focus_sid(self.t), "c1")
+        self.press("h"); self.title_focused_then_unfold()
+
+    def test_title_l_goes_to_c1_and_h_to_a1(self):
+        self.fold_b(); self.press("l"); self.assertEqual(focus_sid(self.t), "c1")
+        self.press("h", "h"); self.assertEqual(focus_sid(self.t), "a1")
+
+    def test_every_left_column_card_reaches_the_title_with_l(self):
+        for ups in ((), ("j",), ("j", "j")):  # a1, a2, a3
+            with self.subTest(start="a" + str(len(ups) + 1)):
+                env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
+                t = Term(env, w=200, h=50); self.addCleanup(t.close); self.assertTrue(ready(t))
+                t.keys("l"); time.sleep(0.25); t.keys("f"); time.sleep(0.4); t.keys("h"); time.sleep(0.25)
+                for k in ups:
+                    t.keys(k); time.sleep(0.25)
+                t.keys("l"); time.sleep(0.3)
+                self.assertEqual([c for c in find_cards(t.snap()) if c.ok and c.rows[0].cells[0][1] == C_FOCUS], [], "focus is on the folded title")
+                t.keys("Enter")
+                self.assertTrue(wait(lambda: [g[0][0] for g in structure(t)[0]][1] == "▾", 3), "enter unfolds it")
+                self.assertEqual(env.actions(), [])
+                t.close()
+
+    def test_unfolded_neighbours_unchanged(self):
+        self.walk([("l", "b1"), ("l", "c1"), ("l", "d1"), ("l", "d1"), ("h", "c1")])
 
 
 class Folded(Base):
     W = 120
+
+    def on_folded_title(self, idx):
+        """focus is on the folded title of group idx: no card carries the focus border, and enter unfolds that group instead of switching"""
+        cs = [c for c in find_cards(self.t.snap()) if c.ok]
+        self.assertEqual([c for c in cs if c.rows[0].cells[0][1] == C_FOCUS], [], "no card has the focus border when a folded title is focused")
+        self.t.keys("Enter")
+        self.assertTrue(wait(lambda: [g[0][0] for g in structure(self.t)[0]][idx] == "▾", 3), "enter unfolds it (the title had the focus)")
+        self.assertEqual(self.env.actions(), [], "no ccmux call")
+
+    def test_a3_l_reaches_the_folded_b_title_not_d1(self):
+        self.press("l", "f")  # fold G2 (/b); the focus stays on its title
+        self.assertTrue(wait(lambda: [g[0][0] for g in structure(self.t)[0]][1] == "▸", 3))
+        self.press("h", "j", "j")
+        self.assertEqual(focus_sid(self.t), "a3")
+        self.press("l")
+        self.on_folded_title(1)
+
+    def test_unfolded_a3_l_lands_on_b2(self):
+        self.walk([("j", "a2"), ("j", "a3"), ("l", "b2")])
 
     def test_a_folded_title_is_a_one_row_card_in_the_walk(self):
         self.press("j", "j", "j")  # c1
@@ -120,7 +202,7 @@ class Folded(Base):
         # the folded title has no border to read: it is focused when enter unfolds it instead of switching
         self.t.keys("Enter")
         self.assertTrue(wait(lambda: [g[0][0] for g in structure(self.t)[0]][2] == "▾", 3), "j from a3 lands on the folded title; enter unfolds it")
-        self.assertEqual(self.env.calls(), [], "no ccmux call")
+        self.assertEqual(self.env.actions(), [], "no ccmux call")
 
     def test_j_passes_through_a_folded_title_to_the_next_card(self):
         self.press("j", "j", "j"); self.t.keys("f"); time.sleep(0.4)  # focus on the folded G3 title
@@ -136,7 +218,7 @@ class Folded(Base):
         self.press("h"); time.sleep(0.2)
         self.t.keys("Enter")  # back on the folded title? enter unfolds it, it must not call ccmux
         self.assertTrue(wait(lambda: [g[0][0] for g in structure(self.t)[0]][2] == "▾", 3), "h from d1 returns to the folded title")
-        self.assertEqual(self.env.calls(), [])
+        self.assertEqual(self.env.actions(), [])
 
 
 if __name__ == "__main__":

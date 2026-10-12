@@ -39,6 +39,8 @@ class Env:
         for d in (self.home, self.state, self.bin, self.fake):
             d.mkdir()
         (self.fake / "show.json").write_text("[]")
+        self.pane_ids = {}
+        (self.fake / "tmux.clients").write_text("1\tc-test\tmain\n")  # one outer client: enter can switch; T10 tests override with set_tmux()
         d = shlex.quote(str(self.fake))
         script = f"""#!/bin/sh
 d={d}
@@ -58,9 +60,34 @@ exit 0
 """
         (self.bin / "ccmux").write_text(script)
         (self.bin / "ccmux").chmod(0o755)
+        # fake `tmux` (T10: agmux calls tmux straight from $PATH): records argv, answers display-message / list-clients from files
+        tmux = f"""#!/bin/sh
+d={d}
+printf '%s\\037' "$@" >> "$d/tmux.log"; printf '\\n' >> "$d/tmux.log"
+perl -MTime::HiRes=time -e 'printf "%.3f\\n", time' >> "$d/tmux.times"
+if [ -e "$d/tmux.fail" ] && [ "$(cat "$d/tmux.fail")" = "$1" ]; then printf 'tmux: boom from fake tmux\\nsecond tmux line\\n' >&2; exit 1; fi
+case "$1" in
+  display-message) if [ -e "$d/tmux.session" ]; then cat "$d/tmux.session"; else echo fl-own; fi; exit 0;;
+  list-clients) [ -e "$d/tmux.clients" ] && cat "$d/tmux.clients"; exit 0;;
+  show-environment) if [ -e "$d/tmux.env" ]; then cat "$d/tmux.env"; exit 0; else echo "unknown variable: $4" >&2; exit 1; fi;;
+esac
+exit 0
+"""
+        (self.bin / "tmux").write_text(tmux)
+        (self.bin / "tmux").chmod(0o755)
+        # PATH for the REAL-tmux tests: the fake ccmux, but not the fake tmux
+        self.bin_real = self.tmp / "bin_real"; self.bin_real.mkdir()
+        os.symlink(self.bin / "ccmux", self.bin_real / "ccmux")
 
     def cleanup(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
+
+    @property
+    def prefix_real(self):
+        """like `prefix`, but PATH has the REAL tmux (and the fake ccmux) instead of the fake tmux, for tests whose panes live in the private tmux server"""
+        q = shlex.quote
+        return (f"env -i PATH={q(str(self.bin_real))}:/opt/homebrew/bin:/usr/bin:/bin HOME={q(str(self.home))} XDG_STATE_HOME={q(str(self.state))} "
+                "TERM=xterm-256color COLORTERM=truecolor LANG=en_US.UTF-8")
 
     @property
     def prefix(self):
@@ -82,6 +109,36 @@ exit 0
         if not p.exists():
             return []
         return [[a for a in line.split("\x1f") if a != ""] for line in p.read_text().split("\n") if line]
+
+    def actions(self):
+        """What the user asked for, whichever channel carries it: ccmux calls plus the tmux ones that replaced `ccmux switch` / `ccmux send` in T10
+        (switch-client -t <pane> -> ["switch", id]; send-keys -t <pane> -l -- <text> -> ["send", id, "--", text]; the Enter key press is not a separate action)."""
+        out = list(self.calls())
+        for c in self.tmux_calls():
+            if c[0] == "switch-client" and "-t" in c:
+                out.append(["switch", self.pane_ids.get(c[c.index("-t") + 1], "?")])
+            elif c[0] == "send-keys" and "-l" in c and "--" in c:
+                out.append(["send", self.pane_ids.get(c[c.index("-t") + 1], "?"), "--", " ".join(c[c.index("--") + 1:])])
+        return out
+
+    def tmux_calls(self):
+        p = self.fake / "tmux.log"
+        if not p.exists():
+            return []
+        return [[a for a in line.split("\x1f") if a != ""] for line in p.read_text().split("\n") if line]
+
+    def tmux_times(self):
+        p = self.fake / "tmux.times"
+        return [float(x) for x in p.read_text().split()] if p.exists() else []
+
+    def set_tmux(self, session="fl-own", clients=(), fail=None, session_env=None):
+        """clients: (activity, client_name, client_session) rows served by `tmux list-clients -F ...`; fail: subcommand that exits 1."""
+        (self.fake / "tmux.session").write_text(session + "\n")  # NB: tmux keeps trailing spaces in names, so the file keeps them too
+        (self.fake / "tmux.clients").write_text("".join(f"{a}\t{n}\t{s}\n" for a, n, s in clients))
+        if fail:
+            (self.fake / "tmux.fail").write_text(fail)
+        if session_env is not None:  # what `tmux show-environment -t <session> AGMUX_CLIENT` prints, e.g. "AGMUX_CLIENT=/dev/outer" or "-AGMUX_CLIENT"
+            (self.fake / "tmux.env").write_text(session_env + "\n")
 
     def show_calls(self):
         p = self.fake / "show.calls"
@@ -301,10 +358,15 @@ def find_cards(snap, height=5):
 
 # ---------------------------------------------------------------- terminal under test
 class Term:
-    def __init__(self, env, args="board", w=200, h=50, binary=None):
+    def __init__(self, env, args="board", w=200, h=50, binary=None, extra_env="", real_tmux=False):
         self.env, self.w, self.h = env, w, h
         self.name = "t" + uuid.uuid4().hex[:8]
-        cmd = f"{env.prefix} {shlex.quote(binary or BIN)} {args}"
+        prefix = env.prefix
+        if real_tmux:  # agmux reaches the private server like a pane inside it would: through $TMUX
+            sock = tm("display-message", "-p", "#{socket_path},#{pid},0").stdout.strip()
+            assert sock.count(",") == 2, f"no running private tmux server yet: {sock!r}"
+            prefix, extra_env = env.prefix_real, f"TMUX={sock} {extra_env}"
+        cmd = f"{prefix} {extra_env} {shlex.quote(binary or BIN)} {args}"
         r = tm("start-server", ";", "set", "-g", "remain-on-exit", "on", ";", "new-session", "-d", "-s", self.name,
                "-x", w, "-y", h, cmd)
         if r.returncode:
@@ -332,6 +394,10 @@ class Term:
         """Inject an SGR mouse click at 0-based cell (col,row) straight into the pane's pty."""
         x, y = col + 1, row + 1
         self.lit((f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m") * n)
+
+    def wheel(self, col, row, up=True, n=1):
+        x, y = col + 1, row + 1
+        self.lit((f"\x1b[<{64 if up else 65};{x};{y}M") * n)
 
     def resize(self, w, h):
         tm("resize-window", "-t", self.name, "-x", w, "-y", h)
@@ -394,6 +460,7 @@ def build_fixture(env, with_hud=True):
         mk("e1", "echo-long", long_cwd, "echo", pane="%108", attentionState="read", lastPrompt="按 <leader>w 触发 Vec<T> 而 a < b"),
     ]
     env.write_show(S)
+    env.pane_ids = {s["tmuxPane"]: s["id"] for s in S if s["tmuxPane"]}
     ctx = lambda p: '{"context_window":{"used_percentage":%s,"remaining_percentage":%s},"rate_limits":{"used_percentage":99}}' % (p, 100 - p)
     if with_hud:
         env.hud("n-a1", '{"rate_limits":{"used_percentage":99},"context_window":{"used_percentage":41,"remaining_percentage":59}}')

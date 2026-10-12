@@ -79,8 +79,8 @@ class Ordering(unittest.TestCase):
         S = json.loads((env.fake / "show.json").read_text()); S[0]["summary"] = "zzz-late"; env.write_show(S)  # a1 now sorts after pj-fallback
         extra = {"zzz-late": "a1"}
         self.assertTrue(wait(lambda: [x for x in structure(t, extra)[0] if x[1] == 0][0][2][:2] == ["a2", "a1"], 8), "rename re-sorts the group: " + t.text())
-        t.keys("Enter"); wait(lambda: env.calls(), 3)
-        self.assertEqual(env.calls(), [["switch", "a2"]], "focus stayed on the session (a2), not on the row position")
+        t.keys("Enter"); wait(lambda: env.actions(), 3)
+        self.assertEqual(env.actions(), [["switch", "a2"]], "focus stayed on the session (a2), not on the row position")
 
 
 class Fold(unittest.TestCase):
@@ -90,7 +90,7 @@ class Fold(unittest.TestCase):
         self.assertTrue(ready(self.t), self.t.text())
 
     def calls(self):
-        time.sleep(0.8); return self.env.calls()
+        time.sleep(0.8); return self.env.actions()
 
     def test_footer_lists_f(self):
         self.assertIn("f 折叠", last_text_row(self.t.snap()))
@@ -112,7 +112,7 @@ class Fold(unittest.TestCase):
         self.assertEqual({c[1] for c in cards if c[2] == "e1"}, {c[1] for c in before[1] if c[2] == "e1"}, "later band keeps its column")
         self.t.keys("f")
         self.assertTrue(wait(lambda: structure(self.t) == before, 3), "f again restores the exact layout:\n" + self.t.text())
-        self.assertEqual(self.env.calls(), []); self.assertTrue(self.t.alive())
+        self.assertEqual(self.env.actions(), []); self.assertTrue(self.t.alive())
 
     def test_folded_title_is_focusable_and_inert(self):
         self.t.keys("l"); time.sleep(0.3); self.t.keys("f")  # fold G2 (focus on b1)
@@ -120,7 +120,7 @@ class Fold(unittest.TestCase):
         for k in ("H", "r", "d"):
             self.t.keys(k); time.sleep(0.4)
         self.t.keys("s"); time.sleep(0.3)
-        self.assertNotIn("发送到", foot(self.t, 4), "no `s` prompt on a folded title")
+        self.assertNotIn("按键直通", foot(self.t, 4), "`s` on a folded title opens nothing and focuses nothing")
         self.t.keys("x"); time.sleep(0.3)
         self.assertNotRegex(foot(self.t, 4), "杀掉|y 确认", "no kill confirm on a folded title")
         self.t.keys("y")
@@ -131,14 +131,14 @@ class Fold(unittest.TestCase):
         self.assertTrue(wait(lambda: structure(self.t)[0][1][0].startswith("▾"), 3), self.t.text())
         self.assertEqual(self.calls(), [], "enter on a title must not call ccmux switch")
         self.t.keys("Enter")
-        wait(lambda: self.env.calls(), 3)
-        self.assertEqual(self.env.calls(), [["switch", "b1"]], "after unfolding the focus is the group's first card")
+        wait(lambda: self.env.actions(), 3)
+        self.assertEqual(self.env.actions(), [["switch", "b1"]], "after unfolding the focus is the group's first card")
 
     def test_h_l_walk_through_folded_titles(self):
         self.t.keys("l"); time.sleep(0.3); self.t.keys("f")  # G2 folded, focused
         self.assertTrue(wait(lambda: structure(self.t)[0][1][0].startswith("▸"), 3), "G2 folded")
         self.t.keys("l"); time.sleep(0.3); self.t.keys("Enter")  # G3 first card
-        wait(lambda: self.env.calls(), 3); self.assertEqual(self.env.calls(), [["switch", "c1"]])
+        wait(lambda: self.env.actions(), 3); self.assertEqual(self.env.actions(), [["switch", "c1"]])
 
     def test_h_back_onto_a_folded_title_then_f_unfolds(self):
         self.t.keys("l"); time.sleep(0.3); self.t.keys("f")
