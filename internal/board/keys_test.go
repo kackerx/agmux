@@ -109,6 +109,8 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}
 	case "ctrl+c":
 		return tea.KeyMsg{Type: tea.KeyCtrlC}
 	case "tab":
@@ -220,7 +222,7 @@ func TestErrorsGoToMessageLine(t *testing.T) {
 func TestMouse(t *testing.T) {
 	r := &fakeRunner{}
 	m := newModel(r)
-	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, nil, m.w, nil)
+	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, nil, m.w, nil, nil)
 	var b1 rect
 	for _, rc := range rects {
 		if rc.id == "b1" {
@@ -350,7 +352,7 @@ func TestBackgroundHintOnce(t *testing.T) {
 func TestFold(t *testing.T) {
 	r := &fakeRunner{}
 	m := newModel(r)
-	_, before, _ := view(sessions, m.w, m.h, "", 0, now, "", false, nil, m.w, nil)
+	_, before, _ := view(sessions, m.w, m.h, "", 0, now, "", false, nil, m.w, nil, nil)
 
 	m, _ = press(t, m, "f") // fold /a (focus was on a1)
 	v := ansi.Strip(m.View())
@@ -360,7 +362,7 @@ func TestFold(t *testing.T) {
 	if m.focus != headerID("/a") {
 		t.Fatalf("focus %q, want the folded title", m.focus)
 	}
-	_, after, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, m.folded, m.w, nil)
+	_, after, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, m.folded, m.w, nil, nil)
 	for _, b := range before {
 		for _, a := range after {
 			if a.id == "b1" && b.id == "b1" && a != b {
@@ -1585,7 +1587,7 @@ func TestConfiguredColors(t *testing.T) {
 	useConfig(c)
 	defer useConfig(config.Default())
 	s := store.Session{Status: "working", AvatarID: "bot-01", AgentType: "claude", ContextPct: -1}
-	if cd := card(s, 48, 5, false, 0, now); !strings.HasPrefix(cd, "\x1b[38;2;18;52;86m╭") {
+	if cd := card(s, 48, 5, false, 0, now, hit{}); !strings.HasPrefix(cd, "\x1b[38;2;18;52;86m╭") {
 		t.Errorf("working border from the config: %q", cd[:30])
 	}
 	if !strings.Contains(contextBar(-1), "38;2;1;2;3m■") {
@@ -1747,27 +1749,27 @@ func TestEveryColorWired(t *testing.T) {
 		}
 	}
 	idle := store.Session{Name: "nm", Branch: "br", Model: "claude-opus-5-5", Status: "idle", AvatarID: "bot-01", AgentType: "claude", ContextPct: -1, TmuxPane: "%1"}
-	has("idle border", card(idle, 48, 5, false, 0, now), "idle")
-	has("focused border", card(idle, 48, 5, true, 0, now), "focus")
-	has("idle word", card(idle, 48, 5, false, 0, now), "muted")
-	has("name", card(idle, 48, 5, false, 0, now), "name", "nm")
-	has("branch", card(idle, 48, 5, false, 0, now), "branch", "\ue725 br")
-	has("model", card(idle, 48, 5, false, 0, now), "model")
+	has("idle border", card(idle, 48, 5, false, 0, now, hit{}), "idle")
+	has("focused border", card(idle, 48, 5, true, 0, now, hit{}), "focus")
+	has("idle word", card(idle, 48, 5, false, 0, now, hit{}), "muted")
+	has("name", card(idle, 48, 5, false, 0, now, hit{}), "name", "nm")
+	has("branch", card(idle, 48, 5, false, 0, now, hit{}), "branch", "\ue725 br")
+	has("model", card(idle, 48, 5, false, 0, now, hit{}), "model")
 	done := idle
 	done.Done = true
-	has("done border", card(done, 48, 5, false, 0, now), "done")
+	has("done border", card(done, 48, 5, false, 0, now, hit{}), "done")
 	working := idle
 	working.Status = "working"
-	has("working word", card(working, 48, 5, false, 0, now), "working", "⏵ working")
+	has("working word", card(working, 48, 5, false, 0, now, hit{}), "working", "⏵ working")
 	waiting := idle
 	waiting.Status = "waiting"
-	has("waiting word", card(waiting, 48, 5, false, 0, now), "attention", "⏳ waiting")
+	has("waiting word", card(waiting, 48, 5, false, 0, now, hit{}), "attention", "⏳ waiting")
 	has("bar low", contextBar(10), "bar_low")
 	has("bar mid", contextBar(40), "bar_mid")
 	has("bar high", contextBar(70), "bar_high")
 	has("bar empty", contextBar(10), "bar_empty")
 	has("disabled footer keys", footer(true, 300), "disabled")
-	has("group title", header(group{key: "/x", sessions: []store.Session{idle}}, 40, false, false), "dir")
+	has("group title", header(group{key: "/x", sessions: []store.Session{idle}}, 40, false, false, nil), "dir")
 	has("preview box", strings.Join(previewLines(idle, true, previewMsg{}, 60, 10, 0, false), "\n"), "idle")
 }
 
@@ -1785,5 +1787,129 @@ func TestModalKeysShareBoardKeys(t *testing.T) {
 	}
 	if m, _ = press(t, m, "tab"); m.pvFocus {
 		t.Error("and in pass-through tab leaves it")
+	}
+}
+
+func typeKeys(t *testing.T, m Model, text string) Model {
+	t.Helper()
+	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)}) // one burst, as typed fast
+	return tm.(Model)
+}
+
+// /: the cards filter as the query is typed; keys go into the box (j, q are text); the top bar
+// shows the query and the count; enter keeps the filter, focus on the first card shown; esc drops it.
+func TestSearchFilter(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "j") // focus: two
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "thq")
+	m, _ = press(t, m, "backspace", "r")
+	v := ansi.Strip(m.View())
+	lines := strings.Split(v, "\n")
+	if m.query != "thr" || !strings.HasPrefix(lines[0], " / thr▏") || !strings.HasSuffix(lines[0], "1/3 ") {
+		t.Fatalf("query %q, top %q", m.query, lines[0])
+	}
+	if strings.Contains(v, "one") || strings.Contains(v, "two") || !strings.Contains(v, "three") || strings.Contains(v, "/a (") {
+		t.Errorf("only three and its group show:\n%s", v)
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "enter keep the filter · esc clear it") {
+		t.Errorf("footer %q", last)
+	}
+	m, quit := press(t, m, "enter")
+	if quit || m.searching || m.query != "thr" || m.focus != "b1" || len(r.calls) != 0 {
+		t.Fatalf("enter: searching %v query %q focus %s calls %q", m.searching, m.query, m.focus, r.calls)
+	}
+	if top := strings.Split(ansi.Strip(m.View()), "\n")[0]; strings.Contains(top, "▏") || !strings.Contains(top, "/ thr") {
+		t.Errorf("kept filter, box closed: %q", top)
+	}
+	m, _ = press(t, m, "/", "esc")
+	if m.query != "" || m.searching || m.focus != "b1" || !strings.Contains(ansi.Strip(m.View()), "one") {
+		t.Errorf("esc: query %q focus %s", m.query, m.focus)
+	}
+	m, _ = press(t, m, "h", "/") // focus one, from there
+	m = typeKeys(t, m, "zzz")
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "no match") || !strings.Contains(v, "0/3") {
+		t.Errorf("no match:\n%s", v)
+	}
+	m, quit = press(t, m, "ctrl+c")
+	if quit || m.query != "" || m.searching || m.focus != "a1" {
+		t.Errorf("ctrl+c in the box clears, focus back on one: quit %v focus %s", quit, m.focus)
+	}
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "ab")
+	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlH})
+	if m = tm.(Model); m.query != "a" {
+		t.Errorf("ctrl+h is backspace: %q", m.query)
+	}
+	if !strings.Contains(ansi.Strip(footer(false, 300)), "enter jump · / search · f fold") {
+		t.Error("footer: … enter jump · / search · f fold …")
+	}
+}
+
+// Where a card matched: rune offsets split into name, branch and the ~-path of its cwd.
+func TestSearchHits(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	src := staticSrc{{ID: "x", Name: "ab", Branch: "cd", CWD: home + "/ef", GroupKey: home + "/ef"}}
+	for q, want := range map[string]hit{"'ab": {name: []int{0, 1}}, "'cd": {branch: []int{0, 1}}, "'ef": {dir: []int{2, 3}}} {
+		m := New(src, &fakeRunner{})
+		m.query = q
+		if _, hits := m.shown(); !reflect.DeepEqual(hits["x"], want) {
+			t.Errorf("%q: %+v, want %+v", q, hits["x"], want)
+		}
+	}
+}
+
+// Highlights color whole grapheme clusters, so wide and combined characters keep their width.
+func TestHilite(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	got := hilite("éx你", []int{1, 3}, cName) // the combining accent, and 你
+	if want := fg(cFocus, "é") + fg(cName, "x") + fg(cFocus, "你"); got != want {
+		t.Errorf("%q\nwant %q", got, want)
+	}
+	if hilite("ab", nil, cName) != fg(cName, "ab") {
+		t.Error("no hits: plain")
+	}
+	g := group{key: "/proj/agmux", sessions: []store.Session{{ID: "x"}}}
+	if h := header(g, 40, false, false, dirHits(g, map[string]hit{"x": {dir: []int{6}}})); !strings.Contains(h, fg(cFocus, "a")) {
+		t.Errorf("the group title shows its cards' path hits: %q", h)
+	}
+}
+
+// A click lands on the card shown there under the filter, not the one there without it.
+func TestSearchMouse(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "/")
+	m = typeKeys(t, m, "tw")
+	m, _ = press(t, m, "enter") // two, alone in /a: where one sits unfiltered
+	tm, cmd := m.Update(tea.MouseMsg{X: 3, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m = tm.(Model)
+	run(&m, cmd)
+	if m.focus != "a2" {
+		t.Errorf("clicked %s", m.focus)
+	}
+}
+
+// esc puts the focus back on the card it was on, even after the filter hid it and the focus fell back.
+func TestSearchEscRestoresFocus(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "j", "p", "/") // two, preview open
+	m = typeKeys(t, m, "thr")
+	m.capturing = false
+	tm, _ := m.Update(frameMsg{}) // the frame resolves the focus: two is hidden, three it is
+	if m = tm.(Model); m.focus != "b1" {
+		t.Fatalf("focus %s", m.focus)
+	}
+	if m, _ = press(t, m, "esc"); m.focus != "a2" {
+		t.Errorf("esc: focus %s, want two", m.focus)
+	}
+}
+
+func TestBranchHilite(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	if l := line2(store.Session{Branch: "cd"}, 36, []int{1}); !strings.Contains(l, fg(cFocus, "d")) || strings.Contains(l, fg(cFocus, "c")) {
+		t.Errorf("%q", l)
 	}
 }

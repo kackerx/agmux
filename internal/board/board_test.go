@@ -51,7 +51,7 @@ func TestView(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	ss := fixture(t)
 	for _, w := range []int{60, 114, 120, 200} {
-		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "", false, nil, w, nil)
+		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "", false, nil, w, nil, nil)
 		lines := strings.Split(out, "\n")
 		if len(lines) != 200 {
 			t.Errorf("w=%d: %d lines, want the full height", w, len(lines))
@@ -79,7 +79,7 @@ func TestView(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", "/Users/dev") // the fixture's home, so headers shorten to ~ on any machine
-	out, _, _ := view(ss, 200, 50, "", 0, now, "", false, nil, 200, nil)
+	out, _, _ := view(ss, 200, 50, "", 0, now, "", false, nil, 200, nil, nil)
 	plain := ansi.Strip(out)
 	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "⏵ working", "● done", "q quit"} {
 		if !strings.Contains(plain, want) {
@@ -92,7 +92,7 @@ func TestScrollKeepsFocusVisible(t *testing.T) {
 	ss := fixture(t)
 	last := groups(ss)
 	id := last[len(last)-1].sessions[0].ID
-	out, rects, off := view(ss, 60, 20, id, 0, now, "", false, nil, 60, nil)
+	out, rects, off := view(ss, 60, 20, id, 0, now, "", false, nil, 60, nil, nil)
 	if off == 0 || len(strings.Split(out, "\n")) != 20 {
 		t.Fatalf("expected a scrolled 20-line screen, off=%d", off)
 	}
@@ -141,7 +141,7 @@ func TestCardStatus(t *testing.T) {
 			t.Errorf("%s: line 3 %q, want %q (%q in %s)", c.name, ansi.Strip(l3), c.head+c.tail, c.head, c.color)
 		}
 		for f := range 2 { // moods differ on different frames: Alert on even, Scan on odd
-			cd := card(s, 44, 5, false, f, now)
+			cd := card(s, 44, 5, false, f, now, hit{})
 			for i, l := range strings.Split(avatar.Render(sp, "claude", c.mood, f), "\n") {
 				if !strings.Contains(cd, l) {
 					t.Errorf("%s frame %d: eyes line %d are not mood %d", c.name, f, i, c.mood)
@@ -152,7 +152,7 @@ func TestCardStatus(t *testing.T) {
 		for corner, focused := range map[string]bool{"╭": false, "┏": true} {
 			color := map[bool]lipgloss.Color{false: c.border, true: cFocus}[focused]
 			want, _, _ := strings.Cut(fg(color, corner), corner)
-			if cd := card(s, 44, 5, focused, 0, now); !strings.HasPrefix(cd, want+corner) {
+			if cd := card(s, 44, 5, focused, 0, now, hit{}); !strings.HasPrefix(cd, want+corner) {
 				t.Errorf("%s focused=%v: border should start %q in %s", c.name, focused, corner, color)
 			}
 		}
@@ -170,24 +170,24 @@ func TestCardLines(t *testing.T) {
 		w       int
 		nameCut bool
 	}{{36, false}, {27, false}, {20, true}} {
-		l := ansi.Strip(line1(s, c.w, now))
+		l := ansi.Strip(line1(s, c.w, now, nil))
 		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, "qa-") || !strings.HasSuffix(l, " 3h") || // no icon before the name
 			strings.Contains(l, s.Name) == c.nameCut || strings.Contains(l, "…") != c.nameCut {
 			t.Errorf("w=%d line 1 %q: name cut=%v, time last", c.w, l, c.nameCut)
 		}
 	}
 	// line 2: the branch with its icon, in the branch color; cut when it doesn't fit
-	if l := line2(s, 36); l != fg(cBranch, "\ue725 "+s.Branch) {
+	if l := line2(s, 36, nil); l != fg(cBranch, "\ue725 "+s.Branch) {
 		t.Errorf("line 2: %q", ansi.Strip(l))
 	}
-	if l := ansi.Strip(line2(s, 20)); ansi.StringWidth(l) != 20 || !strings.HasSuffix(l, "…") {
+	if l := ansi.Strip(line2(s, 20, nil)); ansi.StringWidth(l) != 20 || !strings.HasSuffix(l, "…") {
 		t.Errorf("line 2 cut: %q", l)
 	}
-	if line2(store.Session{}, 36) != "" {
+	if line2(store.Session{}, 36, nil) != "" {
 		t.Error("no branch, empty line")
 	}
 	// the acceptance card: 48 columns hold the 24-character name and the 32-character branch whole
-	lines := strings.Split(ansi.Strip(card(s, 48, 5, false, 0, now)), "\n")
+	lines := strings.Split(ansi.Strip(card(s, 48, 5, false, 0, now, hit{})), "\n")
 	if !strings.Contains(lines[1], s.Name+" ") || !strings.HasSuffix(lines[1], " 3h │") || !strings.Contains(lines[2], "\ue725 "+s.Branch) ||
 		!strings.HasPrefix(lines[3], "│ ■") || !strings.HasSuffix(lines[3], "Opus 5.5·high │") {
 		t.Errorf("48-column card:\n%s", strings.Join(lines, "\n"))
@@ -201,7 +201,7 @@ func TestCardLines(t *testing.T) {
 
 func TestMultilineMessage(t *testing.T) {
 	ss := fixture(t)
-	out, _, _ := view(ss, 120, 30, "", 0, now, "ccmux kill x: boom\n  at stack\n  at more", false, nil, 120, nil)
+	out, _, _ := view(ss, 120, 30, "", 0, now, "ccmux kill x: boom\n  at stack\n  at more", false, nil, 120, nil, nil)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 30 || !strings.HasPrefix(ansi.Strip(lines[0]), " agmux") || !strings.Contains(out, "boom") || strings.Contains(out, "at stack") {
 		t.Errorf("multi-line message: %d lines (want 30), top bar %q", len(lines), ansi.Strip(lines[0]))
@@ -277,9 +277,9 @@ func TestOrderIgnoresCcmuxOrder(t *testing.T) {
 		reversed[len(ss)-1-i] = s
 	}
 	rotated := append(append([]store.Session{}, ss[5:]...), ss[:5]...)
-	want, _, _ := view(ss, 200, 60, "", 0, now, "", false, nil, 200, nil)
+	want, _, _ := view(ss, 200, 60, "", 0, now, "", false, nil, 200, nil, nil)
 	for name, order := range map[string][]store.Session{"reversed": reversed, "rotated": rotated} {
-		if got, _, _ := view(order, 200, 60, "", 0, now, "", false, nil, 200, nil); got != want {
+		if got, _, _ := view(order, 200, 60, "", 0, now, "", false, nil, 200, nil, nil); got != want {
 			t.Errorf("%s ccmux order renders differently", name)
 		}
 	}
@@ -360,7 +360,7 @@ func TestLine3Yields(t *testing.T) {
 func TestFoldedTitleFocusColor(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	g := group{key: "/a", sessions: make([]store.Session, 2)}
-	focused, plain := header(g, 40, true, true), header(g, 40, true, false)
+	focused, plain := header(g, 40, true, true, nil), header(g, 40, true, false, nil)
 	if !strings.HasPrefix(focused, "\x1b[38;2;255;142;190m▸") || strings.HasPrefix(plain, "\x1b[38;2;255;142;190m") {
 		t.Errorf("a focused folded title is #ff8ebe, an unfocused one is not: %q / %q", focused, plain)
 	}

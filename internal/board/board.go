@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/execx"
+	"github.com/kackerx/agmux/internal/fuzzy"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -80,6 +82,10 @@ type Model struct {
 	target store.Session   // what the open x prompt / avatar list acts on, fixed when it opened
 	pick   int             // the avatar list's cursor, an index into avatar.Sprites
 	folded map[string]bool // group keys folded with f; this run only
+
+	query      string // the / filter; "" = every card
+	searching  bool   // the filter's input box has the keys
+	searchFrom string // the focus when / was pressed: esc puts it back
 
 	preview   bool       // p: show the focused pane on the right
 	pv        previewMsg // the latest capture
@@ -201,10 +207,44 @@ func (m Model) items(gs []group) [][]string {
 	return out
 }
 
-// current resolves focus against the live sessions, falling back to the first item.
+// shown is what the / filter lets through (every session without one) and where each card matched.
+func (m Model) shown() ([]store.Session, map[string]hit) {
+	ss := m.src.Sessions()
+	if m.query == "" {
+		return ss, nil
+	}
+	items := make([]string, len(ss))
+	for i, s := range ss {
+		items[i] = s.Name + " " + s.Branch + " " + tildePath(s.CWD)
+	}
+	var out []store.Session
+	hits := map[string]hit{}
+	for _, mt := range fuzzy.Filter(m.query, items) {
+		s := ss[mt.Index]
+		out = append(out, s)
+		// split the offsets into the three fields (each joined by one space)
+		n, b := len([]rune(s.Name)), len([]rune(s.Branch))
+		var h hit
+		for _, p := range mt.Pos {
+			switch {
+			case p < n:
+				h.name = append(h.name, p)
+			case p > n && p <= n+b:
+				h.branch = append(h.branch, p-n-1)
+			case p > n+b+1:
+				h.dir = append(h.dir, p-n-b-2)
+			}
+		}
+		hits[s.ID] = h
+	}
+	return out, hits
+}
+
+// current resolves focus against the shown sessions, falling back to the first item.
 // s is the focused session; ok is false when there is none (nothing to show, or a folded title).
 func (m *Model) current() (gs []group, gi int, s store.Session, ok bool) {
-	gs = groups(m.src.Sessions())
+	ss, _ := m.shown()
+	gs = groups(ss)
 	items := m.items(gs)
 	gi, ci := -1, -1
 	for g := range items {
@@ -275,6 +315,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd := m.forward(k)
 		return m, cmd
 	}
+	if m.searching {
+		return m.searchKey(k), nil
+	}
 	if k.Type == tea.KeyCtrlC {
 		return m, tea.Quit
 	}
@@ -319,6 +362,25 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.do(m.keymap[k.String()])
 }
 
+// searchKey edits the / filter, which applies as it is typed. enter keeps it and puts the focus
+// on the first card it shows; esc / ctrl+c drop it, the focus back where it was.
+func (m Model) searchKey(k tea.KeyMsg) Model {
+	switch k.Type {
+	case tea.KeyEnter:
+		m.searching, m.focus = false, ""
+		m.current() // the first card shown
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.searching, m.query, m.focus = false, "", m.searchFrom
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		if r := []rune(m.query); len(r) > 0 {
+			m.query = string(r[:len(r)-1])
+		}
+	case tea.KeyRunes, tea.KeySpace:
+		m.query += strings.ReplaceAll(string(k.Runes), "\n", " ")
+	}
+	return m
+}
+
 // do runs a configured action on the focused card.
 func (m Model) do(action string) (tea.Model, tea.Cmd) {
 	if action == "quit" {
@@ -334,13 +396,16 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// ponytail: lays the board out again per key press; fine for tens of sessions.
-		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.folded)
+		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.folded, nil)
 		if id := nearest(rects, m.focus, d); id != "" {
 			m.focus, m.msg = id, ""
 		}
 		return m, nil
 	}
 	switch action {
+	case "search": // with a filter on, / edits it
+		m.searching, m.searchFrom, m.msg = true, m.focus, ""
+		return m, nil
 	case "focus_preview":
 		if m.previewOn() && ok && s.TmuxPane != "" {
 			m.lock(s)
@@ -642,7 +707,8 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	m.current()
 	// ponytail: re-lays out the board per click to find the card; fine for tens of sessions.
-	_, rects, off := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), "", false, m.folded, m.cardsW(), nil)
+	ss, _ := m.shown()
+	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, m.folded, m.cardsW(), nil, nil)
 	y := e.Y - 1 + off // row 0 is the top bar
 	for _, r := range rects {
 		if e.X >= r.x && e.X < r.x+r.w && y >= r.y && y < r.y+r.h {
@@ -686,8 +752,23 @@ func (m Model) View() string {
 	if m.previewOn() {
 		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.passThrough())
 	}
-	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right)
+	ss, hits := m.shown()
+	out, _, _ := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right, hits)
+	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
+		cursor := ""
+		if m.searching {
+			cursor = "▏"
+		}
+		lines := strings.SplitN(out, "\n", 3)
+		lines[0] = spread(fg(cFocus, " / ")+m.query+cursor, fg(cMuted, fmt.Sprintf("%d/%d ", len(ss), len(m.src.Sessions()))), m.w)
+		if len(ss) == 0 && len(lines) > 2 {
+			lines[1] = fg(cMuted, " no match")
+		}
+		out = strings.Join(lines, "\n")
+	}
 	switch { // the footer is always the last line
+	case m.searching:
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " enter keep the filter · esc clear it")
 	case m.mode == pickAvatar:
 		k := m.cfg.First
 		out = overlay(out, avatarList(m.target, m.pick), m.w)

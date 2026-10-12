@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/config"
@@ -108,7 +110,7 @@ func headerID(key string) string { return "\x00" + key }
 
 // layout renders the body and reports the position of every focusable thing: cards, and the
 // titles of folded groups (for focus scrolling and mouse hits).
-func layout(gs []group, width int, focus string, frame int, now time.Time, folded map[string]bool) ([]string, []rect) {
+func layout(gs []group, width int, focus string, frame int, now time.Time, folded map[string]bool, hits map[string]hit) ([]string, []rect) {
 	n, colW := columns(width)
 	var lines []string
 	var rects []rect
@@ -124,14 +126,14 @@ func layout(gs []group, width int, focus string, frame int, now time.Time, folde
 			x := i * (colW + colGap)
 			if folded[g.key] {
 				rects = append(rects, rect{headerID(g.key), x, top, colW, 1, start / n})
-				cols[i] = append(cols[i], header(g, colW, true, focus == headerID(g.key)))
+				cols[i] = append(cols[i], header(g, colW, true, focus == headerID(g.key), dirHits(g, hits)))
 				height = max(height, 1)
 				continue
 			}
-			cols[i] = append(cols[i], header(g, colW, false, false))
+			cols[i] = append(cols[i], header(g, colW, false, false, dirHits(g, hits)))
 			for _, s := range g.sessions {
 				rects = append(rects, rect{s.ID, x, top + len(cols[i]), colW, cardH, start / n})
-				cols[i] = append(cols[i], strings.Split(card(s, colW, cardH, s.ID == focus, frame, now), "\n")...)
+				cols[i] = append(cols[i], strings.Split(card(s, colW, cardH, s.ID == focus, frame, now, hits[s.ID]), "\n")...)
 			}
 			height = max(height, len(cols[i]))
 		}
@@ -155,8 +157,39 @@ func layout(gs []group, width int, focus string, frame int, now time.Time, folde
 
 func pad(s string, w int) string { return s + strings.Repeat(" ", max(w-ansi.StringWidth(s), 0)) }
 
+// hit is where the / filter matched a card: rune offsets into its name, branch and tildePath(cwd).
+type hit struct{ name, branch, dir []int }
+
+// dirHits: the group title shows every match in its path, from any of its cards.
+func dirHits(g group, hits map[string]hit) []int {
+	var pos []int
+	for _, s := range g.sessions {
+		pos = append(pos, hits[s.ID].dir...)
+	}
+	return pos
+}
+
+// hilite draws text in c, the grapheme clusters holding a rune at pos (rune offsets) in the focus color.
+func hilite(text string, pos []int, c lipgloss.Color) string {
+	if len(pos) == 0 {
+		return fg(c, text)
+	}
+	var b strings.Builder
+	i := 0
+	g := uniseg.NewGraphemes(text)
+	for g.Next() {
+		n, col := len(g.Runes()), c
+		if slices.ContainsFunc(pos, func(p int) bool { return p >= i && p < i+n }) {
+			col = cFocus
+		}
+		b.WriteString(fg(col, g.Str()))
+		i += n
+	}
+	return b.String()
+}
+
 // header is a group's title: ▾ when open, ▸ when folded (then it can hold the focus).
-func header(g group, w int, folded, focused bool) string {
+func header(g group, w int, folded, focused bool, hl []int) string {
 	count := fmt.Sprintf(" (%d)", len(g.sessions))
 	mark, c := "▾ ", cDir
 	if folded {
@@ -165,7 +198,7 @@ func header(g group, w int, folded, focused bool) string {
 	if focused {
 		c = cFocus
 	}
-	return fg(c, mark+midTrunc(tildePath(g.key), w-2-len(count))) + fg(cMuted, count)
+	return fg(c, mark) + midTrunc(hilite(tildePath(g.key), hl, c), w-2-len(count)) + fg(cMuted, count)
 }
 
 func tildePath(p string) string {
@@ -188,10 +221,9 @@ func midTrunc(s string, w int) string {
 	if w < 3 {
 		return ansi.Truncate(s, w, "")
 	}
-	r := []rune(s)
 	tail := (w - 1) / 2
 	head := w - 1 - tail
-	return ansi.Truncate(string(r[:min(head, len(r))]), head, "") + "…" + ansi.TruncateLeft(s, ansi.StringWidth(s)-tail, "")
+	return ansi.Truncate(s, head, "") + "…" + ansi.TruncateLeft(s, ansi.StringWidth(s)-tail, "")
 }
 
 // card renders a session as w×h cells. h is the full height including the border;
@@ -202,7 +234,7 @@ func midTrunc(s string, w int) string {
 //	│ ▀▄▄▄▄▀   feature/qa-acceptance-pap-be-dev   │   branch
 //	│ ■■■□□□  ⏸ idle · Bash  ⚇ 2   Opus 5.5·high │   context bar · status + detail · counts · model·effort
 //	╰──────────────────────────────────────────────╯
-func card(s store.Session, w, h int, focused bool, frame int, now time.Time) string {
+func card(s store.Session, w, h int, focused bool, frame int, now time.Time, hl hit) string {
 	alert := s.Attention != "" || s.Status == "waiting"
 	border, mood := cDim, avatar.Dim
 	switch {
@@ -225,8 +257,8 @@ func card(s store.Session, w, h int, focused bool, frame int, now time.Time) str
 	x := w - 4                 // inside the border and its one-cell margins
 	tw := x - avatar.Width - 2 // right of the avatar
 	body := []string{
-		face[0] + "  " + line1(s, tw, now),
-		face[1] + "  " + line2(s, tw),
+		face[0] + "  " + line1(s, tw, now, hl.name),
+		face[1] + "  " + line2(s, tw, hl.branch),
 		line3(s, x),
 	}
 	b := fg(border, bs.TopLeft+strings.Repeat(bs.Top, w-2)+bs.TopRight)
@@ -248,8 +280,8 @@ func spread(left, right string, w int) string {
 }
 
 // line1: the name, the time at the right edge; the name is cut only when it doesn't fit.
-func line1(s store.Session, w int, now time.Time) string {
-	return spread(fg(cName, s.Name), fg(cMuted, relTime(s.LastActivity, now)), w)
+func line1(s store.Session, w int, now time.Time, hl []int) string {
+	return spread(hilite(s.Name, hl, cName), fg(cMuted, relTime(s.LastActivity, now)), w)
 }
 
 // status is the colored status word and its plain detail (" · Bash", " · agents" or "").
@@ -273,11 +305,15 @@ func status(s store.Session) (word, detail string) {
 }
 
 // line2: the branch, cut when it doesn't fit.
-func line2(s store.Session, w int) string {
+func line2(s store.Session, w int, hl []int) string {
 	if s.Branch == "" {
 		return ""
 	}
-	return fg(cBranch, ansi.Truncate("\ue725 "+s.Branch, w, "…")) // nf-dev-git_branch
+	shifted := make([]int, len(hl))
+	for i, p := range hl {
+		shifted[i] = p + 2 // past the icon and its space
+	}
+	return ansi.Truncate(hilite("\ue725 "+s.Branch, shifted, cBranch), w, fg(cBranch, "…")) // nf-dev-git_branch
 }
 
 // line3: context bar, the status word and its detail, subagent / shell counts, model·effort at the
@@ -397,7 +433,7 @@ func footerFor(c *config.Config) []footerKey {
 	k := c.First
 	return []footerKey{
 		{k("down") + "/" + k("up") + " " + k("left") + "/" + k("right") + " move", false},
-		{k("jump") + " jump", true}, {k("fold") + " fold", false}, {k("preview") + " preview", false},
+		{k("jump") + " jump", true}, {k("search") + " search", false}, {k("fold") + " fold", false}, {k("preview") + " preview", false},
 		{k("focus_preview") + " focus preview", true}, {k("reply") + " reply", true}, {k("handoff") + " handoff", true},
 		{k("restart") + " restart", false}, {k("kill") + " kill", false}, {k("review") + " review", false},
 		{k("avatar") + " avatar", false}, {k("quit") + " quit", false},
@@ -458,9 +494,9 @@ func footer(noPane bool, w int) string {
 
 // view assembles top bar, body (scrolled so the focused card is visible), message line and footer.
 // The cards get the first cw columns; right (the preview, one line per body row) fills the rest.
-func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool, cw int, right []string) (string, []rect, int) {
+func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool, cw int, right []string, hits map[string]hit) (string, []rect, int) {
 	top := " " + lipgloss.NewStyle().Bold(true).Render("agmux") + fg(cMuted, fmt.Sprintf(" · %d sessions", len(ss)))
-	body, rects := layout(groups(ss), cw, focus, frame, now, folded)
+	body, rects := layout(groups(ss), cw, focus, frame, now, folded, hits)
 	bodyH := max(h-3, 1) // top bar, message line, footer
 	off := 0
 	for _, r := range rects {
