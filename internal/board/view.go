@@ -235,33 +235,50 @@ func agentIcon(agentType string) string {
 	return "\uec20" // cod-robot
 }
 
-// line1: icon + name on the left (cut first), status and time always on the right.
+// minName is how much of the name line 1 keeps before anything but the status word and time.
+const minName = 12
+
+// line1: icon + name, then the status word, its detail (pending tool / agents) and the time.
+// The status word and time always show; the detail is cut first (MCP tool names run to 40+
+// characters), then the name, which keeps at least minName cells.
 func line1(s store.Session, w int, now time.Time) string {
-	right := status(s)
-	if ago := relTime(s.LastActivity, now); ago != "" {
-		right += "  " + fg(cMuted, ago)
+	word, detail := status(s)
+	ago := relTime(s.LastActivity, now)
+	if ago != "" {
+		ago = "  " + ago
 	}
-	return spread(fg(avatar.BandColor(s.AgentType), agentIcon(s.AgentType))+" "+fg(cName, s.Name), right, w)
+	icon := agentIcon(s.AgentType) + " "
+	avail := w - ansi.StringWidth(icon) - ansi.StringWidth(word) - ansi.StringWidth(ago) - 1
+	name := min(ansi.StringWidth(s.Name), max(avail-ansi.StringWidth(detail), minName), max(avail, 0))
+	if room := avail - name; room < ansi.StringWidth(detail) {
+		full := detail
+		detail = ""
+		if room >= 4 { // " · x…" at least
+			detail = ansi.Truncate(full, room, "…")
+		}
+	}
+	left := fg(avatar.BandColor(s.AgentType), icon[:len(icon)-1]) + " " + fg(cName, ansi.Truncate(s.Name, name, "…"))
+	return spread(left, word+fg(cMuted, detail+ago), w)
 }
 
-func status(s store.Session) string {
+// status is the colored status word and its plain detail (" · Bash", " · agents" or "").
+func status(s store.Session) (word, detail string) {
 	switch {
 	case s.Status == "working":
-		st := fg(cWorking, "⏵ working")
 		if s.PendingTool != "" {
-			st += fg(cMuted, " · "+s.PendingTool)
+			detail = " · " + s.PendingTool
 		} else if s.AgentsWorking {
-			st += fg(cMuted, " · agents")
+			detail = " · agents"
 		}
-		return st
+		return fg(cWorking, "⏵ working"), detail
 	case s.Status == "waiting":
-		return fg(cRed, "⏳ waiting")
+		return fg(cRed, "⏳ waiting"), ""
 	case s.Done:
-		return fg(cDone, "● done")
+		return fg(cDone, "● done"), ""
 	case s.Status == "idle":
-		return fg(cMuted, "⏸ idle")
+		return fg(cMuted, "⏸ idle"), ""
 	}
-	return fg(cMuted, "● "+s.Status)
+	return fg(cMuted, "● "+s.Status), ""
 }
 
 // line2: branch on the left (cut first), model·effort on the right.

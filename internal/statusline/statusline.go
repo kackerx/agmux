@@ -164,6 +164,14 @@ func replaceFile(path string, orig []byte, exists bool, out []byte) error {
 	if fi, err := os.Stat(path); err == nil {
 		perm = fi.Mode().Perm()
 	}
+	// rename only needs the directory writable; a read-only settings.json must still mean "no"
+	if exists {
+		f, err := os.OpenFile(path, os.O_WRONLY, 0)
+		if err != nil {
+			return err
+		}
+		f.Close()
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

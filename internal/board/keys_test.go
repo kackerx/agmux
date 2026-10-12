@@ -127,6 +127,7 @@ func TestKeys(t *testing.T) {
 		{"arrow keys move", []string{"down", "r", "right", "r"}, [][]string{{"restart", "a2"}, {"restart", "b1"}}, false},
 		{"text starting with - stays text", []string{"s", "--help", "enter"}, [][]string{{"send", "a1", "--", "--help"}}, false},
 		{"burst of keys = one by one", []string{"lr"}, [][]string{{"restart", "b1"}}, false},
+		{"unfolding focuses the group's first card", []string{"l", "f", "f", "r"}, [][]string{{"restart", "b1"}}, false},
 		{"burst keeps typed order", []string{"Hr"}, [][]string{{"send", "a1", "--", "/handoff"}, {"restart", "a1"}}, false},
 		{"ctrl+c quits from the prompt", []string{"s", "hi", "ctrl+c"}, nil, true},
 		{"pasted newlines become spaces", []string{"s", "a\nb", "enter"}, [][]string{{"send", "a1", "--", "a b"}}, false},

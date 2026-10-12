@@ -81,7 +81,7 @@ func TestView(t *testing.T) {
 	t.Setenv("HOME", "/Users/dev") // the fixture's home, so headers shorten to ~ on any machine
 	out, _, _ := view(ss, 200, 50, "", 0, now, "", false, nil)
 	plain := ansi.Strip(out)
-	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "⏵ working · agents", "● done", "q 退出"} {
+	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "⏵ working", "● done", "q 退出"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("view missing %q", want)
 		}
@@ -250,8 +250,12 @@ func TestContextBar(t *testing.T) {
 		if plain := ansi.Strip(bar); plain != strings.Repeat("■", 6)+c.text { // no number, no "--"
 			t.Errorf("%d: %q", c.pct, plain)
 		}
-		if c.filled > 0 && !strings.Contains(bar, c.color+"m"+strings.Repeat("■", c.filled)+"\x1b") {
+		if c.filled > 0 && !strings.Contains(bar, "38;2;"+c.color+"m"+strings.Repeat("■", c.filled)+"\x1b") {
 			t.Errorf("%d: want %d cells in %s: %q", c.pct, c.filled, c.color, bar)
+		}
+		// with no number, the colors are all the bar says: the rest must be the dark #585b70
+		if dark := 6 - c.filled; !strings.Contains(bar, "38;2;88;91;112m"+strings.Repeat("■", dark)+"\x1b") || strings.Count(bar, "■") != 6 {
+			t.Errorf("%d: want %d dark cells: %q", c.pct, dark, bar)
 		}
 	}
 }
@@ -314,5 +318,34 @@ func TestOrderIgnoresCcmuxOrder(t *testing.T) {
 	same := []store.Session{{ID: "b", Name: "x", GroupKey: "/g"}, {ID: "a", Name: "x", GroupKey: "/g"}}
 	if g := groups(same)[0].sessions; g[0].ID != "a" {
 		t.Error("same name: ordered by id")
+	}
+}
+
+// A long pending tool (MCP names run past 40 characters) gives way before the name and time.
+func TestLine1LongTool(t *testing.T) {
+	s := store.Session{Name: "qa-acceptance-pap-be-dev", AgentType: "claude", Status: "working",
+		PendingTool: "mcp__claude_ai_Claude_Docs__batch", LastActivity: now.Add(-2 * time.Minute)}
+	for _, w := range []int{28, 30, 36, 60} { // 28 = text width of the narrowest (40-column) card
+		l := ansi.Strip(line1(s, w, now))
+		name := strings.TrimPrefix(strings.Fields(l)[1], "")
+		if ansi.StringWidth(l) != w || !strings.HasSuffix(l, "  2m") || !strings.Contains(l, "⏵ working") ||
+			ansi.StringWidth(name) < min(minName, len(s.Name)) {
+			t.Errorf("w=%d %q: want the time last, the status word, and ≥%d cells of name (got %q)", w, l, minName, name)
+		}
+	}
+	if l := ansi.Strip(line1(s, 36, now)); !strings.Contains(l, "qa-acceptan") || !strings.Contains(l, " · mcp") {
+		t.Errorf("w=36: name keeps 12, the tool gets the rest: %q", l)
+	}
+	if l := ansi.Strip(line1(s, 80, now)); !strings.Contains(l, s.Name) || !strings.Contains(l, s.PendingTool) {
+		t.Errorf("wide enough for everything: %q", l)
+	}
+}
+
+func TestFoldedTitleFocusColor(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	g := group{key: "/a", sessions: make([]store.Session, 2)}
+	focused, plain := header(g, 40, true, true), header(g, 40, true, false)
+	if !strings.HasPrefix(focused, "\x1b[38;2;255;142;190m▸") || strings.HasPrefix(plain, "\x1b[38;2;255;142;190m") {
+		t.Errorf("a focused folded title is #ff8ebe, an unfocused one is not: %q / %q", focused, plain)
 	}
 }

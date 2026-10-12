@@ -100,3 +100,11 @@ func TestBindings(t *testing.T) {
 		t.Error("corrupt file should error")
 	}
 }
+
+func TestBandColors(t *testing.T) {
+	for at, want := range map[string]lipgloss.Color{"claude": "#ffb86c", "codex": "#50fa7b", "gemini": "#6272a4", "": "#6272a4"} {
+		if got := BandColor(at); got != want {
+			t.Errorf("BandColor(%q) = %s, want %s", at, got, want)
+		}
+	}
+}

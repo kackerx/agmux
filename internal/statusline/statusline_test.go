@@ -206,3 +206,26 @@ func TestSetupReadOnlyDirLeavesNothing(t *testing.T) {
 		t.Errorf("stray files left: %v", entries)
 	}
 }
+
+// A read-only settings.json in a writable directory: rename would succeed, but the user said no.
+func TestSetupReadOnlyFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".claude")
+	path := filepath.Join(dir, "settings.json")
+	os.MkdirAll(dir, 0o755)
+	orig := []byte(`{"theme":"dark"}`)
+	os.WriteFile(path, orig, 0o444)
+	if code, _, e := setup(t, "--write"); code != 1 || e == "" {
+		t.Errorf("want exit 1 with an error, got %d %q", code, e)
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(orig) {
+		t.Error("file changed")
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o444 {
+		t.Errorf("mode changed to %v", fi.Mode().Perm())
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("no .bak or tmp file may be left: %v", entries)
+	}
+}
