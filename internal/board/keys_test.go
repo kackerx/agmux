@@ -2875,9 +2875,22 @@ func TestFlashOnlyPlainText(t *testing.T) {
 // Each s starts clean; esc leaves nothing behind.
 func TestFlashStartsClean(t *testing.T) {
 	m := typed(t, psized(flashSrc, 232, 50), "sal")
+	m.flash.freed = map[string]bool{"a": true}
 	m, _ = press(t, m, "esc", "s")
-	if m.flash.pat != "" || len(m.flash.ms) != 0 {
-		t.Errorf("pattern %q hits %v", m.flash.pat, labelsOf(m))
+	if m.flash.pat != "" || len(m.flash.ms) != 0 || len(m.flash.freed) != 0 {
+		t.Errorf("pattern %q hits %v freed %v", m.flash.pat, labelsOf(m), m.flash.freed)
+	}
+}
+
+// A letter freed by a hit that went is not given to another in the reads that follow.
+func TestFlashFreedLetterNotReused(t *testing.T) {
+	m := typed(t, psized(namesSrc("xq"), 232, 50), "sx")
+	if got := labelsOf(m); got != "n00=a" {
+		t.Fatalf("labels %q", got)
+	}
+	m.flash.freed = map[string]bool{"a": true, "s": true}
+	if got := (&m).flashRead(nil); len(got) != 1 || got[0].label != "d" {
+		t.Errorf("a and s are freed: %+v", got)
 	}
 }
 
@@ -3382,5 +3395,60 @@ func TestPreviewCursorKeepsColorAfter(t *testing.T) {
 	after := box[2][strings.Index(box[2], "\x1b[7m"):]
 	if j := strings.Index(after, "text"); j < 0 || !strings.Contains(after[:j], "31") {
 		t.Errorf("text after the cursor lost its red: %q", after)
+	}
+}
+
+// A card goes in a poll and a frame tick reads the board again before the user presses its label:
+// the label is still the one of a hit that was drawn, so it is ignored (not typed), and no new hit
+// is given the letter it freed. Typing or backspace ends that.
+func TestFlashGoneLabelAcrossTick(t *testing.T) {
+	src := &mutSrc{ss: slices.Clone([]store.Session(flashSrc))}
+	m := typed(t, psized(src, 232, 50), "sb")
+	h, _ := hitOf(m, "b1")
+	label := h.label
+	// Bravo goes; a card with another b comes in the same poll; then the tick
+	src.ss = slices.DeleteFunc(slices.Clone(src.ss), func(s store.Session) bool { return s.ID == "b1" })
+	src.ss = append(src.ss, store.Session{ID: "n1", Name: "abba", GroupKey: "/z", CWD: "/z", ContextPct: -1, TmuxPane: "%9"})
+	tm, _ := m.Update(frameMsg{})
+	m = tm.(Model)
+	if _, ok := hitOf(m, "b1"); ok {
+		t.Fatal("Bravo's hit is gone after the tick")
+	}
+	for _, x := range m.flash.ms {
+		if x.label == label {
+			t.Errorf("the freed letter %q went to a new hit: %s", label, labelsOf(m))
+		}
+	}
+	before := m.focus
+	if m, _ = press(t, m, label); m.mode != flashing || m.flash.pat != "b" || m.focus != before {
+		t.Errorf("the vanished card's label: mode %v pattern %q focus %s", m.mode, m.flash.pat, m.focus)
+	}
+	// typing ends the grace: the pattern changes, labels are given afresh
+	m = typed(t, m, "r")
+	if m.flash.pat != "br" || len(m.flash.freed) != 0 {
+		t.Errorf("after typing: pattern %q freed %v", m.flash.pat, m.flash.freed)
+	}
+	// a backspace too
+	m = typed(t, psized(src, 232, 50), "sb")
+	h2, _ := hitOf(m, "n1")
+	src.ss = slices.DeleteFunc(slices.Clone(src.ss), func(s store.Session) bool { return s.ID == "n1" })
+	tm, _ = m.Update(frameMsg{})
+	m = tm.(Model)
+	if m, _ = press(t, m, h2.label); m.flash.pat != "b" {
+		t.Fatalf("ignored: %q", m.flash.pat)
+	}
+	if m, _ = press(t, m, "backspace"); len(m.flash.freed) != 0 {
+		t.Errorf("after backspace: %v", m.flash.freed)
+	}
+}
+
+// The message line names the flash key as configured (and not a fixed "s").
+func TestFlashMessageLineNamesTheKey(t *testing.T) {
+	m := withConfig(t, "[keys]\nflash = [\"F\"]\nfold = [\"s\"]\n")
+	m, _ = press(t, m, "F")
+	m = typed(t, m, "br")
+	v := strings.Split(ansi.Strip(m.View()), "\n")
+	if v[len(v)-2] != " F br▏" {
+		t.Errorf("msg line %q", v[len(v)-2])
 	}
 }

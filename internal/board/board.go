@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -91,8 +92,9 @@ type Model struct {
 	searchFrom string // the focus when / was pressed: esc puts it back
 
 	flash struct {
-		pat string       // what was typed
-		ms  []flashMatch // its hits as the last key left them: a poll may move the cards, the labels stay
+		pat   string          // what was typed
+		ms    []flashMatch    // its hits as the last read of the board left them
+		freed map[string]bool // labels of hits whose cards have gone since: pressing one is ignored, no new hit gets one
 	}
 
 	preview   bool       // p: show the focused pane on the right
@@ -384,11 +386,11 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.flashScan()
 			}
 		case (k.Type == tea.KeyRunes || k.Type == tea.KeySpace) && !k.Alt && !k.Paste && len(k.Runes) == 1 && unicode.IsPrint(k.Runes[0]):
-			gone := m.flashFollow() // the board as it is now: what a label is pressed on
+			m.flashFollow() // the board as it is now: what a label is pressed on
 			label := string(k.Runes)
 			if i := slices.IndexFunc(m.flash.ms, func(x flashMatch) bool { return x.label == label }); i >= 0 {
 				m.mode, m.focus, m.msg = browsing, m.flash.ms[i].id, ""
-			} else if !slices.ContainsFunc(gone, func(x flashMatch) bool { return x.label == label }) {
+			} else if !m.flash.freed[label] {
 				m.flash.pat += label // not a label: more of the pattern
 				m.flashScan()
 			} // else the label of a hit whose card has gone since it was drawn: ignored, still flashing
@@ -432,23 +434,32 @@ func (m *Model) flashRead(prev []flashMatch) []flashMatch {
 	gs, _, _, _ := m.current()
 	_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.foldedNow(), nil)
 	bodyH := max(m.h-3, 1)
-	return flashScan(gs, rects, m.focus, m.flash.pat, scrollOff(rects, m.focus, bodyH), bodyH, m.cardsW(), m.now(), prev)
+	return flashScan(gs, rects, m.focus, m.flash.pat, scrollOff(rects, m.focus, bodyH), bodyH, m.cardsW(), m.now(), prev, m.flash.freed)
 }
 
-// flashScan: the pattern changed, so the hits are read anew with new labels.
-func (m *Model) flashScan() { m.flash.ms = m.flashRead(nil) }
+// flashScan: the pattern changed, so the hits are read anew with new labels, and what was freed is forgotten.
+func (m *Model) flashScan() {
+	m.flash.freed = nil
+	m.flash.ms = m.flashRead(nil)
+}
 
 // flashFollow reads the hits again for a board that moved under them (a poll, a resize), keeping
-// the labels, and says the ones drawn before whose cards are gone from it.
-func (m *Model) flashFollow() (gone []flashMatch) {
+// the labels. The labels of hits whose cards are gone from it are noted as freed: they were drawn,
+// so pressing one is not typing, and no new hit is given one until the pattern changes.
+func (m *Model) flashFollow() {
 	old := m.flash.ms
+	freed := maps.Clone(m.flash.freed) // the copy View makes must not write into the model's
+	m.flash.freed = freed
 	m.flash.ms = m.flashRead(old)
 	for _, o := range old {
-		if !slices.ContainsFunc(m.flash.ms, func(n flashMatch) bool { return n.key() == o.key() }) {
-			gone = append(gone, o)
+		if o.label != "" && !slices.ContainsFunc(m.flash.ms, func(n flashMatch) bool { return n.key() == o.key() }) {
+			if freed == nil {
+				freed = map[string]bool{}
+			}
+			freed[o.label] = true
 		}
 	}
-	return gone
+	m.flash.freed = freed
 }
 
 // visibleFocus is the focus once the filter is gone: a card that f had folded away is not there to
@@ -546,7 +557,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.mode, m.msg = flashing, ""
-		m.flash.pat, m.flash.ms = "", nil // nothing is labelled until a character is typed
+		m.flash.pat, m.flash.ms, m.flash.freed = "", nil, nil // nothing is labelled until a character is typed
 		return m, nil
 	case "preview":
 		if m.w < previewMinTerm && !m.preview { // too narrow to open; an open one still closes
@@ -922,7 +933,7 @@ func (m Model) View() string {
 				lines[1+h.y] = put(lines[1+h.y], h.x+h.w, flashLabel(h.label))
 			}
 		}
-		lines[len(lines)-2] = fg(cFocus, " s ") + m.flash.pat + "▏" // what has been typed
+		lines[len(lines)-2] = fg(cFocus, " "+m.cfg.First("flash")+" ") + m.flash.pat + "▏" // what has been typed
 		out = strings.Join(lines, "\n")
 	}
 	if m.query != "" { // a kept filter: what moves around it (the states below replace the whole line)

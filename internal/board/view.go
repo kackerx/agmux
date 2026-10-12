@@ -592,7 +592,7 @@ func findAll(cs []cluster, pat []rune) []int {
 // the focused card first. A label is never the character after any hit (not only the ones taken),
 // or typing on would be taken for pressing it. off and bodyH are the window onto the body;
 // rects are the cards and folded titles as laid out for width cardsW.
-func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW int, now time.Time, prev []flashMatch) []flashMatch {
+func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW int, now time.Time, prev []flashMatch, avoid map[string]bool) []flashMatch {
 	p := []rune(pat)
 	for i, r := range p {
 		p[i] = unicode.ToLower(r)
@@ -681,7 +681,7 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 	}
 	var free []string
 	for _, r := range flashAlphabet {
-		if l := string(r); !skip[unicode.ToLower(r)] && !used[l] {
+		if l := string(r); !skip[unicode.ToLower(r)] && !used[l] && !avoid[l] {
 			free = append(free, l)
 		}
 	}
