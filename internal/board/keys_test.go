@@ -159,7 +159,7 @@ func TestErrorsGoToMessageLine(t *testing.T) {
 func TestMouse(t *testing.T) {
 	r := &fakeRunner{}
 	m := newModel(r)
-	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false)
+	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, nil)
 	var b1 rect
 	for _, rc := range rects {
 		if rc.id == "b1" {
@@ -282,5 +282,59 @@ func TestBackgroundHintOnce(t *testing.T) {
 		if n := strings.Count(ansi.Strip(m.View()), noPane); n != 1 {
 			t.Errorf("%s on a background session: hint shown %d times, want 1", k, n)
 		}
+	}
+}
+
+func TestFold(t *testing.T) {
+	r := &fakeRunner{}
+	m := newModel(r)
+	_, before, _ := view(sessions, m.w, m.h, "", 0, now, "", false, nil)
+
+	m, _ = press(t, m, "f") // fold /a (focus was on a1)
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "▸ /a (2)") || strings.Contains(v, " one ") || strings.Contains(v, " two ") || !strings.Contains(v, "▾ /b (1)") {
+		t.Fatalf("folded /a: title ▸, its cards gone, /b untouched:\n%s", v)
+	}
+	if m.focus != headerID("/a") {
+		t.Fatalf("focus %q, want the folded title", m.focus)
+	}
+	_, after, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, m.folded)
+	for _, b := range before {
+		for _, a := range after {
+			if a.id == "b1" && b.id == "b1" && a != b {
+				t.Errorf("other groups must not move: b1 %+v → %+v", b, a)
+			}
+		}
+	}
+
+	m, _ = press(t, m, "r", "x", "y", "H", "s", "j") // session keys do nothing on a title
+	if len(r.calls) != 0 || m.mode != browsing {
+		t.Fatalf("keys on a folded title ran %q", r.calls)
+	}
+	m, _ = press(t, m, "l", "r", "h") // the title is a stop for h/l like a card
+	m, _ = press(t, m, "enter", "r")  // enter unfolds; focus lands on its first card
+	if !reflect.DeepEqual(r.calls, [][]string{{"restart", "b1"}, {"restart", "a1"}}) {
+		t.Errorf("calls %q", r.calls)
+	}
+	m, _ = press(t, m, "f", "f") // f folds and unfolds
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "▾ /a (2)") || !strings.Contains(v, " one ") {
+		t.Errorf("f twice should leave /a open:\n%s", v)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "f 折叠") {
+		t.Error("footer lists f")
+	}
+}
+
+func TestFoldMouse(t *testing.T) {
+	m, _ := press(t, newModel(&fakeRunner{}), "f", "l")                                              // /a folded, focus on b1
+	click := tea.MouseMsg{X: 1, Y: 1 + 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft} // /a's title row
+	tm, _ := m.Update(click)
+	m = tm.(Model)
+	if m.focus != headerID("/a") {
+		t.Fatalf("first click focuses the title, focus %q", m.focus)
+	}
+	tm, _ = m.Update(click)
+	if m = tm.(Model); m.folded["/a"] || m.focus != "a1" {
+		t.Errorf("second click unfolds: folded=%v focus=%q", m.folded["/a"], m.focus)
 	}
 }

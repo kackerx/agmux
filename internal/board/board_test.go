@@ -51,7 +51,7 @@ func TestView(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	ss := fixture(t)
 	for _, w := range []int{60, 114, 120, 200} {
-		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "", false)
+		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "", false, nil)
 		lines := strings.Split(out, "\n")
 		if len(lines) != 200 {
 			t.Errorf("w=%d: %d lines, want the full height", w, len(lines))
@@ -79,7 +79,7 @@ func TestView(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", "/Users/dev") // the fixture's home, so headers shorten to ~ on any machine
-	out, _, _ := view(ss, 200, 50, "", 0, now, "", false)
+	out, _, _ := view(ss, 200, 50, "", 0, now, "", false, nil)
 	plain := ansi.Strip(out)
 	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "⏵ working · agents", "● done", "q 退出"} {
 		if !strings.Contains(plain, want) {
@@ -92,7 +92,7 @@ func TestScrollKeepsFocusVisible(t *testing.T) {
 	ss := fixture(t)
 	last := groups(ss)
 	id := last[len(last)-1].sessions[0].ID
-	out, rects, off := view(ss, 60, 20, id, 0, now, "", false)
+	out, rects, off := view(ss, 60, 20, id, 0, now, "", false, nil)
 	if off == 0 || len(strings.Split(out, "\n")) != 20 {
 		t.Fatalf("expected a scrolled 20-line screen, off=%d", off)
 	}
@@ -226,7 +226,7 @@ func TestCardLines(t *testing.T) {
 
 func TestMultilineMessage(t *testing.T) {
 	ss := fixture(t)
-	out, _, _ := view(ss, 120, 30, "", 0, now, "ccmux kill x: boom\n  at stack\n  at more", false)
+	out, _, _ := view(ss, 120, 30, "", 0, now, "ccmux kill x: boom\n  at stack\n  at more", false, nil)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 30 || !strings.HasPrefix(ansi.Strip(lines[0]), " agmux") || !strings.Contains(out, "boom") || strings.Contains(out, "at stack") {
 		t.Errorf("multi-line message: %d lines (want 30), top bar %q", len(lines), ansi.Strip(lines[0]))
@@ -286,5 +286,33 @@ func TestRelTime(t *testing.T) {
 	}
 	if relTime(time.Time{}, now) != "" {
 		t.Error("zero time = blank")
+	}
+}
+
+// The board's order comes only from the data: shuffling ccmux's array changes nothing.
+func TestOrderIgnoresCcmuxOrder(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	ss := fixture(t)
+	reversed := make([]store.Session, len(ss))
+	for i, s := range ss {
+		reversed[len(ss)-1-i] = s
+	}
+	rotated := append(append([]store.Session{}, ss[5:]...), ss[:5]...)
+	want, _, _ := view(ss, 200, 60, "", 0, now, "", false, nil)
+	for name, order := range map[string][]store.Session{"reversed": reversed, "rotated": rotated} {
+		if got, _, _ := view(order, 200, 60, "", 0, now, "", false, nil); got != want {
+			t.Errorf("%s ccmux order renders differently", name)
+		}
+	}
+	for _, g := range groups(ss) {
+		for i := 1; i < len(g.sessions); i++ {
+			if a, b := g.sessions[i-1], g.sessions[i]; a.Name > b.Name {
+				t.Errorf("%s: %q before %q", g.key, a.Name, b.Name)
+			}
+		}
+	}
+	same := []store.Session{{ID: "b", Name: "x", GroupKey: "/g"}, {ID: "a", Name: "x", GroupKey: "/g"}}
+	if g := groups(same)[0].sessions; g[0].ID != "a" {
+		t.Error("same name: ordered by id")
 	}
 }

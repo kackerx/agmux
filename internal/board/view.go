@@ -54,7 +54,8 @@ type group struct {
 	sessions []store.Session
 }
 
-// groups splits sessions by GroupKey, sorted by key; card order inside a group is ccmux's.
+// groups splits sessions by GroupKey. The order comes only from the data (groups by key,
+// cards by name then id), never from ccmux's array order, so polls don't shuffle the board.
 func groups(ss []store.Session) []group {
 	var gs []group
 	idx := map[string]int{}
@@ -67,7 +68,13 @@ func groups(ss []store.Session) []group {
 		}
 		gs[i].sessions = append(gs[i].sessions, s)
 	}
-	sort.SliceStable(gs, func(i, j int) bool { return gs[i].key < gs[j].key })
+	sort.Slice(gs, func(i, j int) bool { return gs[i].key < gs[j].key })
+	for _, g := range gs {
+		sort.Slice(g.sessions, func(i, j int) bool {
+			a, b := g.sessions[i], g.sessions[j]
+			return a.Name < b.Name || a.Name == b.Name && a.ID < b.ID
+		})
+	}
 	return gs
 }
 
@@ -77,8 +84,12 @@ type rect struct {
 	x, y, w, h int
 }
 
-// layout renders the body and reports every card's position (for focus scrolling and mouse hits).
-func layout(gs []group, width int, focus string, frame int, now time.Time) ([]string, []rect) {
+// headerID is the focus ID of a folded group's title; session IDs never start with NUL.
+func headerID(key string) string { return "\x00" + key }
+
+// layout renders the body and reports the position of every focusable thing: cards, and the
+// titles of folded groups (for focus scrolling and mouse hits).
+func layout(gs []group, width int, focus string, frame int, now time.Time, folded map[string]bool) ([]string, []rect) {
 	n, colW := columns(width)
 	var lines []string
 	var rects []rect
@@ -92,7 +103,13 @@ func layout(gs []group, width int, focus string, frame int, now time.Time) ([]st
 		height := 0
 		for i, g := range row {
 			x := i * (colW + colGap)
-			cols[i] = append(cols[i], header(g, colW))
+			if folded[g.key] {
+				rects = append(rects, rect{headerID(g.key), x, top, colW, 1})
+				cols[i] = append(cols[i], header(g, colW, true, focus == headerID(g.key)))
+				height = max(height, 1)
+				continue
+			}
+			cols[i] = append(cols[i], header(g, colW, false, false))
 			for _, s := range g.sessions {
 				rects = append(rects, rect{s.ID, x, top + len(cols[i]), colW, cardH})
 				cols[i] = append(cols[i], strings.Split(card(s, colW, cardH, s.ID == focus, frame, now), "\n")...)
@@ -119,9 +136,17 @@ func layout(gs []group, width int, focus string, frame int, now time.Time) ([]st
 
 func pad(s string, w int) string { return s + strings.Repeat(" ", max(w-ansi.StringWidth(s), 0)) }
 
-func header(g group, w int) string {
+// header is a group's title: ▾ when open, ▸ when folded (then it can hold the focus).
+func header(g group, w int, folded, focused bool) string {
 	count := fmt.Sprintf(" (%d)", len(g.sessions))
-	return fg(cDir, "▾ "+midTrunc(tildePath(g.key), w-2-len(count))) + fg(cMuted, count)
+	mark, c := "▾ ", cDir
+	if folded {
+		mark = "▸ "
+	}
+	if focused {
+		c = cFocus
+	}
+	return fg(c, mark+midTrunc(tildePath(g.key), w-2-len(count))) + fg(cMuted, count)
 }
 
 func tildePath(p string) string {
@@ -333,7 +358,7 @@ var footerKeys = []struct {
 	text     string
 	needPane bool
 }{
-	{"j/k 卡片", false}, {"h/l 跨列", false}, {"enter 跳转", true}, {"H 交接", true}, {"s 发送", true},
+	{"j/k 卡片", false}, {"h/l 跨列", false}, {"enter 跳转", true}, {"f 折叠", false}, {"H 交接", true}, {"s 发送", true},
 	{"r 重启", false}, {"x 杀", false}, {"d review", false}, {"q 退出", false},
 }
 
@@ -351,9 +376,9 @@ func footer(noPane bool, w int) string {
 }
 
 // view assembles top bar, body (scrolled so the focused card is visible), message line and footer.
-func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool) (string, []rect, int) {
+func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool) (string, []rect, int) {
 	top := " " + lipgloss.NewStyle().Bold(true).Render("agmux") + fg(cMuted, fmt.Sprintf(" · %d sessions", len(ss)))
-	body, rects := layout(groups(ss), w, focus, frame, now)
+	body, rects := layout(groups(ss), w, focus, frame, now, folded)
 	bodyH := max(h-3, 1) // top bar, message line, footer
 	off := 0
 	for _, r := range rects {

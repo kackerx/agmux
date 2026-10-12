@@ -59,11 +59,14 @@ type Model struct {
 	focus  string // session ID; follows the session across polls
 	msg    string // one line above the footer: ccmux stderr, hints
 	mode   mode
-	target store.Session // what the open x / s prompt acts on, fixed when it opened
-	input  []rune        // the `s` line being typed
+	target store.Session   // what the open x / s prompt acts on, fixed when it opened
+	input  []rune          // the `s` line being typed
+	folded map[string]bool // group keys folded with f; this run only
 }
 
-func New(src Source, run Runner) Model { return Model{src: src, run: run, now: time.Now} }
+func New(src Source, run Runner) Model {
+	return Model{src: src, run: run, now: time.Now, folded: map[string]bool{}}
+}
 
 // Run polls p in the background and runs the board until the user quits.
 func Run(p *store.Poller) error {
@@ -117,22 +120,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func firstLine(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }
 
-// current resolves focus against the live sessions, falling back to the first card.
-func (m *Model) current() (gs []group, gi, ci int, ok bool) {
+// items lists, per group, what the focus can rest on: the title of a folded group, else its cards.
+func (m Model) items(gs []group) [][]string {
+	out := make([][]string, len(gs))
+	for i, g := range gs {
+		if m.folded[g.key] {
+			out[i] = []string{headerID(g.key)}
+			continue
+		}
+		for _, s := range g.sessions {
+			out[i] = append(out[i], s.ID)
+		}
+	}
+	return out
+}
+
+// current resolves focus against the live sessions, falling back to the first item.
+// s is the focused session; ok is false when there is none (nothing to show, or a folded title).
+func (m *Model) current() (gs []group, items [][]string, gi, ci int, s store.Session, ok bool) {
 	gs = groups(m.src.Sessions())
-	for gi, g := range gs {
-		for ci, s := range g.sessions {
-			if s.ID == m.focus {
-				return gs, gi, ci, true
+	items = m.items(gs)
+	gi, ci = -1, -1
+	for g := range items {
+		for c, id := range items[g] {
+			if id == m.focus {
+				gi, ci = g, c
 			}
 		}
 	}
-	if len(gs) == 0 {
-		m.focus = ""
-		return gs, 0, 0, false
+	if gi < 0 {
+		if len(gs) == 0 {
+			m.focus = ""
+			return gs, items, 0, 0, s, false
+		}
+		gi, ci = 0, 0
+		m.focus = items[0][0]
 	}
-	m.focus = gs[0].sessions[0].ID
-	return gs, 0, 0, true
+	if m.folded[gs[gi].key] {
+		return gs, items, gi, ci, s, false
+	}
+	return gs, items, gi, ci, gs[gi].sessions[ci], true
 }
 
 // alive reports whether a session is still in the latest poll.
@@ -196,24 +223,40 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.String() == "q" || k.Type == tea.KeyEsc {
 		return m, tea.Quit
 	}
-	gs, gi, ci, ok := m.current()
-	if !ok {
+	gs, items, gi, ci, s, ok := m.current()
+	if len(gs) == 0 {
 		return m, nil
 	}
-	s := gs[gi].sessions[ci]
+	key := gs[gi].key
 	switch k.String() {
 	case "j", "down":
-		ci = min(ci+1, len(gs[gi].sessions)-1)
+		ci = min(ci+1, len(items[gi])-1)
 	case "k", "up":
 		ci = max(ci-1, 0)
 	case "l", "right":
 		gi = min(gi+1, len(gs)-1)
-		ci = min(ci, len(gs[gi].sessions)-1)
+		ci = min(ci, len(items[gi])-1)
 	case "h", "left":
 		gi = max(gi-1, 0)
-		ci = min(ci, len(gs[gi].sessions)-1)
+		ci = min(ci, len(items[gi])-1)
+	case "f": // fold / unfold the focused group; the focus stays on it
+		m.folded[key] = !m.folded[key]
+		m.focus, m.msg = m.items(gs)[gi][0], ""
+		return m, nil
 	case "enter":
+		if !ok { // a folded title: unfold it
+			m.folded[key] = false
+			m.focus, m.msg = m.items(gs)[gi][0], ""
+			return m, nil
+		}
 		return m.jump(s)
+	}
+	if !ok { // the rest act on a session; a folded title has none
+		m.focus = items[gi][ci]
+		return m, nil
+	}
+	switch k.String() {
+	case "j", "down", "k", "up", "l", "right", "h", "left":
 	case "H":
 		return m.send(s, "/handoff", "已发送 /handoff → "+s.Name)
 	case "s":
@@ -233,7 +276,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
-	m.focus, m.msg = gs[gi].sessions[ci].ID, ""
+	m.focus, m.msg = items[gi][ci], ""
 	return m, nil
 }
 
@@ -303,9 +346,8 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.current()
-	ss := m.src.Sessions()
 	// ponytail: re-lays out the board per click to find the card; fine for tens of sessions.
-	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false)
+	_, rects, off := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), "", false, m.folded)
 	y := e.Y - 1 + off // row 0 is the top bar
 	for _, r := range rects {
 		if e.X >= r.x && e.X < r.x+r.w && y >= r.y && y < r.y+r.h {
@@ -313,11 +355,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.focus, m.msg = r.id, ""
 				return m, nil
 			}
-			for _, s := range ss {
-				if s.ID == r.id {
-					return m.jump(s)
-				}
-			}
+			return m.key(tea.KeyMsg{Type: tea.KeyEnter}) // second click = enter: jump, or unfold a title
 		}
 	}
 	return m, nil
@@ -353,11 +391,7 @@ func (m Model) View() string {
 	if m.w == 0 {
 		return ""
 	}
-	gs, gi, ci, ok := m.current()
-	var focused store.Session
-	if ok {
-		focused = gs[gi].sessions[ci]
-	}
-	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "")
+	_, _, _, _, focused, ok := m.current()
+	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded)
 	return out
 }
