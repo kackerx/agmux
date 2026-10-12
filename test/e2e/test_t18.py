@@ -432,7 +432,7 @@ class PickerInPassthrough(PreviewBase):
         self.enter_passthrough_on_a3()
         self.t.lit("a"); time.sleep(0.5)
         self.assertEqual(self.cat("a3"), "a"); self.assertIsNone(overlay(self.t.snap())); self.assertTrue(self.preview_focused())
-        self.t.keys("C-]"); time.sleep(0.4); self.t.keys("a"); time.sleep(0.5)
+        self.t.keys("Tab"); time.sleep(0.4); self.t.keys("a"); time.sleep(0.5)
         self.assertTrue(overlay(self.t.snap()), "back on the cards, a opens the picker")
 
 

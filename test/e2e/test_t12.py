@@ -26,22 +26,27 @@ class Passthrough(PreviewBase):
         return last_text_row(self.t.snap())
 
     # ---- focus switching ------------------------------------------------------------------------------------------------------------------
-    def test_tab_moves_the_keys_to_the_preview(self):
+    def test_tab_moves_the_keys_to_the_preview_and_tab_again_gives_them_back(self):  # T21: tab in, tab out; the preview stays open
         self.open_preview()
         self.assertFalse(self.preview_focused())
         self.assertIn("tab focus preview", self.footer())
         self.press("Tab")
         self.assertTrue(wait(self.preview_focused, 3), "preview border turns #ff8ebe:\n" + self.t.text())
-        self.assertIn("keys go to the pane · ctrl+] back to the cards", self.footer())
-        self.press("C-]")
+        self.assertIn("keys go to the pane · tab back to the cards", self.footer())
+        self.press("Tab")
         self.assertTrue(wait(lambda: not self.preview_focused(), 3)); self.assertIn("tab focus preview", self.footer())
+        self.assertIsNotNone(self.pv(), "the preview is still open")
 
-    def test_tab_does_nothing_when_the_preview_is_closed(self):
-        self.t.keys("Tab"); time.sleep(0.5)
-        self.assertIsNone(self.pv()); self.assertNotIn("keys go to the pane", self.footer())
-        cs = [c for c in find_cards(self.t.snap()) if c.ok and c.rows[0].cells[0][1] == C_FOCUS]
-        self.assertEqual(len(cs), 1, "focus still on a card")
-        self.t.keys("q"); self.assertEqual(self.t.exit_status(), 0, "q still quits: nothing swallowed")
+    def test_tab_with_the_preview_closed_opens_it_and_takes_the_keys(self):  # T21
+        self.assertIsNone(self.pv())
+        self.t.keys("Tab"); time.sleep(0.6)
+        self.assertTrue(wait(lambda: self.pv() is not None, 4), self.t.text())
+        self.assertTrue(wait(self.preview_focused, 3), "the border is #ff8ebe at once")
+        self.assertIn("keys go to the pane · tab back to the cards", self.footer())
+        self.t.lit("hi"); time.sleep(0.4); self.assertIn("hi", pane_text(self.panes["a1"], 3), "typing goes to the focused card's pane")
+        self.press("Tab"); self.assertTrue(wait(lambda: not self.preview_focused(), 3)); self.assertIsNotNone(self.pv())
+        self.press("p"); self.assertTrue(wait(lambda: self.pv() is None, 3), "p still toggles the preview")
+        self.t.keys("q"); self.assertEqual(self.t.exit_status(), 0)
 
     def test_tab_does_nothing_on_a_card_without_a_pane_and_the_hint_is_greyed(self):
         self.open_preview()
@@ -116,11 +121,13 @@ class Passthrough(PreviewBase):
         self.t.lit("\x1b[200~粘贴 paste-me\x1b[201~")
         self.assertTrue(wait(lambda: "粘贴 paste-me" in self.cat_text(), 3), self.cat_text())
 
-    def test_tab_inside_the_passthrough_is_forwarded_not_a_way_out(self):
+    def test_tab_is_the_way_out_and_shift_tab_and_ctrl_bracket_go_to_the_pane(self):  # T21 (the cost the user accepted: tab never reaches the pane)
         self.to_cat_pane(); self.press("Tab")
+        self.t.keys("BTab"); time.sleep(0.3); self.t.keys("C-]"); time.sleep(0.4)
+        self.assertTrue(self.preview_focused(), "neither shift+tab nor ctrl+] leaves")
+        self.assertIn("^[[Z", self.cat_text()); self.assertIn("^]", self.cat_text())
         self.t.keys("Tab"); time.sleep(0.4)
-        self.assertTrue(self.preview_focused(), "tab is Claude Code's completion key: it goes to the pane")
-        self.assertIn("^I", self.cat_text())
+        self.assertFalse(self.preview_focused(), "tab leaves"); self.assertNotIn("^I", self.cat_text(), "and it was not forwarded")
 
     def test_q_in_the_preview_is_a_character_not_quit(self):
         self.to_cat_pane(); self.press("Tab")
@@ -131,7 +138,7 @@ class Passthrough(PreviewBase):
         self.to_cat_pane(); self.press("Tab")
         self.t.lit("abc"); time.sleep(0.4)
         before = self.cat_text()
-        self.press("C-]")
+        self.press("Tab")
         self.assertFalse(self.preview_focused())
         self.t.keys("q")
         self.assertEqual(self.t.exit_status(4), 0, "q quits agmux once the focus is back on the cards")
@@ -141,7 +148,7 @@ class Passthrough(PreviewBase):
         self.open_preview(); self.press("Tab")  # a1's pane (sleep, tty echo on)
         self.t.lit("AAA"); time.sleep(0.4)
         self.assertIn("AAA", pane_text(self.panes["a1"], 3))
-        self.press("C-]", "j", "Tab")  # a2
+        self.press("Tab", "j", "Tab")  # a2
         self.t.lit("BBB"); time.sleep(0.4)
         self.assertIn("BBB", pane_text(self.panes["a2"], 3)); self.assertNotIn("BBB", pane_text(self.panes["a1"], 3))
 
@@ -231,20 +238,20 @@ class PassthroughReview(PreviewBase):
                 self.t.lit("ok"); time.sleep(0.4)
                 self.assertEqual(self.cat("a3"), "ok"); a3_before = self.cat("a3")
                 self.drop_a3(how)
-                self.t.lit("rxdfq"); self.t.keys("j"); self.t.keys("Enter"); self.t.keys("Tab"); time.sleep(0.8)
+                self.t.lit("rxdfq"); self.t.keys("j"); self.t.keys("Enter"); time.sleep(0.8)
                 self.assertTrue(self.t.alive(), "q / r / x / d / f typed while locked must not reach the board either")
                 self.assertEqual(self.env.actions(), [], "ccmux: zero calls (no restart / kill / review / switch)")
                 self.assertEqual(self.cat("a1"), "", "the decoy pane (the first card the focus fell back to) got zero bytes")
                 self.assertEqual(self.cat("a3"), a3_before, "nothing is sent to the old pane either")
                 self.assertEqual(self.cat("a2"), "".join(l.strip() for l in [] ) or self.cat("a2"))
-                row = last_text_row(self.t.snap()); self.assertIn("session is gone · ctrl+] back to the cards", row)
+                row = last_text_row(self.t.snap()); self.assertIn("session is gone · tab back to the cards", row)
                 i = self.t.snap()[-2].find("session is gone") if "session is gone" in self.t.snap()[-2].text else self.t.snap()[-1].find("session is gone")
                 rows = [r for r in self.t.snap() if "session is gone" in r.text]
                 self.assertTrue(rows and is_red(rows[0].cells[rows[0].find("session is gone")][1]), "red footer")
                 self.assertFalse(self.preview_focused(), "the preview border is back to the plain colour")
-                self.t.keys("C-]"); time.sleep(0.5)
+                self.t.keys("Tab"); time.sleep(0.5)
                 self.assertNotIn("session is gone", self.footer()); self.assertIn("tab focus preview", self.footer())
-                self.t.keys("q"); self.assertEqual(self.t.exit_status(4), 0, "after ctrl+] the board is itself again: q quits")
+                self.t.keys("q"); self.assertEqual(self.t.exit_status(4), 0, "after tab the board is itself again: q quits")
                 self.t.close() if False else None
 
     def test_esc_also_leaves_the_locked_state(self):
@@ -338,14 +345,14 @@ class PassthroughReview2(PreviewBase):
         full = json.loads((self.env.fake / "show.json").read_text())
         self.env.write_show([]); self.poll_twice()
         self.env.write_show(full); self.poll_twice(); self.poll_twice()  # the same session, with the same pane, is listed again
-        self.assertIn("session is gone · ctrl+] back to the cards", self.footer())
+        self.assertIn("session is gone · tab back to the cards", self.footer())
         rows = [r for r in self.t.snap() if "session is gone" in r.text]
         self.assertTrue(rows and is_red(rows[0].cells[rows[0].find("session is gone")][1]), "red footer")
         self.assertFalse(self.preview_focused(), "the preview border is not pink again")
         self.t.lit("typed after it came back"); self.t.keys("Enter"); time.sleep(0.8)
         self.assertEqual(self.cat("a3"), "ok", "zero bytes forwarded after the lock failed, even though the target is back")
         self.assertEqual(self.cat("a1"), ""); self.assertEqual(self.env.actions(), []); self.assertTrue(self.t.alive())
-        self.t.keys("C-]"); time.sleep(0.5)
+        self.t.keys("Tab"); time.sleep(0.5)
         self.assertNotIn("session is gone", self.footer())
 
     # ---- 2) empty and failed pastes ----
@@ -365,7 +372,7 @@ class PassthroughReview2(PreviewBase):
         cs = self.calls()
         self.assertTrue(any(c[0] == "load-buffer" for c in cs) or any("session is gone" in r.text for r in self.t.snap()), f"calls: {cs}\n{self.t.text()}")
         self.assertEqual(tm("list-buffers", "-F", "#{buffer_name}").stdout.split(), [], f"no agmux buffer left behind; calls: {cs}")
-        self.t.keys("C-]"); time.sleep(0.5)
+        self.t.keys("Tab"); time.sleep(0.5)
         self.press("k", "k", "i"); self.assertTrue(wait(self.preview_focused, 3), self.t.text())  # a1: the decoy cat pane
         self.t.lit("\x1b[200~\x1b[201~"); time.sleep(1.0)
         self.assertEqual(self.cat("a1"), "", f"the second pane got zero bytes; tmux calls: {self.calls()}")
@@ -385,7 +392,7 @@ class PassthroughReview2(PreviewBase):
         self.env.write_show([s for s in S if s["id"] != "a1"]); self.poll_twice(); time.sleep(0.8)  # the focus falls back to the first remaining card: a2
         a2 = self.panes["a2"]; self.assertTrue(wait(lambda: caps(a2), 3), f"the preview now follows a2; calls: {self.calls('capture-pane')[-4:]}")
         self.assertEqual(set(caps(a2)), {caps(a1)[0]}, f"a2 is captured with the plain visible-rows window ({caps(a1)[0]}), not with a1's leftover offset: {caps(a2)}")
-        self.t.keys("C-]"); time.sleep(0.4); self.press("k", "j")  # the board is itself again; moving around keeps the plain window
+        self.t.keys("Tab"); time.sleep(0.4); self.press("k", "j")  # the board is itself again; moving around keeps the plain window
         self.assertEqual(set(caps(a2)), {caps(a1)[0]})
 
     # ---- 3) the terminal narrower than 100 columns ----

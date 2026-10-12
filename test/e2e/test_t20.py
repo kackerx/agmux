@@ -243,7 +243,7 @@ class InPassthrough(PreviewBase):
     def test_s_is_forwarded_to_the_pane(self):
         self.enter_passthrough_on_a3(); self.t.lit("s"); time.sleep(0.5)
         self.assertEqual(self.cat("a3"), "s"); self.assertNotIn("jump: press a label", self.t.text()); self.assertTrue(self.preview_focused())
-        self.t.keys("C-]"); time.sleep(0.4); self.t.keys("s"); time.sleep(0.4)
+        self.t.keys("Tab"); time.sleep(0.4); self.t.keys("s"); time.sleep(0.4)
         self.assertIn("jump: press a label", self.t.text(), "back on the cards, s starts the jump")
 
 

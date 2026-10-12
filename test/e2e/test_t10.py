@@ -234,8 +234,8 @@ class FakeTmux(unittest.TestCase):
         self.assertEqual(self.preview_open_and_focused(), (True, False))
         self.t.keys("i"); time.sleep(0.5)
         self.assertEqual(self.preview_open_and_focused(), (True, True), "still open (s is not a toggle), now focused")
-        self.t.keys("C-]"); time.sleep(0.4)
-        self.assertEqual(self.preview_open_and_focused(), (True, False))
+        self.t.keys("Tab"); time.sleep(0.4)
+        self.assertEqual(self.preview_open_and_focused(), (True, False), "tab leaves the pass-through; the preview stays open")
 
     def test_s_on_a_card_without_a_pane_does_nothing(self):
         self.start()
@@ -468,7 +468,7 @@ class RealTmux(unittest.TestCase):
         self.assertTrue(wait(lambda: self.pane_text().count("你好 world") >= 2, 5), f"cat did not echo it:\n{self.pane_text()}")
         tm("send-keys", "-t", "fl-x", "-l", "--", "--help -x"); time.sleep(0.3); d("Enter")
         self.assertTrue(wait(lambda: self.pane_text().count("--help -x") >= 2, 5), self.pane_text())
-        d("C-]"); time.sleep(0.4); d("H")  # ctrl+] back to the cards, then the hand-over
+        d("Tab"); time.sleep(0.4); d("H")  # tab back to the cards, then the hand-over
         self.assertTrue(wait(lambda: self.pane_text().count("/handoff") >= 2, 5), self.pane_text())
         lines = [l for l in self.pane_text().splitlines() if l.strip()]
         self.assertEqual(lines[:6], ["你好 world", "你好 world", "--help -x", "--help -x", "/handoff", "/handoff"],

@@ -57,7 +57,7 @@ class Defaults(Base):
         keys = r.stdout.split("[colors]")[0]; cols = r.stdout.split("[colors]")[1].split("[avatars]")[0]  # [avatars] (T18) follows the colours
         self.assertEqual([l.split(" = ")[0] for l in keys.splitlines()[1:] if l], DEFAULT_KEYS)
         self.assertEqual([l.split(" = ")[0] for l in cols.splitlines() if l], DEFAULT_COLOURS)
-        for line in ('down = ["j", "down"]', 'reply = ["i"]', 'flash = ["s"]', 'leave_preview = ["ctrl+]"]', 'quit = ["q", "esc"]', 'working = "#ffb86c"', 'name = "5"'):
+        for line in ('down = ["j", "down"]', 'reply = ["i"]', 'flash = ["s"]', 'focus_preview = ["tab"]', 'leave_preview = ["tab"]', 'quit = ["q", "esc"]', 'working = "#ffb86c"', 'name = "5"'):
             self.assertIn(line, r.stdout)
         p = self.cli("config", "--path"); self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stdout.strip(), str(self.file), "--path: $XDG_CONFIG_HOME/agmux/config.toml")
@@ -343,13 +343,14 @@ class PreviewKeys(PreviewBase):
 
 
 class LeaveWithTab(PreviewBase):
-    """`leave_preview = ["tab"]` is valid (tab stays focus_preview on the cards): in the pass-through tab leaves, and ctrl+] is then just a key for the pane."""
+    """T21: tab is both focus_preview and leave_preview by default (config says nothing here): tab in, tab out, ctrl+] is just a key for the pane."""
     PANES = (("a1", CAT_CMD), ("a2", CAT_CMD), ("a3", CAT_CMD))
+    CONFIG = ""
     cat, focused = PreviewKeys.cat, PreviewKeys.focused
 
     def board(self, w, h):
         cfg = self.env.tmp / "cfg"; (cfg / "agmux").mkdir(parents=True)
-        (cfg / "agmux" / "config.toml").write_text('[keys]\nleave_preview = ["tab"]\n')
+        (cfg / "agmux" / "config.toml").write_text(self.CONFIG)
         t = Term(self.env, w=w, h=h, real_tmux=True, extra_env=f"XDG_CONFIG_HOME={cfg}"); self.addCleanup(t.close)
         self.assertTrue(wait(lambda: "agmux ·" in t.text(), 8), t.text())
         return t
@@ -362,6 +363,27 @@ class LeaveWithTab(PreviewBase):
         self.press("Tab"); self.assertTrue(wait(lambda: not self.focused(), 3), self.t.text())
         self.assertEqual(self.cat(), "^]", "the tab that left was not forwarded")
         self.assertIn("tab focus preview", last_text_row(self.t.snap()))
+
+    def test_default_config_dump_has_no_ctrl_bracket(self):
+        r = subprocess.run([BIN, "config"], env={"PATH": "/usr/bin:/bin", "HOME": str(self.env.home), "XDG_CONFIG_HOME": str(self.env.tmp / "cfg")}, capture_output=True, text=True)
+        self.assertIn('leave_preview = ["tab"]', r.stdout); self.assertNotIn("ctrl+]", r.stdout)
+
+
+class LeaveWithCtrlBracket(LeaveWithTab):
+    """leave_preview = ["ctrl+]"] brings the old key back: it leaves, and tab (still focus_preview on the cards) is forwarded inside the pass-through."""
+    CONFIG = '[keys]\nleave_preview = ["ctrl+]"]\n'
+
+    def test_tab_goes_in_and_tab_comes_out(self):  # (replaced: this class tests the opposite)
+        self.press("j", "j", "p"); self.assertTrue(wait(lambda: self.pv() is not None, 4))
+        self.press("Tab"); self.assertTrue(wait(self.focused, 3), "tab still opens the pass-through from the cards")
+        self.assertIn("ctrl+] back to the cards", last_text_row(self.t.snap()))
+        self.press("Tab"); self.assertEqual(wait(lambda: self.cat() == "^I", 3), True, f"inside, tab goes to the pane: {self.cat()!r}"); self.assertTrue(self.focused())
+        self.press("C-]"); self.assertTrue(wait(lambda: not self.focused(), 3), self.t.text())
+        self.assertEqual(self.cat(), "^I", "ctrl+] was taken by agmux, not forwarded"); self.assertIsNotNone(self.pv(), "the preview stays open")
+
+    def test_default_config_dump_has_no_ctrl_bracket(self):
+        r = subprocess.run([BIN, "config"], env={"PATH": "/usr/bin:/bin", "HOME": str(self.env.home), "XDG_CONFIG_HOME": str(self.env.tmp / "cfg")}, capture_output=True, text=True)
+        self.assertIn('leave_preview = ["ctrl+]"]', r.stdout); self.assertIn('focus_preview = ["tab"]', r.stdout)
 
 
 if __name__ == "__main__":
