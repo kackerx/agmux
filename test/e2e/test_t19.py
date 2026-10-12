@@ -225,5 +225,104 @@ class WithPanes(PreviewBase):
         self.assertNotIn("▏", self.t.snap()[0].text, "no filter input opened"); self.assertTrue(self.preview_focused())
 
 
+class Review(Base):
+    """T19 review (specs/m3-config/design.md, the bullets added in 297756a)."""
+
+    def paste(self, text):
+        self.t.lit("\x1b[200~" + text + "\x1b[201~"); time.sleep(0.5)
+
+    def query(self):
+        m = re.match(r"\s*/ (.*?)▏", self.top()); return m.group(1) if m else None
+
+    def test_no_match_then_enter_then_slash_still_edits_the_query(self):
+        self.search("qqqq", enter=True)
+        self.assertEqual(self.names(), [], "enter on no match changes nothing")
+        self.t.keys("/"); time.sleep(0.3)
+        self.assertEqual(self.query(), "qqqq", f"the input is open again with the query: {self.top()!r}")
+        for _ in range(4):
+            self.t.keys("C-h"); time.sleep(0.1)
+        time.sleep(0.3); self.assertEqual(len(self.names()), 9); self.assertTrue(self.t.alive())
+
+    def test_pasted_text_goes_into_the_input_as_plain_text(self):
+        self.t.keys("/"); time.sleep(0.2)
+        self.paste("bra\rvo"); self.assertEqual(self.query(), "bra vo", "the carriage return became a space")
+        self.paste("a\tb"); self.assertEqual(self.query(), "bra voa b", "so did the tab")
+        before = self.query()
+        self.paste("x\x1b[31my\nz"); q = self.query()
+        self.assertIsNotNone(q, self.top()); self.assertNotIn("\x1b", q, "the ESC itself is not typed into the box (it became a space; the `[31m` after it is ordinary text)")
+        self.assertTrue(q.startswith(before + "x"), q)
+        snap = self.t.snap(); self.assertTrue(all(len(r.cells) <= 200 for r in snap), "no row is torn / widened")
+        self.assertEqual(self.count()[1], 9)
+
+    def test_alt_plus_a_character_is_not_text(self):
+        self.t.keys("/"); self.t.lit("ab"); time.sleep(0.2)
+        self.t.keys("M-e"); time.sleep(0.4)
+        self.assertEqual(self.query(), "ab", "alt+e did not append anything")
+        self.assertTrue(self.t.alive())
+
+    def test_enter_lands_on_the_best_scoring_card_but_the_layout_keeps_its_order(self):
+        S = json.loads((self.env.fake / "show.json").read_text()); base = S[0]
+        mk = lambda i, name: dict(base, id=i, summary=name, project="p", cwd=f"{self.env.home}/work/p", mainRepoRoot=f"{self.env.home}/work/p", gitBranch="main", tmuxPane=f"%{400 + len(i)}",
+                                  status="idle", subagents=[], pendingTool=None, nativeSessionId="n-" + i, logPath=None)
+        self.env.write_show([mk("low", "a-l-p-x"), mk("high", "alpha")]); self.env.pane_ids = {}
+        self.t.close(); self.t = Term(self.env, w=200, h=50); self.addCleanup(self.t.close)
+        self.assertTrue(wait(lambda: len(find_cards(self.t.snap())) == 2, 8), self.t.text())
+        base_order = self.names(); self.assertEqual(base_order, ["a-l-p-x", "alpha"], "the layout order: by name")
+        self.search("alp", enter=True)
+        self.assertEqual(self.names(), base_order, "scores do not reorder the cards")
+        self.assertEqual(self.focused(), ["alpha"], "enter goes to the highest score (the contiguous match), not the first card")
+
+    def test_a_matching_card_inside_a_folded_group_unfolds_it_while_filtering(self):
+        self.t.keys("f"); time.sleep(0.4); self.assertEqual(len(self.names()), 6, "alpha is folded")
+        self.search("alpha")
+        self.assertEqual(sorted(self.names()), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽"]), "the folded group opened for its matches")
+        self.assertEqual(self.count()[0], 3)
+        self.t.esc(); time.sleep(0.5)
+        self.assertEqual(len(self.names()), 6, "after clearing, the group is folded again"); self.assertIn("▸ ~/work/alpha (3)", self.t.text())
+
+    def test_the_counter_is_matches_over_all_sessions_and_folding_does_not_count(self):  # orchestrator (28ee25e): n = matching cards, total = all sessions
+        self.t.keys("f"); time.sleep(0.4); self.assertEqual(len(self.names()), 6, "alpha is folded")
+        self.t.keys("/"); time.sleep(0.3)
+        self.assertEqual(self.count(), (9, 9), "empty pattern = no filter, folding as before: 9/9 whatever is on screen")
+        self.assertEqual(len(self.names()), 6)
+        self.t.lit("a"); time.sleep(0.4); n, total = self.count()
+        self.assertEqual(total, 9); self.assertEqual(n, len(self.names()), "non-empty pattern: every group is open, n = the cards on screen")
+        self.t.lit("lpha"); time.sleep(0.4); n, total = self.count()
+        self.assertEqual((n, total), (len(self.names()), 9)); self.assertEqual(n, 3)
+
+    def test_clearing_a_kept_filter_leaves_the_focus_on_the_current_card(self):
+        self.t.keys("l"); self.t.keys("l"); self.t.keys("j"); time.sleep(0.3)
+        self.search("alpha", enter=True); self.assertEqual(self.focused(), ["alpha-main"])
+        self.t.keys("j"); time.sleep(0.3); self.assertEqual(self.focused(), ["pj-fallback"])
+        self.t.esc(); time.sleep(0.5)
+        self.assertEqual(len(self.names()), 9); self.assertEqual(self.focused(), ["pj-fallback"], "not back on charlie-59 (the card that had focus before /)")
+
+
+class ReviewWithPanes(WithPanes):
+    def test_clicking_the_preview_while_the_input_is_open_closes_the_input_and_enters_the_passthrough(self):
+        self.press("p"); self.assertTrue(wait(lambda: self.pv() is not None, 4))
+        self.t.keys("/"); time.sleep(0.3); self.t.lit("al"); time.sleep(0.3)
+        self.assertIn("▏", self.t.snap()[0].text); self.assertIn("enter keep the filter", last_text_row(self.t.snap()))
+        self.t.click(PV_X + 20, 12); time.sleep(0.6)
+        self.assertNotIn("▏", self.t.snap()[0].text, "the input is closed")
+        bar = last_text_row(self.t.snap()); self.assertIn("keys go to the pane", bar); self.assertNotIn("enter keep", bar)
+        self.assertTrue(self.preview_focused())
+
+    def test_a_locked_card_that_stops_matching_stays_on_screen_and_the_lock_holds(self):
+        self.t.keys("/"); self.t.lit("告警"); self.t.keys("Enter"); time.sleep(0.5)
+        self.assertEqual(len(find_cards(self.t.snap())), 1)
+        self.press("i"); self.assertTrue(wait(self.preview_focused, 3), self.t.text())
+        self.t.lit("ab"); time.sleep(0.4); self.assertEqual(self.cat("a3"), "ab")
+        S = json.loads((self.env.fake / "show.json").read_text())
+        for x in S:
+            if x["id"] == "a3":
+                x["summary"] = "renamed"  # no longer matches 告警
+        self.env.write_show(S); n = self.env.show_calls(); self.assertTrue(wait(lambda: self.env.show_calls() >= n + 2, 8)); time.sleep(0.5)
+        self.assertNotIn("session is gone", self.t.text(), "the card is still there, only its name stopped matching")
+        self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.c < PV_X]), 1, "the locked card stays displayed (the preview box on the right is not a card)")
+        self.t.lit("cd"); time.sleep(0.4); self.assertEqual(self.cat("a3"), "abcd", "keys still reach the locked pane")
+        self.assertTrue(self.preview_focused())
+
+
 if __name__ == "__main__":
     unittest.main()
