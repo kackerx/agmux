@@ -64,7 +64,8 @@
 - 审查退回（reviewer @b4b5351，探针 cr-t23-b4b5351/probes/）：1. 轮询后命中和标签仍画在旧坐标、压到别的卡上——改为轮询后按新布局重扫，「卡 → 标签」保留（design.md 已写）；探针 TestProbeFlashStaleAfterPoll。2. 收 probe_t23b_test.go 三条：TestProbeFlashNameCutByTime（名字宽度扣右侧时间）、TestProbeFlashOpenTitleAfterHit（前卡命中后下一组标题仍搜）、TestProbeFlashTitleJustAbove（标题在窗口上一行不画到顶栏）。3. spec 定稿：每张卡名字 + 分支合起来一处命中一个标签（按现有代码），组标题单独一处。
 - 验收：单测 标签避开后续字符（卡名 "alpha" "alps"，打 "al" 后标签不能是 p / s）；黑盒 `s` 打 `br` → 只有 bravo-* 卡有黄底 + 标签，按标签焦点到位；打到无命中时无标签、esc 退出。
 
-### T24 预览里画出 pane 的光标（4e0985d 审查 / 测试中；光标行落在被裁掉的空行时补白再画）
+### T24 预览里画出 pane 的光标（审查退回 1 必改 + 2 顺手改，待修）
+- 审查退回（reviewer @4e0985d，探针 cr-t24-4e0985d/probes/）：1. 必改：内容填满框、光标停在被裁掉的末尾空行（seq / tail -f 常态）时不画——有光标时末尾空行只裁到光标行为止（取 max(非空行数, cur.row+1) 再取最后 n 行，框少显示最上一行）；探针 TestProbeCursorBlankRowFullBox。2. tab 展开改按 8 列制表位（现在固定 4 格，光标列错位）；探针 TestProbeCursorAfterTab。3. 信息行认不出（旧 tmux 无 cursor_shape）也丢掉第一行、只是不画光标，不当屏幕内容。
 - 用户 2026-10-12 验收：预览里看不到光标。能解决：抓屏时顺带 `tmux display -p -t <pane> '#{cursor_x} #{cursor_y} #{cursor_flag} #{cursor_shape}'`（tmux 3.7 有这些变量，已查 man），在预览对应格子上画光标：cursor_flag=0 不画；shape 块状 → 该格反色；竖线/下划线 → 该格加 focus 色下划线（终端里画不出细竖线，用下划线替代）。滚动（scroll 偏移非 0）时不画。预览和直通态都画，直通态随每次抓屏刷新。
 - **先实测再写死**：dev 先用一个真 pane 验证 cursor_shape 的取值（0/1/2 还是文字）和 cursor_flag 在 vim 插入态 / Claude Code 输入框里的值，把结果写进 design.md 再实现。
 - 验收：黑盒 真 pane 里跑 `printf 'abc'` 后预览第一行第 4 格反色；`tput civis` 后不画；滚动后不画。
