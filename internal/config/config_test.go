@@ -71,7 +71,8 @@ func TestParseErrors(t *testing.T) {
 		{"[keys]\ndown = [\"enterr\"]\n", `cfg: keys.down: "enterr" is not a key name`},
 		{"[keys]\ndown = []\n", "cfg: keys.down: needs at least one key"},
 		{"[keys]\nquit = [\"j\"]\ndown = [\"j\"]\n", `cfg: keys.quit: "j" is already bound to down`}, // both written: error
-		{"[keys]\nfold = [\"x\"]\n", `cfg: keys.kill: no key left after "x" was taken by fold; bind one`},
+		{"[keys]\njump = [\"alt+ctrl+m\"]\n", `"alt+ctrl+m" arrives as alt+enter (the terminal sends the same byte); write "alt+enter"`},
+		{"[keys]\nkill = [\"alt+ctrl+c\"]\n", "cfg: keys.kill: ctrl+c can't be bound"},
 		{"[keys]\njump = [\"ctrl+m\"]\n", `cfg: keys.jump: "ctrl+m" arrives as enter (the terminal sends the same byte); write "enter"`},
 		{"[keys]\nfocus_preview = [\"ctrl+i\"]\n", `"ctrl+i" arrives as tab`},
 		{"[keys]\nkill = [\"ctrl+c\"]\n", "cfg: keys.kill: ctrl+c can't be bound (it always quits)"},
@@ -181,5 +182,21 @@ func TestDefaultKeys(t *testing.T) {
 	Default().Keys["up"][0] = "z"
 	if Default().Keys["up"][0] != "k" {
 		t.Error("changing one config changed the defaults")
+	}
+}
+
+// A default action left with no key by the file has none (no error): new default actions never
+// stop an old config from loading. Only an empty list the file writes is an error.
+func TestActionLeftWithNoKey(t *testing.T) {
+	c, err := Parse("cfg", []byte("[keys]\nfold = [\"a\"]\n")) // a is avatar's
+	if err != nil || len(c.Keys["avatar"]) != 0 || c.First("avatar") != "" || c.KeyMap()["a"] != "fold" {
+		t.Errorf("%v %v", err, c.Keys["avatar"])
+	}
+	if _, err := Parse("cfg", []byte("[keys]\navatar = []\n")); err == nil {
+		t.Error("an empty list the file writes is an error")
+	}
+	back, err := Parse("cfg", []byte(c.String())) // printed as a comment: loads back the same
+	if err != nil || !reflect.DeepEqual(back.Keys, c.Keys) || !strings.Contains(c.String(), "# avatar: no key") {
+		t.Errorf("round trip: %v\n%s", err, c.String())
 	}
 }

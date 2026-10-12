@@ -133,13 +133,17 @@ func Parse(path string, data []byte) (*Config, error) {
 			return nil, fmt.Errorf("%s: keys.%s: needs at least one key", path, action)
 		}
 		for _, k := range keys {
-			if as, ok := sentAs[k]; ok {
+			base, alt := strings.CutPrefix(k, "alt+")
+			if as, ok := sentAs[base]; ok {
+				if alt {
+					as = "alt+" + as
+				}
 				return nil, fmt.Errorf("%s: keys.%s: %q arrives as %s (the terminal sends the same byte); write %q", path, action, k, as, as)
 			}
 			if !validKey(k) {
 				return nil, fmt.Errorf("%s: keys.%s: %q is not a key name (examples: j, ctrl+k, enter, tab, shift+tab, esc, space, f5)", path, action, k)
 			}
-			if norm(k) == "ctrl+c" {
+			if base == "ctrl+c" {
 				return nil, fmt.Errorf("%s: keys.%s: ctrl+c can't be bound (it always quits)", path, action)
 			}
 		}
@@ -184,12 +188,9 @@ func Parse(path string, data []byte) (*Config, error) {
 		if _, set := raw.Keys[a]; set || modal[a] {
 			continue
 		}
-		kept := slices.DeleteFunc(slices.Clone(c.Keys[a]), func(k string) bool { return owner[norm(k)] != "" })
-		if len(kept) == 0 {
-			k := c.Keys[a][0]
-			return nil, fmt.Errorf("%s: keys.%s: no key left after %q was taken by %s; bind one", path, a, k, owner[norm(k)])
-		}
-		c.Keys[a] = kept
+		// left with none, the action has no key (and no footer entry): a new default action never
+		// stops an old config from loading
+		c.Keys[a] = slices.DeleteFunc(slices.Clone(c.Keys[a]), func(k string) bool { return owner[norm(k)] != "" })
 	}
 	return c, nil
 }
@@ -219,14 +220,23 @@ func (c *Config) Is(action, key string) bool {
 	return slices.ContainsFunc(c.Keys[action], func(k string) bool { return norm(k) == key })
 }
 
-// First is the key shown for action in the footer and prompts.
-func (c *Config) First(action string) string { return c.Keys[action][0] }
+// First is the key shown for action in the footer and prompts; "" when it has none.
+func (c *Config) First(action string) string {
+	if len(c.Keys[action]) == 0 {
+		return ""
+	}
+	return c.Keys[action][0]
+}
 
 // String is the effective config as TOML, ready to copy into config.toml.
 func (c *Config) String() string {
 	var b strings.Builder
 	b.WriteString("[keys]\n")
 	for _, a := range Actions {
+		if len(c.Keys[a]) == 0 { // "a = []" would not load back
+			fmt.Fprintf(&b, "# %s: no key (another action took its default)\n", a)
+			continue
+		}
 		q := make([]string, len(c.Keys[a]))
 		for i, k := range c.Keys[a] {
 			q[i] = strconv.Quote(k)

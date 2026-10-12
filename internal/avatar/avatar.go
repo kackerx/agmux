@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -168,29 +169,60 @@ func darken(c lipgloss.Color) lipgloss.Color {
 type Bindings interface {
 	Get(key string) (id string, ok bool)
 	Set(key, id string) error
+	Reload() error // pick up the file if someone else changed it; the error if it is unreadable
 }
 
-// FileBindings stores bindings in avatars.json as {"<key>":"<avatarID>"}.
+// FileBindings stores bindings in avatars.json as {"<key>":"<avatarID>"}. Another board, or a
+// hand edit, may change the file at any time: Set merges into what is on disk, Reload follows it.
 type FileBindings struct {
 	Path string
 	mu   sync.Mutex // the board sets while the poller reads
 	m    map[string]string
+	mod  time.Time // the file's mtime when m was read
 }
 
-// LoadBindings reads path; a missing file is an empty set.
+// LoadBindings reads path; a missing file is an empty set. On error the set is empty, still usable.
 func LoadBindings(path string) (*FileBindings, error) {
 	b := &FileBindings{Path: path, m: map[string]string{}}
-	data, err := os.ReadFile(path)
+	return b, b.Reload()
+}
+
+// read is what the file holds now (missing = empty) and its mtime.
+func (b *FileBindings) read() (map[string]string, time.Time, error) {
+	m := map[string]string{}
+	fi, err := os.Stat(b.Path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return b, nil
+		return m, time.Time{}, nil
 	}
 	if err != nil {
-		return b, err
+		return nil, time.Time{}, err
 	}
-	if err := json.Unmarshal(data, &b.m); err != nil {
-		return b, errors.New(path + ": not valid JSON, fix or delete it to reset avatar bindings (" + err.Error() + ")")
+	data, err := os.ReadFile(b.Path)
+	if err != nil {
+		return nil, time.Time{}, err
 	}
-	return b, nil
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, time.Time{}, errors.New(b.Path + ": not valid JSON, fix or delete it to reset avatar bindings (" + err.Error() + ")")
+	}
+	if m == nil { // the file says null
+		m = map[string]string{}
+	}
+	return m, fi.ModTime(), nil
+}
+
+// Reload rereads the file when its mtime moved (a file that can't be read is retried every time,
+// keeping what was read before).
+func (b *FileBindings) Reload() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if fi, err := os.Stat(b.Path); err == nil && fi.ModTime().Equal(b.mod) {
+		return nil
+	}
+	m, mod, err := b.read()
+	if err == nil {
+		b.m, b.mod = m, mod
+	}
+	return err
 }
 
 func (b *FileBindings) Get(key string) (string, bool) {
@@ -200,23 +232,47 @@ func (b *FileBindings) Get(key string) (string, bool) {
 	return id, ok
 }
 
-// Set writes the whole file atomically (tmp + rename) so a crash never leaves it half-written.
+// Set adds one binding to what the file holds now, never to a stale copy, and writes it whole and
+// atomically (temp file + rename). A file it can't read is not overwritten.
+// ponytail: the lock is per process; two boards binding in the same instant can still lose one.
 func (b *FileBindings) Set(key, id string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.m[key] = id
-	data, err := json.MarshalIndent(b.m, "", "  ")
+	m, _, err := b.read()
+	if err != nil {
+		return err
+	}
+	m[key] = id
+	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(b.Path), 0o755); err != nil {
 		return err
 	}
-	tmp := b.Path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(b.Path), "avatars-*.json.tmp") // another board may be writing too
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, b.Path)
+	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Chmod(0o644) // CreateTemp makes it 0600
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), b.Path)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	b.m = m
+	if fi, err := os.Stat(b.Path); err == nil {
+		b.mod = fi.ModTime()
+	}
+	return nil
 }
 
 // ByID finds a sprite by its ID.

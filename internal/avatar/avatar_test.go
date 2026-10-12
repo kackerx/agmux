@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -129,5 +130,113 @@ func TestForPrecedence(t *testing.T) {
 	}
 	if For(nil, nil, "hash", "x").ID != For(nil, nil, "nope", "x").ID {
 		t.Error("an unknown default is the hash pick")
+	}
+}
+
+// Set merges into what the file holds now: another board's binding, or a hand edit, survives.
+func TestSetMergesWithDisk(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "avatars.json")
+	b1, _ := LoadBindings(path)
+	b2, _ := LoadBindings(path)
+	if err := b1.Set("one", "bot-01"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b2.Set("two", "bot-02"); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(path, []byte(`{"one":"bot-01","two":"bot-02","hand":"bot-03"}`), 0o644)
+	if err := b1.Set("three", "bot-04"); err != nil {
+		t.Fatal(err)
+	}
+	b3, _ := LoadBindings(path)
+	for k, want := range map[string]string{"one": "bot-01", "two": "bot-02", "hand": "bot-03", "three": "bot-04"} {
+		if got, _ := b3.Get(k); got != want {
+			t.Errorf("%s: %q, want %q", k, got, want)
+		}
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o644 {
+		t.Errorf("mode %v", fi.Mode())
+	}
+	if m, _ := filepath.Glob(filepath.Join(filepath.Dir(path), "*.tmp")); len(m) != 0 {
+		t.Errorf("temp files left: %v", m)
+	}
+}
+
+// A file that can't be read is never overwritten; a write that fails leaves the bindings as they were.
+func TestSetFailures(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "avatars.json")
+	b, _ := LoadBindings(path)
+	b.Set("one", "bot-01")
+	os.WriteFile(path, []byte("{oops"), 0o644)
+	if err := b.Set("two", "bot-02"); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+		t.Errorf("err %v", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "{oops" {
+		t.Errorf("overwritten: %s", data)
+	}
+	if _, ok := b.Get("two"); ok {
+		t.Error("a refused binding is not in memory either")
+	}
+	os.Remove(path)
+	os.Chmod(dir, 0o555)
+	defer os.Chmod(dir, 0o755)
+	if err := b.Set("three", "bot-03"); err == nil {
+		t.Fatal("a read-only directory can't be written")
+	}
+	if _, ok := b.Get("three"); ok {
+		t.Error("memory changed though the file wasn't written")
+	}
+}
+
+// "null" is an empty set, not a nil map that panics on the first binding.
+func TestNullFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "avatars.json")
+	os.WriteFile(path, []byte("null"), 0o644)
+	b, err := LoadBindings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Set("one", "bot-01"); err != nil {
+		t.Fatal(err)
+	}
+	b.m = nil // as Reload would leave it if read() let null through
+	os.WriteFile(path, []byte("null"), 0o644)
+	os.Chtimes(path, time.Now(), time.Now().Add(time.Hour))
+	if err := b.Reload(); err != nil || b.m == nil {
+		t.Errorf("reload of null: %v %v", err, b.m)
+	}
+}
+
+// Reload follows the file when its mtime moves: another board's binding shows on the next poll;
+// a broken file reports, keeps what was read, and stops reporting once fixed.
+func TestReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "avatars.json")
+	b, _ := LoadBindings(path)
+	b.Set("one", "bot-01")
+	other, _ := LoadBindings(path)
+	other.Set("two", "bot-02")
+	os.Chtimes(path, time.Now(), time.Now().Add(time.Hour)) // a later mtime, whatever the clock's grain
+	if err := b.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := b.Get("two"); id != "bot-02" {
+		t.Error("another board's binding not picked up")
+	}
+	os.WriteFile(path, []byte("{oops"), 0o644)
+	os.Chtimes(path, time.Now(), time.Now().Add(2*time.Hour))
+	if err := b.Reload(); err == nil || b.Reload() == nil {
+		t.Error("a broken file reports, every poll")
+	}
+	if id, _ := b.Get("one"); id != "bot-01" {
+		t.Error("a broken file keeps the bindings read before")
+	}
+	os.WriteFile(path, []byte(`{"one":"bot-05"}`), 0o644)
+	os.Chtimes(path, time.Now(), time.Now().Add(3*time.Hour))
+	if err := b.Reload(); err != nil {
+		t.Errorf("fixed: %v", err)
+	}
+	if id, _ := b.Get("one"); id != "bot-05" {
+		t.Error("the fixed file is read")
 	}
 }

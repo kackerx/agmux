@@ -279,6 +279,17 @@ func TestAvatarsByName(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "avatars.json")); !strings.Contains(string(data), `"dev": "bot-05"`) {
 		t.Errorf("avatars.json: %s", data)
 	}
+	// no summary, same project: one name, one binding; both cards change at once
+	p.Show = func() ([]ccmux.Session, error) {
+		return []ccmux.Session{{ID: "p1", Project: "proj"}, {ID: "p2", Project: "proj"}, {ID: "id-3"}}, nil
+	}
+	p.Refresh()
+	if err := p.SetAvatar(byID(t, p.Sessions(), "p1"), "bot-04"); err != nil {
+		t.Fatal(err)
+	}
+	if a, b := byID(t, p.Sessions(), "p1").AvatarID, byID(t, p.Sessions(), "p2").AvatarID; a != "bot-04" || b != "bot-04" {
+		t.Errorf("same name: %s %s", a, b)
+	}
 	p.SetAvatar(byID(t, ss, "id-3"), "bot-02")
 	if data, _ := os.ReadFile(filepath.Join(dir, "avatars.json")); !strings.Contains(string(data), `"id-3": "bot-02"`) {
 		t.Errorf("no name: bound by ID: %s", data)
@@ -316,5 +327,33 @@ func TestSetAvatarWaitsForPoll(t *testing.T) {
 	p.refreshMu.Unlock()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// avatars.json is followed on every poll: another board's binding shows, a fixed file stops the error.
+func TestPollFollowsAvatarsFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	path := filepath.Join(dir, "agmux", "avatars.json")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	os.WriteFile(path, []byte("{oops"), 0o644)
+	p, _ := NewPoller()
+	p.Show = func() ([]ccmux.Session, error) { return []ccmux.Session{{ID: "a", Summary: "n"}}, nil }
+	p.Refresh()
+	if p.Err() == nil {
+		t.Fatal("broken file: error")
+	}
+	os.WriteFile(path, []byte(`{"n":"bot-06"}`), 0o644)
+	os.Chtimes(path, time.Now(), time.Now().Add(time.Hour))
+	p.Refresh()
+	if p.Err() != nil || p.Sessions()[0].AvatarID != "bot-06" {
+		t.Errorf("fixed by hand, another board's pick: err %v avatar %s", p.Err(), p.Sessions()[0].AvatarID)
+	}
+	os.WriteFile(path, []byte("{oops"), 0o644)
+	os.Chtimes(path, time.Now(), time.Now().Add(2*time.Hour))
+	p.Refresh()
+	os.WriteFile(path, []byte(`{}`), 0o644)
+	if err := p.SetAvatar(p.Sessions()[0], "bot-01"); err != nil || p.Err() != nil {
+		t.Errorf("a bind reads the file now: fixed, no error: %v %v", err, p.Err())
 	}
 }

@@ -430,14 +430,31 @@ type footerKey struct {
 var footerKeys = footerFor(config.Default())
 
 func footerFor(c *config.Config) []footerKey {
-	k := c.First
-	return []footerKey{
-		{k("down") + "/" + k("up") + " " + k("left") + "/" + k("right") + " move", false},
-		{k("jump") + " jump", true}, {k("search") + " search", false}, {k("flash") + " flash", false}, {k("fold") + " fold", false}, {k("preview") + " preview", false},
-		{k("focus_preview") + " focus preview", true}, {k("reply") + " reply", true}, {k("handoff") + " handoff", true},
-		{k("restart") + " restart", false}, {k("kill") + " kill", false}, {k("review") + " review", false},
-		{k("avatar") + " avatar", false}, {k("quit") + " quit", false},
+	var out []footerKey
+	add := func(needPane bool, text string, actions ...string) {
+		keys := make([]any, len(actions))
+		for i, a := range actions {
+			if keys[i] = c.First(a); keys[i] == "" { // an action left with no key isn't shown
+				return
+			}
+		}
+		out = append(out, footerKey{fmt.Sprintf(text, keys...), needPane})
 	}
+	add(false, "%s/%s %s/%s move", "down", "up", "left", "right")
+	add(true, "%s jump", "jump")
+	add(false, "%s search", "search")
+	add(false, "%s flash", "flash")
+	add(false, "%s fold", "fold")
+	add(false, "%s preview", "preview")
+	add(true, "%s focus preview", "focus_preview")
+	add(true, "%s reply", "reply")
+	add(true, "%s handoff", "handoff")
+	add(false, "%s restart", "restart")
+	add(false, "%s kill", "kill")
+	add(false, "%s review", "review")
+	add(false, "%s avatar", "avatar")
+	add(false, "%s quit", "quit")
+	return out
 }
 
 // avatarList is the avatar picker for s: two rows per sprite with its ID and name beside;
@@ -479,8 +496,13 @@ func overlay(screen string, box []string, w int) string {
 
 // put draws s over line from column x.
 func put(line string, x int, s string) string {
+	end := x + ansi.StringWidth(s)
+	right := ansi.TruncateLeft(line, end, "")
+	if ansi.StringWidth(right) > ansi.StringWidth(line)-end { // a wide character straddles the cut: a space for its half
+		right = " " + ansi.TruncateLeft(line, end+1, "")
+	}
 	// resets: an SGR left open where the line is cut must not color s, nor s the rest
-	return pad(ansi.Truncate(line, x, ""), x) + "\x1b[0m" + s + "\x1b[0m" + ansi.TruncateLeft(line, x+ansi.StringWidth(s), "")
+	return pad(ansi.Truncate(line, x, ""), x) + "\x1b[0m" + s + "\x1b[0m" + right
 }
 
 // flashAlphabet: home row first, as flash.tmux and sqlmux; then the same in upper case.

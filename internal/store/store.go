@@ -63,7 +63,7 @@ type Poller struct {
 	refreshMu sync.Mutex        // serializes Refresh; guards models
 	models    map[string]string // session ID → last model found in its jsonl
 
-	avatarErr error // avatars.json could not be read
+	avatarErr error // avatars.json could not be read, as of the last poll or bind
 
 	mu       sync.Mutex
 	sessions []Session
@@ -98,17 +98,17 @@ func (p *Poller) Err() error {
 }
 
 // SetAvatar binds s's key to sprite id in avatars.json; the sessions show it right away.
+// A file that can't be read is not overwritten (Set says why).
 func (p *Poller) SetAvatar(s Session, id string) error {
-	if p.avatarErr != nil { // writing would drop whatever the user may still fix in the file
-		return p.avatarErr
-	}
 	p.refreshMu.Lock() // a poll in flight read the old binding; it must not land after this
 	defer p.refreshMu.Unlock()
-	if err := p.Avatars.Set(s.AvatarKey(), id); err != nil {
-		return err
-	}
+	err := p.Avatars.Set(s.AvatarKey(), id)
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.avatarErr = err // the file was read just now: fixed, or still broken
+	if err != nil {
+		return err
+	}
 	ss := slices.Clone(p.sessions) // the board may still hold the old slice
 	for i := range ss {
 		if ss[i].AvatarKey() == s.AvatarKey() {
@@ -123,6 +123,10 @@ func (p *Poller) SetAvatar(s Session, id string) error {
 func (p *Poller) Refresh() error {
 	p.refreshMu.Lock()
 	defer p.refreshMu.Unlock()
+	var aerr error
+	if p.Avatars != nil { // another board, or a hand edit, may have changed avatars.json
+		aerr = p.Avatars.Reload()
+	}
 	raw, err := p.Show()
 	var ss []Session
 	if err == nil {
@@ -133,7 +137,7 @@ func (p *Poller) Refresh() error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.err = err
+	p.err, p.avatarErr = err, aerr
 	if err == nil {
 		p.sessions = ss
 	}

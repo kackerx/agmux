@@ -1142,6 +1142,9 @@ func TestPreviewFollowsEveryFocusChange(t *testing.T) {
 // pane changes, the next key is swallowed and the board takes the keys back — it never types into
 // whatever pane now sits where the session was.
 func TestPassThroughLock(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // it tells the borders apart by color
+	defer lipgloss.SetColorProfile(old)
 	for _, c := range []struct {
 		name  string
 		after []store.Session
@@ -1700,6 +1703,16 @@ func TestOverlay(t *testing.T) {
 	if got != "abcdXXghij\n0123YY6789\nklmnopqrst" {
 		t.Errorf("%q", got)
 	}
+	if got := ansi.Strip(overlay("a\nb\nc\nd\ne", []string{"X"}, 1)); got != "a\nb\nX\nd\ne" {
+		t.Errorf("centered vertically: %q", got)
+	}
+	// a wide character cut in half by the box: a space for the half that shows, the line keeps its width
+	if got := ansi.Strip(put("a你cd", 0, "XY")); got != "XY cd" {
+		t.Errorf("right cut: %q", got)
+	}
+	if got := ansi.Strip(put("你cd", 1, "X")); got != " Xcd" {
+		t.Errorf("left cut: %q", got)
+	}
 	if got := ansi.Strip(overlay("abc", []string{"XXXXX"}, 3)); got != "XXX" {
 		t.Errorf("a box wider than the screen is cut: %q", got)
 	}
@@ -1983,5 +1996,25 @@ func TestEscClearsKeptFilter(t *testing.T) {
 	}
 	if _, quit = press(t, m, "esc"); !quit {
 		t.Error("then esc quits")
+	}
+}
+
+// a on a folded title: nothing to bind, says so.
+func TestAvatarOnFoldedTitle(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "f", "a")
+	if m.mode != browsing || !strings.Contains(ansi.Strip(m.View()), "fold a group? pick a card first") {
+		t.Errorf("mode %v", m.mode)
+	}
+}
+
+// An action the config left with no key is not in the footer.
+func TestFooterSkipsKeylessAction(t *testing.T) {
+	c, _ := config.Parse("cfg", []byte("[keys]\nfold = [\"a\"]\n"))
+	f := ""
+	for _, k := range footerFor(c) {
+		f += k.text + " · "
+	}
+	if strings.Contains(f, "avatar") || !strings.Contains(f, "a fold") || strings.Contains(f, " avatar") {
+		t.Errorf("%s", f)
 	}
 }

@@ -454,6 +454,9 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m.jump(s)
 	}
 	if !ok { // the rest act on a session; a folded title has none
+		if action == "avatar" {
+			return m.say(cMuted, "fold a group? pick a card first"), nil
+		}
 		return m, nil
 	}
 	switch action {
