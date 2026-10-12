@@ -37,10 +37,10 @@ def last_text_row(snap):
 
 
 class Layout(unittest.TestCase):
-    """Column count / width algorithm: n=floor((W+2)/42), colW=floor((W-2(n-1))/n), remainder left empty on the right."""
+    """Column count / width algorithm: n=min(4, floor((W+2)/42)), colW=floor((W-2(n-1))/n), remainder left empty on the right."""
 
     def test_widths(self):
-        for W in (40, 81, 82, 123, 124, 165, 166, 200, 207, 208, 232, 249, 250):
+        for W in (40, 81, 82, 123, 124, 165, 166, 200, 207, 208, 232, 249, 250, 300):
             with self.subTest(W=W):
                 env = Env(); self.addCleanup(env.cleanup)
                 fx = build_fixture(env)
@@ -170,7 +170,8 @@ class Content(unittest.TestCase):
     def test_line3_bar_and_counts(self):
         a1, b1 = self.card("a1"), self.card("b1")
         self.assertEqual(a1.rows[3].find("■"), 2, "the bar starts under the avatar, at the left edge of the body")
-        self.assertEqual(a1.rows[3].find(" 41%"), 8, "6 cells: exactly as wide as the avatar above it")
+        self.assertEqual(a1.rows[3].width_text(2, 8), "■" * 6, "6 cells: exactly as wide as the avatar above it")
+        self.assertEqual(a1.rows[3].width_text(8, 10), "  ", "no percentage number after the bar")
         self.assertIn("⚇ 2 agents", a1.line(3)); self.assertRegex(a1.line(3), r"agents [│┃]$")
         self.assertIn("⚇ 1 agent", b1.line(3)); self.assertNotIn("1 agents", b1.line(3))
         for sid in NAMES:
@@ -189,10 +190,12 @@ class Content(unittest.TestCase):
                 self.assertEqual(len(filled), (p * 6 + 50) // 100, f"{p}%: filled cells of 6 (rounded)")
                 self.assertTrue(all(x[1] == col for x in filled), f"{p}% colour {[x[1] for x in filled]} want {col}")
                 self.assertTrue(all(x[1] == C_DIM for x in sq[len(filled):]))
-                self.assertIn(f"{p}%", row.text, "the number is the truncated percentage")
+                self.assertNotRegex(row.text, r"\d\s*%", "T8: no percentage number; the colour is the hint")
         c = self.card("a2")
         sq = [x for x in c.rows[3].cells if x[0] == "■"]
-        self.assertEqual((len(sq), {x[1] for x in sq}), (6, {C_DIM})); self.assertIn("--", c.line(3))
+        self.assertEqual((len(sq), {x[1] for x in sq}), (6, {C_DIM})); self.assertNotIn("--", c.line(3), "unknown: six dark cells, no `--`")
+        for card in self.cards:
+            self.assertNotIn("%", card.line(3)); self.assertNotIn("--", card.line(3))
 
     def test_border_colour_is_status_colour(self):
         self.assertEqual(border_colours(self.card("a1")), {C_FOCUS}, "a1 is focused: #ff8ebe overrides its (working) status colour")
@@ -243,19 +246,23 @@ class FocusMove(unittest.TestCase):
 
 
 class Wide232(unittest.TestCase):
-    """The user's popup: 232 columns -> 5 columns of 44, all five groups on one band."""
+    """The user's popup: 232 columns -> capped at 4 columns of 56 (5 columns left no room for branch names); the 5th group wraps to a second band."""
 
-    def test_five_columns(self):
+    def test_four_columns_max(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
-        t = Term(env, w=232, h=50); self.addCleanup(t.close)
-        cs = ready(t); self.assertTrue(cs, t.text())
-        self.assertEqual(layout(232), (5, 44))
-        self.assertEqual({c.w for c in cs}, {44})
-        first = [c for c in cs if c.r == min(x.r for x in cs)]
-        self.assertEqual(sorted(c.c for c in first), [0, 46, 92, 138, 184], "5 columns")
-        titles = t.snap()[min(x.r for x in cs) - 1].text
-        self.assertEqual(titles.count("▾"), 5, titles)
-        self.assertEqual(len(t.text().rstrip("\n").split("\n")), 50)
+        for W, colW in ((232, 56), (300, 73), (250, 61)):
+            with self.subTest(W=W):
+                t = Term(env, w=W, h=50); self.addCleanup(t.close)
+                cs = ready(t); self.assertTrue(cs, t.text())
+                self.assertEqual(layout(W), (4, colW))
+                self.assertEqual({c.w for c in cs}, {colW})
+                top = min(x.r for x in cs)
+                self.assertEqual(sorted(c.c for c in cs if c.r == top), [i * (colW + 2) for i in range(4)], "4 columns")
+                snap = t.snap(); self.assertEqual(snap[top - 1].text.count("▾"), 4, snap[top - 1].text)
+                echo = [c for c in cs if "echo-long" in c.line(1)]
+                self.assertEqual(len(echo), 1); self.assertGreater(echo[0].r, top + 15, "the fifth group is on a second band")
+                self.assertEqual(echo[0].c, 0)
+                t.close()
 
 
 class Narrow(unittest.TestCase):
@@ -321,6 +328,28 @@ class ModelCache(unittest.TestCase):
         self.assertIn("opus", c.line(2).lower(), "model must be kept from the previous poll:\n" + t.text())
 
 
+class BarEdges(unittest.TestCase):
+    """0% and unknown are both six dark cells; any non-zero percentage fills at least one cell (design: 非零至少 1 格)."""
+
+    def test_zero_unknown_small_and_full(self):
+        env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
+        for sid, p in (("n-a1", 0), ("n-b1", 1), ("n-c1", 4), ("n-c2", 100)):
+            env.hud(sid, json.dumps({"context_window": {"used_percentage": p}}))
+        t = Term(env, w=200, h=50); self.addCleanup(t.close)
+        cs = ready(t); self.assertTrue(cs)
+
+        def fills(name):
+            sq = [x for x in by_name(cs, name).rows[3].cells if x[0] == "■"]
+            return len(sq), [x[1] for x in sq if x[1] != C_DIM]
+        self.assertEqual(fills("alpha-main"), (6, []), "0%: six dark cells")
+        self.assertEqual(fills("pj-fallback"), (6, []), "unknown: six dark cells")
+        n, f = fills("bravo-29"); self.assertEqual((n, f), (6, [C_GREEN]), "1% -> one green cell")
+        n, f = fills("charlie-30"); self.assertEqual((n, f), (6, [C_GREEN]), "4% -> still one cell")
+        n, f = fills("charlie-59"); self.assertEqual((n, f), (6, [C_RED] * 6), "100% -> six red cells")
+        for c in cs:
+            self.assertNotRegex(c.rows[3].width_text(2, 14), r"%|--|\d", "nothing but the bar on the left of line 3")
+
+
 class HudModel(unittest.TestCase):
     """T6 acceptance: the model.display_name that `agmux statusline` captured shows on the card (full chain: payload -> file -> store -> card)."""
 
@@ -335,7 +364,7 @@ class HudModel(unittest.TestCase):
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs)
         b1 = by_name(cs, "bravo-29")
-        self.assertRegex(b1.line(2), r"Fancy Model 9 [│┃]$", b1.line(2)); self.assertIn("77%", b1.line(3))
+        self.assertRegex(b1.line(2), r"Fancy Model 9 [│┃]$", b1.line(2)); self.assertNotIn("%", b1.line(3))
         sq = [x for x in b1.rows[3].cells if x[0] == "■"]
         self.assertEqual(len([x for x in sq if x[1] == C_RED]), (77 * 6 + 50) // 100, "77% -> red, 5 of 6 cells")
 

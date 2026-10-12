@@ -405,9 +405,9 @@ def build_fixture(env, with_hud=True):
     )
 
 
-MIN_COL, GAP = 40, 2  # S1.1: column minimum 40 (was 56)
+MIN_COL, GAP, MAX_COLS = 40, 2, 4  # S1.1: column minimum 40; T8: at most 4 columns
 
 
 def layout(W):
-    n = max(1, (W + GAP) // (MIN_COL + GAP))
+    n = max(1, min(MAX_COLS, (W + GAP) // (MIN_COL + GAP)))
     return n, (W - 2 * (n - 1)) // n
