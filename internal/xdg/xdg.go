@@ -2,15 +2,20 @@
 package xdg
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
 // StateDir is $XDG_STATE_HOME/agmux, defaulting to ~/.local/state/agmux.
-func StateDir() string {
-	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
-		return filepath.Join(d, "agmux")
+// A relative $XDG_STATE_HOME is ignored, as the XDG spec says.
+func StateDir() (string, error) {
+	if d := os.Getenv("XDG_STATE_HOME"); filepath.IsAbs(d) {
+		return filepath.Join(d, "agmux"), nil
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "agmux")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot locate the state directory: %w; set $HOME or an absolute $XDG_STATE_HOME", err)
+	}
+	return filepath.Join(home, ".local", "state", "agmux"), nil
 }

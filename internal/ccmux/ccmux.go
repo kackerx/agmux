@@ -51,11 +51,12 @@ func Run(args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, "ccmux", args...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd.WaitDelay = time.Second // don't hang on children that keep the pipes open after a timeout kill
 	err := cmd.Run()
 	switch {
 	case errors.Is(err, exec.ErrNotFound):
 		return nil, fmt.Errorf("ccmux not found in $PATH: install ccmux and make sure `ccmux show --json` works")
-	case ctx.Err() != nil:
+	case err != nil && ctx.Err() != nil:
 		return nil, fmt.Errorf("ccmux %s: timed out after %s", strings.Join(args, " "), timeout)
 	case err != nil:
 		msg := strings.TrimSpace(stderr.String())

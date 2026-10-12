@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -44,13 +43,20 @@ type Poller struct {
 	Show     func() ([]ccmux.Session, error)
 	StateDir string // where HUD files <nativeSessionId>.json live
 
+	refreshMu sync.Mutex        // serializes Refresh; guards models
+	models    map[string]string // session ID → last model found in its jsonl
+
 	mu       sync.Mutex
 	sessions []Session
 	err      error
 }
 
-func NewPoller() *Poller {
-	return &Poller{Show: ccmux.Show, StateDir: xdg.StateDir()}
+func NewPoller() (*Poller, error) {
+	dir, err := xdg.StateDir()
+	if err != nil {
+		return nil, err
+	}
+	return &Poller{Show: ccmux.Show, StateDir: dir}, nil
 }
 
 func (p *Poller) Sessions() []Session {
@@ -68,6 +74,8 @@ func (p *Poller) Err() error {
 
 // Refresh polls ccmux once.
 func (p *Poller) Refresh() error {
+	p.refreshMu.Lock()
+	defer p.refreshMu.Unlock()
 	raw, err := p.Show()
 	var ss []Session
 	if err == nil {
@@ -115,12 +123,21 @@ func (p *Poller) convert(r ccmux.Session) Session {
 	if r.LogPath != "" {
 		s.Model = lastModel(r.LogPath)
 	}
+	// ~8% of transcripts end in a big attachment / long line with no assistant entry in the tail
+	if p.models == nil {
+		p.models = map[string]string{}
+	}
+	if s.Model == "" {
+		s.Model = p.models[s.ID]
+	} else {
+		p.models[s.ID] = s.Model
+	}
 	return s
 }
 
 // hudContextPct reads context_window.used_percentage from a claude-hud payload.
-// Missing or unparsable file = unknown (-1), never an error.
-// ponytail: model / effort / session_name are not read until a real payload confirms their names.
+// Missing or unparsable file = unknown (-1), never an error. Truncated like claude-hud (29.6 → 29).
+// ponytail: model / effort are not read until a real payload confirms their field names.
 func hudContextPct(path string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -134,7 +151,7 @@ func hudContextPct(path string) int {
 	if json.Unmarshal(data, &hud) != nil || hud.ContextWindow.UsedPercentage == nil {
 		return -1
 	}
-	return int(math.Round(*hud.ContextWindow.UsedPercentage))
+	return int(*hud.ContextWindow.UsedPercentage)
 }
 
 const tailBytes = 64 << 10
@@ -152,7 +169,8 @@ func lastModel(path string) string {
 	if err != nil {
 		return ""
 	}
-	off := max(fi.Size()-tailBytes, 0)
+	// one extra byte: if the cut lands exactly on a line start, the dropped "partial" first line is empty
+	off := max(fi.Size()-tailBytes-1, 0)
 	buf, err := io.ReadAll(io.NewSectionReader(f, off, fi.Size()-off))
 	if err != nil {
 		return ""

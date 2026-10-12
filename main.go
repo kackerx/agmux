@@ -33,7 +33,10 @@ func main() {
 	case "board":
 		err = board()
 	case "show":
-		err = show(os.Stdout, store.NewPoller())
+		var p *store.Poller
+		if p, err = store.NewPoller(); err == nil {
+			err = show(os.Stdout, p)
+		}
 	case "avatars":
 		for _, s := range avatar.Sprites {
 			fmt.Printf("%s  %s\n%s\n\n", s.ID, s.Name, avatar.Render(s, "claude", avatar.Normal, 0))
@@ -68,14 +71,17 @@ func show(w io.Writer, p *store.Poller) error {
 
 // board is the S1 skeleton; cards and layout land once the visual design is settled.
 func board() error {
-	p := store.NewPoller()
+	p, err := store.NewPoller()
+	if err != nil {
+		return err
+	}
 	if err := p.Refresh(); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go p.Run(ctx)
-	_, err := tea.NewProgram(boardModel{p}, tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(boardModel{p}, tea.WithAltScreen()).Run()
 	return err
 }
 

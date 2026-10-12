@@ -73,12 +73,16 @@ func TestHUD(t *testing.T) {
 		body string
 		want int
 	}{
-		{`{"context_window":{"used_percentage":41.6,"remaining_percentage":58.4},"rate_limits":{"used_percentage":99}}`, 42},
+		// rate_limits first: an implementation grabbing the first used_percentage gets 99
+		{`{"rate_limits":{"five_hour":{"used_percentage":99}},"context_window":{"used_percentage":41.6,"remaining_percentage":58.4}}`, 41},
+		{`{"context_window":{"used_percentage":29.6}}`, 29}, // truncated, like claude-hud
 		{`{"context_window":{"used_percentage":0}}`, 0},
 		{`{"context_window":{"used_percentage":null}}`, -1},
 		{`{"context_window":`, -1}, // half-written: treat as missing
 	} {
-		os.WriteFile(hud, []byte(c.body), 0o644)
+		if err := os.WriteFile(hud, []byte(c.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		p.Refresh()
 		if got := p.Sessions()[0].ContextPct; got != c.want {
 			t.Errorf("%s: ContextPct=%d want %d", c.body, got, c.want)
@@ -90,7 +94,9 @@ func TestLastModel(t *testing.T) {
 	dir := t.TempDir()
 	write := func(lines ...string) string {
 		f := filepath.Join(dir, "s.jsonl")
-		os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+		if err := os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		return f
 	}
 	asst := func(m string) string { return `{"type":"assistant","message":{"model":"` + m + `"}}` }
@@ -105,6 +111,8 @@ func TestLastModel(t *testing.T) {
 		{"none", []string{`{"type":"user"}`}, ""},
 		// the old assistant line falls outside the 64KB tail
 		{"only tail read", []string{asst("old"), `{"type":"user","pad":"` + strings.Repeat("x", tailBytes) + `"}`}, ""},
+		// the window starts exactly at the assistant line: it is whole, so it must count
+		{"cut on line start", []string{`{"type":"user"}`, asst("edge"), `{"type":"user","pad":"` + strings.Repeat("x", tailBytes-len(asst("edge"))-1-len(`{"type":"user","pad":""}`)-1) + `"}`}, "edge"},
 		{"cut first line ignored", []string{`{"type":"user","pad":"` + strings.Repeat("x", tailBytes) + `"}`, asst("new")}, "new"},
 	}
 	for _, c := range cases {
@@ -123,5 +131,29 @@ func TestRefreshErrorKeepsSessions(t *testing.T) {
 	p.Show = func() ([]ccmux.Session, error) { return nil, os.ErrDeadlineExceeded }
 	if p.Refresh() == nil || p.Err() == nil || len(p.Sessions()) != n {
 		t.Fatalf("failed poll should keep %d sessions and expose the error", n)
+	}
+}
+
+func TestModelCache(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "s.jsonl")
+	raw := []ccmux.Session{{ID: "a", LogPath: log}}
+	p := &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: dir}
+	write := func(body string) {
+		if err := os.WriteFile(log, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"type":"user"}` + "\n")
+	p.Refresh()
+	if m := p.Sessions()[0].Model; m != "" {
+		t.Fatalf("first poll with no assistant: %q", m)
+	}
+	write(`{"type":"assistant","message":{"model":"claude-opus-5-5"}}` + "\n")
+	p.Refresh()
+	write(`{"type":"user","pad":"` + strings.Repeat("x", tailBytes) + `"}` + "\n")
+	p.Refresh()
+	if m := p.Sessions()[0].Model; m != "claude-opus-5-5" {
+		t.Fatalf("assistant scrolled out of the tail: got %q, want the cached model", m)
 	}
 }
