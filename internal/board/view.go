@@ -278,11 +278,12 @@ func line3(s store.Session, w int) string {
 			model += fg(cMuted, "·") + fg(cEffort, s.Effort)
 		}
 	}
-	if mw := ansi.StringWidth(model); mw+1 > room { // last to go: cut the model to what is left
-		model = ansi.Truncate(model, max(room-1, 0), "…")
+	// two cells before the model, or `⚇ 2 Opus 5.5` reads as two Opuses
+	if mw := ansi.StringWidth(model); mw+2 > room { // last to go: cut the model to what is left
+		model = ansi.Truncate(model, max(room-2, 0), "…")
 	}
 	if model != "" {
-		room -= ansi.StringWidth(model) + 1
+		room -= ansi.StringWidth(model) + 2 // what's left of the model keeps ≥ 2 cells away from it
 	}
 
 	var counts []string

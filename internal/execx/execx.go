@@ -15,12 +15,18 @@ import (
 const timeout = 10 * time.Second
 
 // Run execs `bin args...` and returns stdout. On failure the error carries bin's stderr.
-func Run(bin string, args ...string) ([]byte, error) {
+func Run(bin string, args ...string) ([]byte, error) { return RunIn(nil, bin, args...) }
+
+// RunIn is Run with stdin (nil = none).
+func RunIn(stdin []byte, bin string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	cmd.WaitDelay = time.Second // don't hang on children that keep the pipes open after a timeout kill
 	err := cmd.Run()
 	line := bin + " " + strings.Join(args, " ")

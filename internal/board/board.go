@@ -29,9 +29,10 @@ type Source interface {
 
 // Runner runs ccmux and tmux; tests swap in one that records them.
 type Runner interface {
-	Run(args ...string) error             // ccmux; error carries its stderr
-	Interactive(args ...string) *exec.Cmd // ccmux, given the terminal via tea.ExecProcess
-	Tmux(args ...string) (string, error)  // tmux from $PATH, reaching the server through the inherited $TMUX
+	Run(args ...string) error                  // ccmux; error carries its stderr
+	Interactive(args ...string) *exec.Cmd      // ccmux, given the terminal via tea.ExecProcess
+	Tmux(args ...string) (string, error)       // tmux from $PATH, reaching the server through the inherited $TMUX
+	TmuxIn(stdin string, args ...string) error // tmux with stdin (load-buffer)
 }
 
 type realRunner struct{}
@@ -46,6 +47,11 @@ func (realRunner) Interactive(args ...string) *exec.Cmd { return exec.Command("c
 func (realRunner) Tmux(args ...string) (string, error) {
 	out, err := execx.Run("tmux", args...)
 	return string(out), err
+}
+
+func (realRunner) TmuxIn(stdin string, args ...string) error {
+	_, err := execx.RunIn([]byte(stdin), "tmux", args...)
+	return err
 }
 
 const frameEvery = 500 * time.Millisecond
@@ -73,8 +79,11 @@ type Model struct {
 	preview   bool       // p: show the focused pane on the right
 	pv        previewMsg // the latest capture
 	capturing bool       // a capture is in flight; don't stack them
-	pvFocus   bool       // tab: keys go to the previewed pane
+	pvFocus   bool       // keys go to the locked pane (see passThrough)
+	pvID      string     // the session pass-through was entered on
+	pvPane    string     // and its pane then; keys never go anywhere else
 	scroll    int        // lines the preview is scrolled back with the wheel
+	pvLines   int        // lines in the last capture, the most scroll can show
 	keys      *serial    // forwarded keys reach the pane in the order they were typed
 }
 
@@ -115,6 +124,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(nextFrame(), cmd)
 	case previewMsg:
 		m.pv, m.capturing = msg, false
+		if msg.sendErr { // the key didn't reach the pane: say so where errors go
+			m.msg = fg(cRed, " "+firstLine(msg.err.Error()))
+		} else if msg.err == nil {
+			m.pvLines = len(tail(msg.text, 1<<30))
+		}
 		// the focus moved while this capture was in flight: get the pane it is on now
 		if _, _, s, ok := m.current(); ok && s.TmuxPane != "" && s.TmuxPane != msg.pane {
 			cmd := m.capture()
@@ -146,6 +160,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok || nm.focus == before {
 			return tm, cmd
 		}
+		nm.scroll = 0 // a new card starts at the bottom
 		capture := nm.capture()
 		return nm, tea.Batch(cmd, capture)
 	}
@@ -206,20 +221,44 @@ func (m Model) alive(id string) bool {
 	return false
 }
 
-func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// the preview has the keys: everything but tab goes to the pane, ctrl+c included
-	// (Claude Code interrupts with it); quitting means tab back first
-	if m.pvFocus && m.previewOn() {
-		if _, _, s, ok := m.current(); ok && s.TmuxPane != "" {
-			if k.Type == tea.KeyTab {
-				m.pvFocus = false
-				return m, nil
-			}
-			cmd := m.forward(k)
-			return m, cmd
+// leaveKey takes the keys back from the preview (tab is Claude Code's completion key).
+const leaveKey = "ctrl+]"
+
+// passThrough: keys go to the pane — the preview is on and the session pass-through was entered
+// on still exists with the same pane. Keys, the footer and the border all ask this one question.
+func (m Model) passThrough() bool {
+	if !m.pvFocus || !m.previewOn() {
+		return false
+	}
+	for _, s := range m.src.Sessions() {
+		if s.ID == m.pvID {
+			return s.TmuxPane != "" && s.TmuxPane == m.pvPane
 		}
 	}
-	m.pvFocus = false
+	return false
+}
+
+// lock enters pass-through on session s.
+func (m *Model) lock(s store.Session) {
+	m.pvFocus, m.pvID, m.pvPane, m.msg = true, s.ID, s.TmuxPane, ""
+}
+
+func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// the preview has the keys: everything but ctrl+] goes to the locked pane, tab and ctrl+c
+	// included (Claude Code completes and interrupts with them); quitting means ctrl+] first
+	if m.pvFocus {
+		if k.String() == leaveKey || !m.passThrough() && k.Type == tea.KeyEsc {
+			m.pvFocus = false
+			return m, nil
+		}
+		if !m.passThrough() {
+			// the session ended or its pane changed: locked out. Swallow everything until the user
+			// takes the keys back, or the rest of what they were typing would run as board commands
+			return m, nil
+		}
+		cmd := m.forward(k)
+		return m, cmd
+	}
 	if k.Type == tea.KeyCtrlC {
 		return m, tea.Quit
 	}
@@ -264,7 +303,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "tab":
 		if m.previewOn() && ok && s.TmuxPane != "" {
-			m.pvFocus, m.msg = true, ""
+			m.lock(s)
 		}
 		return m, nil
 	case "p":
@@ -292,14 +331,15 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "H":
 		return m.send(s, "/handoff", "sent /handoff → "+s.Name)
-	case "s": // reply: open the preview if needed and give it the keys (P + tab)
+	case "s": // reply: open the preview if needed and give it the keys (p + tab)
 		if s.TmuxPane == "" {
 			return m, nil // msgLine already shows noPane
 		}
 		if m.w < previewMinTerm {
 			return m.say(cMuted, "the preview needs a terminal at least 100 columns wide"), nil
 		}
-		m.preview, m.pvFocus, m.msg = true, true, ""
+		m.preview = true
+		m.lock(s)
 		cmd := m.capture()
 		return m, cmd
 	case "x":
@@ -451,11 +491,22 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 	if exact == "" && own != "" {
 		// fl-* floats attach to a long-lived session whose shell started long ago, so the launcher
 		// can't reach agmux's process environment; it sets the session's environment instead
-		if out, err := r.Tmux("show-environment", "-t", own, "AGMUX_CLIENT"); err == nil {
+		// hidden (-h): a plain session variable would be inherited by panes opened later and then,
+		// as their process variable, win with a stale client
+		if out, err := r.Tmux("show-environment", "-h", "-t", own, "AGMUX_CLIENT"); err == nil {
 			if v, ok := strings.CutPrefix(strings.TrimSuffix(out, "\n"), "AGMUX_CLIENT="); ok { // "-AGMUX_CLIENT" = unset
 				exact = v
 			}
 		}
+	}
+	// a named client must be attached and not inside agmux's own session (a launcher reached from
+	// another float may pass that float's inner client; tty names get reused): otherwise guess
+	valid := false
+	for _, c := range clients {
+		valid = valid || c.name == exact && c.session != own
+	}
+	if !valid {
+		exact = ""
 	}
 	client := exact
 	if client == "" {
@@ -526,13 +577,13 @@ func (m Model) kill(s store.Session) (tea.Model, tea.Cmd) {
 func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.previewOn() && e.X >= m.cardsW() && e.Action == tea.MouseActionPress && m.mode == browsing {
 		switch e.Button {
-		case tea.MouseButtonWheelUp:
-			m.scroll = min(m.scroll+3, maxScroll)
+		case tea.MouseButtonWheelUp: // up to the oldest line captured, no further
+			m.scroll = min(m.scroll+3, max(m.pvLines-m.previewLinesN(), 0))
 		case tea.MouseButtonWheelDown:
 			m.scroll = max(m.scroll-3, 0)
-		case tea.MouseButtonLeft:
-			if _, _, s, ok := m.current(); ok && s.TmuxPane != "" {
-				m.pvFocus = true
+		case tea.MouseButtonLeft: // only the box counts, not the title row
+			if _, _, s, ok := m.current(); ok && s.TmuxPane != "" && e.Y >= 2 && e.Y <= 3+m.previewLinesN() {
+				m.lock(s)
 			}
 			return m, nil
 		default:
@@ -588,11 +639,14 @@ func (m Model) View() string {
 	_, _, focused, ok := m.current()
 	var right []string
 	if m.previewOn() {
-		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.pvFocus)
+		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.passThrough())
 	}
 	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right)
-	if m.pvFocus && m.previewOn() { // the footer is always the last line
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · tab back to the cards")
+	switch { // the footer is always the last line
+	case m.passThrough():
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · "+leaveKey+" back to the cards")
+	case m.pvFocus: // locked out: the target is gone, keys are being swallowed
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cRed, " session is gone · "+leaveKey+" back to the cards")
 	}
 	return out
 }

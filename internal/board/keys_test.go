@@ -61,6 +61,11 @@ func sent(pane, text string) [][]string {
 	return [][]string{{"tmux", "send-keys", "-t", pane, "-l", "--", text}, {"tmux", "send-keys", "-t", pane, "Enter"}}
 }
 
+func (f *fakeRunner) TmuxIn(stdin string, args ...string) error {
+	_, err := f.Tmux(append(args, "<stdin:"+stdin+">")...)
+	return err
+}
+
 func (f *fakeRunner) Run(args ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -93,6 +98,8 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlC}
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
+	case "ctrl+]":
+		return tea.KeyMsg{Type: tea.KeyCtrlCloseBracket}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
 	case "right":
@@ -441,7 +448,7 @@ func TestSwitchTo(t *testing.T) {
 	display := []string{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}
 	sw := func(c string) []string { return []string{"tmux", "switch-client", "-c", c, "-t", pane} }
 	detach := func(c string) []string { return []string{"tmux", "detach-client", "-t", c} }
-	showEnv := []string{"tmux", "show-environment", "-t", "fl-1", "AGMUX_CLIENT"}
+	showEnv := []string{"tmux", "show-environment", "-h", "-t", "fl-1", "AGMUX_CLIENT"}
 	for _, c := range []struct {
 		name    string
 		env     map[string]string
@@ -450,9 +457,15 @@ func TestSwitchTo(t *testing.T) {
 		want    [][]string
 		err     string
 	}{
-		{"AGMUX_CLIENT wins over activity", map[string]string{"AGMUX_CLIENT": "/dev/x"}, "",
+		{"AGMUX_CLIENT wins over activity", map[string]string{"AGMUX_CLIENT": "/dev/a"}, "",
 			"5\t/dev/a\tmain\n9\t/dev/b\tother\n",
-			[][]string{listClients, sw("/dev/x")}, ""},
+			[][]string{listClients, sw("/dev/a")}, ""},
+		{"AGMUX_CLIENT not attached (stale): guess, no detach", map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/gone"}, "fl-1\n",
+			"5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n",
+			[][]string{display, listClients, sw("/dev/outer")}, ""},
+		{"AGMUX_CLIENT is a client inside own session (another float's inner one): guess, no detach", map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/nested"}, "fl-1\n",
+			"5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n",
+			[][]string{display, listClients, sw("/dev/outer")}, ""},
 		{"direct popup: most recent client", nil, "",
 			"5\t/dev/a\tmain\n9\t/dev/b\tother\n3\t/dev/c\tmain\n",
 			[][]string{listClients, sw("/dev/b")}, ""},
@@ -492,7 +505,7 @@ func TestSwitchSessionEnv(t *testing.T) {
 	const pane = "%7"
 	clients := "5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n3\t/dev/old\tother\n"
 	display := []string{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}
-	showEnv := []string{"tmux", "show-environment", "-t", "fl-1", "AGMUX_CLIENT"}
+	showEnv := []string{"tmux", "show-environment", "-h", "-t", "fl-1", "AGMUX_CLIENT"}
 	for _, c := range []struct {
 		name    string
 		env     map[string]string
@@ -841,18 +854,18 @@ func TestPreviewPassThrough(t *testing.T) {
 	}
 	v := m.View()
 	focusEsc, _, _ := strings.Cut(fg(cFocus, "╭"), "╭")
-	if !strings.Contains(v, focusEsc+"╭") || !strings.HasSuffix(ansi.Strip(v), "keys go to the pane · tab back to the cards") {
+	if !strings.Contains(v, focusEsc+"╭") || !strings.HasSuffix(ansi.Strip(v), "keys go to the pane · ctrl+] back to the cards") {
 		t.Error("focused preview: #ff8ebe border and the pass-through footer")
 	}
 	r.calls = nil
 	m.scroll = 6
-	m, quit := press(t, m, "你好 world", "enter", "ctrl+c", "q", "esc")
-	if quit {
-		t.Fatal("ctrl+c / q / esc go to the pane while it has the keys")
+	m, quit := press(t, m, "你好 world", "enter", "ctrl+c", "q", "esc", "tab")
+	if quit || !m.pvFocus {
+		t.Fatal("ctrl+c / q / esc / tab go to the pane while it has the keys")
 	}
 	capture := []string{"tmux", "capture-pane", "-p", "-e", "-t", "%1", "-S", "-44"}
 	var want [][]string
-	for _, k := range [][]string{{"-l", "--", "你好 world"}, {"Enter"}, {"C-c"}, {"-l", "--", "q"}, {"Escape"}} {
+	for _, k := range [][]string{{"-l", "--", "你好 world"}, {"Enter"}, {"C-c"}, {"-l", "--", "q"}, {"Escape"}, {"Tab"}} {
 		want = append(want, append([]string{"tmux", "send-keys", "-t", "%1"}, k...), capture)
 	}
 	if !reflect.DeepEqual(r.calls, want) {
@@ -861,9 +874,9 @@ func TestPreviewPassThrough(t *testing.T) {
 	if m.scroll != 0 {
 		t.Error("a forwarded key scrolls the preview back to the bottom")
 	}
-	m, quit = press(t, m, "tab", "q")
+	m, quit = press(t, m, "ctrl+]", "q")
 	if m.pvFocus || !quit {
-		t.Error("tab gives the keys back to the board, then q quits")
+		t.Error("ctrl+] gives the keys back to the board, then q quits")
 	}
 
 	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "p", "j", "tab") // a2: no pane
@@ -875,6 +888,12 @@ func TestPreviewPassThrough(t *testing.T) {
 func TestPreviewWheelAndClicks(t *testing.T) {
 	r := &fakeRunner{}
 	m, _ := press(t, wide(r, 232, 50), "p")
+	var hist strings.Builder
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&hist, "line %d\n", i)
+	}
+	tm0, _ := m.Update(previewMsg{pane: "%1", text: hist.String()}) // 100 lines captured: room to scroll
+	m = tm0.(Model)
 	m.capturing = false
 	wheel := func(m Model, x int, b tea.MouseButton) (Model, tea.Cmd) {
 		tm, cmd := m.Update(tea.MouseMsg{X: x, Y: 10, Action: tea.MouseActionPress, Button: b})
@@ -1094,5 +1113,249 @@ func TestPreviewFollowsEveryFocusChange(t *testing.T) {
 	}
 	if pm := cmd().(previewMsg); pm.pane != "%1" {
 		t.Errorf("recaptured %s, want %%1", pm.pane)
+	}
+}
+
+// Pass-through is locked to the session and pane it was entered on. If that session ends or its
+// pane changes, the next key is swallowed and the board takes the keys back — it never types into
+// whatever pane now sits where the session was.
+func TestPassThroughLock(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		after []store.Session
+	}{
+		{"pane changed", []store.Session{{ID: "a1", Name: "one", GroupKey: "/a", TmuxPane: "%9", Status: "idle", ContextPct: -1}, sessions[2]}},
+		{"session gone", []store.Session{sessions[1], sessions[2]}},
+		{"gone, another session now in its pane", []store.Session{{ID: "decoy", Name: "decoy", GroupKey: "/a", TmuxPane: "%1", Status: "idle", ContextPct: -1}, sessions[2]}},
+		{"pane gone", []store.Session{{ID: "a1", Name: "one", GroupKey: "/a", Status: "idle", ContextPct: -1}, sessions[2]}},
+	} {
+		src := &mutSrc{ss: sessions}
+		r := &fakeRunner{}
+		m := New(src, r)
+		m.getenv = func(string) string { return "" }
+		tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+		m, _ = press(t, tm.(Model), "s") // locked on a1 / %1
+		src.ss = c.after
+		r.calls = nil
+		raw := m.View()
+		focusEsc, _, _ := strings.Cut(fg(cFocus, "╭"), "╭")
+		if strings.Contains(ansi.Strip(raw), "keys go to the pane") || strings.Contains(raw, focusEsc+"╭") {
+			t.Errorf("%s: the screen still shows pass-through (footer or pink preview border)", c.name)
+		}
+		// a burst arrives as several messages ("rm", " ", "-rf", " ", "build"): all swallowed
+		var quit bool
+		for _, k := range []tea.KeyMsg{key("rm"), {Type: tea.KeySpace, Runes: []rune(" ")}, key("-rf"), {Type: tea.KeySpace, Runes: []rune(" ")}, key("build"), key("x"), key("y"), key("q")} {
+			tm, cmd := m.Update(k)
+			m = tm.(Model)
+			if q := run(&m, cmd); q {
+				quit = true
+			}
+		}
+		for _, call := range r.calls {
+			if call[1] == "send-keys" || call[1] == "paste-buffer" {
+				t.Errorf("%s: typed into a pane: %q", c.name, call)
+			}
+		}
+		r.mu.Lock()
+		if n := len(r.calls); n != 0 && r.calls[0][0] != "tmux" {
+			t.Errorf("%s: board commands ran while locked out: %q", c.name, r.calls)
+		}
+		for _, call := range r.calls {
+			if call[0] != "tmux" || call[1] != "capture-pane" {
+				t.Errorf("%s: only captures may run while locked out, got %q", c.name, call)
+			}
+		}
+		r.mu.Unlock()
+		if quit || !strings.Contains(ansi.Strip(m.View()), "session is gone · ctrl+] back to the cards") {
+			t.Errorf("%s: locked out with a red footer (quit=%v)", c.name, quit)
+		}
+		if m, _ = press(t, m, "ctrl+]"); m.pvFocus {
+			t.Errorf("%s: ctrl+] takes the keys back", c.name)
+		}
+		if _, quit = press(t, m, "q"); !quit {
+			t.Errorf("%s: then the board has the keys again", c.name)
+		}
+	}
+}
+
+// esc also leaves the locked-out state (but is forwarded while the target is alive).
+func TestLockedOutEsc(t *testing.T) {
+	src := &mutSrc{ss: sessions}
+	m := New(src, &fakeRunner{})
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	m, _ = press(t, tm.(Model), "s")
+	src.ss = sessions[1:]
+	if m, _ = press(t, m, "esc"); m.pvFocus {
+		t.Error("esc leaves the locked-out state")
+	}
+}
+
+// Keys go to the pane pass-through was entered on, whatever card the focus is on.
+func TestForwardGoesToLockedPane(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "s") // locked on a1 / %1
+	m.focus = "b1"                          // however the focus moved, the lock holds
+	r.calls = nil
+	m, _ = press(t, m, "x")
+	if len(r.calls) == 0 || !reflect.DeepEqual(r.calls[0], []string{"tmux", "send-keys", "-t", "%1", "-l", "--", "x"}) {
+		t.Errorf("forwarded %q, want send-keys to %%1", r.calls)
+	}
+}
+
+// The preview key is p now; P does nothing.
+func TestCapitalPIsNotPreview(t *testing.T) {
+	if m, _ := press(t, wide(&fakeRunner{}, 232, 50), "P"); m.preview {
+		t.Error("P opened the preview")
+	}
+}
+
+func TestSendKeysEscaping(t *testing.T) {
+	for _, c := range []struct {
+		k    tea.KeyMsg
+		want []string
+	}{
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x;;")}, []string{"-l", "--", "x", `\;`, `\;`}},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(";")}, []string{"-l", "--", `\;`}},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a;b")}, []string{"-l", "--", "a;b"}},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(";"), Alt: true}, []string{`M-\;`}},
+		{tea.KeyMsg{Type: tea.KeyCtrlAt}, []string{"C-Space"}},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("@"), Alt: true}, []string{"M-@"}},
+	} {
+		if got, want := sendKeysArgs("%1", c.k), append([]string{"send-keys", "-t", "%1"}, c.want...); !reflect.DeepEqual(got, want) {
+			t.Errorf("%q: %q, want %q", c.k.String(), got, want)
+		}
+	}
+	for _, k := range []tea.KeyType{tea.KeyF13, tea.KeyF20} {
+		if got := sendKeysArgs("%1", tea.KeyMsg{Type: k}); got != nil {
+			t.Errorf("tmux has no %s: %q", tea.KeyMsg{Type: k}.String(), got)
+		}
+	}
+}
+
+// A paste goes in as one bracketed paste through a tmux buffer, not line by line.
+func TestPastePassThrough(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "s")
+	r.calls = nil
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("line 1\rline 2;"), Paste: true})
+	cmd()
+	want := [][]string{
+		{"tmux", "load-buffer", "-b", "agmux", "-", "<stdin:line 1\rline 2;>"},
+		{"tmux", "paste-buffer", "-p", "-d", "-b", "agmux", "-t", "%1"},
+		{"tmux", "capture-pane", "-p", "-e", "-t", "%1", "-S", "-44"},
+	}
+	if !reflect.DeepEqual(r.calls, want) {
+		t.Errorf("paste:\n %q\nwant\n %q", r.calls, want)
+	}
+}
+
+func TestPassThroughFailuresAndMouse(t *testing.T) {
+	// a key that fails to reach the pane says so on the message line
+	r := &fakeRunner{tmuxFail: map[string]error{"send-keys": errors.New("tmux send-keys: can't find pane %1")}}
+	m, _ := press(t, wide(r, 232, 50), "s")
+	tm, cmd := m.Update(key("x"))
+	tm, _ = tm.(Model).Update(cmd())
+	if m = tm.(Model); !strings.Contains(ansi.Strip(m.msg), "can't find pane %1") {
+		t.Error("a failed forward shows on the message line")
+	}
+	// pvFocus left set while the preview is closed: no pass-through footer
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "s")
+	m.preview = false
+	if strings.Contains(ansi.Strip(m.View()), "keys go to the pane") {
+		t.Error("no pass-through footer with the preview closed")
+	}
+	// the preview title row is not the box; a session without a pane can't be entered by click
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "p")
+	click := func(m Model, x, y int) Model {
+		tm, _ := m.Update(tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+		return tm.(Model)
+	}
+	if click(m, 200, 1).pvFocus {
+		t.Error("a click on the preview's title row doesn't enter pass-through")
+	}
+	if !click(m, 200, 10).pvFocus {
+		t.Error("a click in the box does")
+	}
+	if mm, _ := press(t, m, "j"); click(mm, 200, 10).pvFocus {
+		t.Error("no pane (a2): a click in the preview does nothing")
+	}
+	// while the kill prompt is open, the mouse does nothing
+	mm, _ := press(t, m, "x")
+	mm.pvLines = 100
+	if got := click(mm, 200, 10); got.pvFocus {
+		t.Error("click ignored during the kill prompt")
+	}
+	tm, _ = mm.Update(tea.MouseMsg{X: 200, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	if tm.(Model).scroll != 0 {
+		t.Error("wheel ignored during the kill prompt")
+	}
+}
+
+// The wheel stops at the oldest captured line and a new card starts at the bottom.
+func TestScrollLimit(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "p")
+	var hist strings.Builder
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&hist, "line %d\n", i)
+	}
+	tm, _ := m.Update(previewMsg{pane: "%1", text: hist.String()})
+	m = tm.(Model)
+	for range 40 {
+		m.capturing = true // keep the wheel from capturing; only the bound matters here
+		tm, _ = m.Update(tea.MouseMsg{X: 200, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+		m = tm.(Model)
+	}
+	if m.scroll != 100-44 {
+		t.Errorf("scroll %d, want 56 (100 captured − 44 visible)", m.scroll)
+	}
+	if m, _ = press(t, m, "l"); m.scroll != 0 {
+		t.Errorf("a new card starts at the bottom: scroll %d", m.scroll)
+	}
+}
+
+// A capture queued before a key comes back before that key's own capture.
+func TestCaptureQueuedWithKeys(t *testing.T) {
+	for range 20 {
+		r := &fakeRunner{}
+		m, _ := press(t, wide(r, 232, 50), "s")
+		m.capturing = false
+		r.mu.Lock()
+		r.calls = nil
+		r.mu.Unlock()
+		tm, frame := m.Update(frameMsg{})
+		m = tm.(Model)
+		_, fwd := m.Update(key("x"))
+		var wg sync.WaitGroup
+		for _, c := range []tea.Cmd{fwd, frame} {
+			wg.Add(1)
+			go func(c tea.Cmd) { defer wg.Done(); runAll(c) }(c)
+		}
+		wg.Wait()
+		var order []string
+		for _, c := range r.calls {
+			order = append(order, c[1])
+		}
+		if want := []string{"capture-pane", "send-keys", "capture-pane"}; !reflect.DeepEqual(order, want) {
+			t.Fatalf("order %v, want %v", order, want)
+		}
+	}
+}
+
+// Review leftovers: p captures on its own, s opens at exactly 100 columns, a scrolled preview on a
+// tiny terminal doesn't crash.
+func TestPreviewOpenEdges(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "l") // focus resolved first, so p's own capture is what counts
+	if _, cmd := m.Update(key("p")); cmd == nil {
+		t.Error("p captures right away")
+	}
+	if m, _ := press(t, wide(&fakeRunner{}, 100, 40), "s"); !m.previewOn() || !m.pvFocus {
+		t.Error("s opens the preview at exactly 100 columns")
+	}
+	for h := 5; h >= 1; h-- {
+		m, _ := press(t, wide(&fakeRunner{}, 120, 20), "p")
+		m.pv, m.scroll = previewMsg{pane: "%1", text: "a\nb\nc\nd\ne\nf\n"}, 3
+		tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: h})
+		_ = tm.(Model).View()
 	}
 }

@@ -298,6 +298,39 @@ func TestOrderIgnoresCcmuxOrder(t *testing.T) {
 
 // Line 3: the bar and the status word always show; as space runs out the detail goes first,
 // then the subagent / shell counts, then the model is cut.
+// Line 3's fields: the model only with a model, effort only after it, counts only when non-zero,
+// two cells between the counts and the model.
+func TestLine3Fields(t *testing.T) {
+	base := store.Session{Status: "idle", ContextPct: -1}
+	for _, c := range []struct {
+		name   string
+		w      int
+		mod    func(*store.Session)
+		want   string // the line ends with this
+		absent []string
+	}{
+		{"model and effort", 40, func(s *store.Session) { s.Model, s.Effort = "claude-opus-5-5", "high" }, "  Opus 5.5·high", nil},
+		{"model only", 40, func(s *store.Session) { s.Model = "claude-opus-5-5" }, "  Opus 5.5", []string{"·"}},
+		{"effort only: nothing", 40, func(s *store.Session) { s.Effort = "high" }, "⏸ idle", []string{"high", "·"}},
+		{"no agents, no shells", 40, func(s *store.Session) {}, "⏸ idle", []string{"⚇", "⚙", "0"}},
+		{"agents only", 40, func(s *store.Session) { s.Subagents = make([]ccmux.Subagent, 2) }, "⏸ idle  ⚇ 2", []string{"⚙"}},
+		{"shells only", 40, func(s *store.Session) { s.Shells = 1 }, "⏸ idle  ⚙ 1", []string{"⚇"}},
+		{"counts then two cells then the model", 29, func(s *store.Session) { s.Shells, s.Model = 1, "claude-opus-5-5" }, "⚙ 1  Opus 5.5", nil},
+	} {
+		s := base
+		c.mod(&s)
+		l := strings.TrimRight(ansi.Strip(line3(s, c.w)), " ") // 29 is exact for the last one: the gap is the two cells
+		if !strings.HasSuffix(l, c.want) {
+			t.Errorf("%s: %q, want it to end with %q", c.name, l, c.want)
+		}
+		for _, a := range c.absent {
+			if strings.Contains(strings.TrimPrefix(l, "■■■■■■"), a) {
+				t.Errorf("%s: %q must not contain %q", c.name, l, a)
+			}
+		}
+	}
+}
+
 func TestLine3Yields(t *testing.T) {
 	s := store.Session{Status: "working", PendingTool: "mcp__claude_ai_Claude_Docs__batch", Subagents: make([]ccmux.Subagent, 2),
 		Shells: 1, Model: "claude-opus-5-5", Effort: "high", ContextPct: 41}
@@ -307,12 +340,13 @@ func TestLine3Yields(t *testing.T) {
 		model        string // at the right edge
 	}{
 		{90, " · mcp__claude_ai_Claude_Docs__batch", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"},
-		{60, " · mcp__claude_ai_C…", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"}, // the detail is cut first
-		{44, "", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"},                     // 4 cells left: no bare " · …"
-		{40, "", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"},                     // then gone, " · " included
-		{33, "", "", "Opus 5.5·high"},                              // then the counts
-		{26, "", "", "Opus 5.…"},                                   // the model last
-		{17, "", "", ""},                                           // only bar + status word left
+		{60, " · mcp__claude_ai_…", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"}, // the detail is cut first
+		{46, " · m…", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"},               // 5 cells: one character of it
+		{44, "", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"},                    // 3 cells left: no bare " · …"
+		{41, "", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"},                    // then gone, " · " included
+		{40, "", "", "Opus 5.5·high"},                             // then the counts
+		{26, "", "", "Opus 5…"},                                   // the model last
+		{17, "", "", ""},                                          // only bar + status word left
 	} {
 		l := ansi.Strip(line3(s, c.w))
 		want := "■■■■■■  ⏵ working" + c.detail + c.cnts

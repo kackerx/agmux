@@ -77,7 +77,7 @@ const (
 	alertColor = lipgloss.Color("#ff6188")
 )
 
-// BandColor is the agentType color (ccmux's agent label colors), also used for the agent icon.
+// BandColor is the agentType color (ccmux's agent label colors).
 func BandColor(agentType string) lipgloss.Color {
 	switch agentType {
 	case "claude":

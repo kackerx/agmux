@@ -19,7 +19,7 @@ const (
 // previewW is the preview's share of a w-wide terminal: 40%, at least previewMinW.
 func previewW(w int) int { return max(previewMinW, w*40/100) }
 
-// previewOn: asked for with P and the terminal is wide enough right now.
+// previewOn: asked for with p and the terminal is wide enough right now.
 func (m Model) previewOn() bool { return m.preview && m.w >= previewMinTerm }
 
 // cardsW is the width the cards get: everything, or what the preview leaves.
@@ -33,10 +33,11 @@ func (m Model) cardsW() int {
 // previewLinesN is how many captured lines fit: the body minus the title and the box's two borders.
 func (m Model) previewLinesN() int { return max(m.h-3-3, 1) }
 
-// previewMsg is one capture of pane.
+// previewMsg is one capture of pane (sendErr: the key forwarded before it failed).
 type previewMsg struct {
 	pane, text string
 	err        error
+	sendErr    bool
 }
 
 // capture grabs the focused session's pane (nil when there is nothing to capture or one is in flight).
@@ -50,10 +51,11 @@ func (m *Model) capture() tea.Cmd {
 	}
 	m.capturing = true
 	r, pane, n := m.run, s.TmuxPane, m.previewLinesN()+m.scroll
-	return func() tea.Msg {
+	// through the key queue: a capture started before a key must not land after that key's capture
+	return m.keys.do(func() tea.Msg {
 		out, err := r.Tmux("capture-pane", "-p", "-e", "-t", pane, "-S", "-"+strconv.Itoa(n))
-		return previewMsg{pane, out, err}
-	}
+		return previewMsg{pane: pane, text: out, err: err}
+	})
 }
 
 // previewLines renders the preview region: h lines, each exactly w wide.
@@ -80,8 +82,9 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 		case pv.err != nil:
 			content = []string{fg(cRed, firstLine(pv.err.Error()))}
 		default:
-			content = tail(pv.text, h-3+scroll) // scroll lines back: drop that many from the bottom
-			content = content[:max(len(content)-scroll, min(len(content), h-3))]
+			n := max(h-3, 0)                  // rows inside the box; none on a tiny terminal
+			content = tail(pv.text, n+scroll) // scroll lines back: drop that many from the bottom
+			content = content[:max(len(content)-scroll, min(len(content), n))]
 		}
 	}
 	out := []string{pad(ansi.Truncate(" "+title, w, "…"), w)}
@@ -115,17 +118,30 @@ func tail(text string, n int) []string {
 var tmuxKeyNames = map[string]string{
 	"up": "Up", "down": "Down", "left": "Left", "right": "Right", "enter": "Enter", "esc": "Escape",
 	"backspace": "BSpace", "delete": "DC", "insert": "IC", "home": "Home", "end": "End",
-	"pgup": "PPage", "pgdown": "NPage", "tab": "Tab", "@": "Space",
+	"pgup": "PPage", "pgdown": "NPage", "tab": "Tab",
 	"f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5", "f6": "F6", "f7": "F7", "f8": "F8", "f9": "F9",
-	"f10": "F10", "f11": "F11", "f12": "F12", "f13": "F13", "f14": "F14", "f15": "F15", "f16": "F16",
-	"f17": "F17", "f18": "F18", "f19": "F19", "f20": "F20",
+	"f10": "F10", "f11": "F11", "f12": "F12", // tmux has no F13 and up: they'd arrive as the text "F13"
+}
+
+// literal sends text as typed. tmux takes an argument ending in ";" as a command separator (even
+// after -l --), so trailing semicolons go as separate `\;` arguments: `x;;` → x \; \;.
+func literal(pane, text string) []string {
+	args := []string{"send-keys", "-t", pane, "-l", "--"}
+	trimmed := strings.TrimRight(text, ";")
+	if trimmed != "" {
+		args = append(args, trimmed)
+	}
+	for range len(text) - len(trimmed) {
+		args = append(args, `\;`)
+	}
+	return args
 }
 
 // sendKeysArgs turns a key into tmux send-keys arguments for pane: text goes literally (-l --),
 // everything else by tmux key name with C- / M- / S- for ctrl / alt / shift. nil = no equivalent.
 func sendKeysArgs(pane string, k tea.KeyMsg) []string {
 	if (k.Type == tea.KeyRunes || k.Type == tea.KeySpace) && (!k.Alt || len(k.Runes) != 1) {
-		return []string{"send-keys", "-t", pane, "-l", "--", string(k.Runes)}
+		return literal(pane, string(k.Runes))
 	}
 	name := k.String()
 	if name == "shift+tab" {
@@ -137,16 +153,18 @@ func sendKeysArgs(pane string, k tea.KeyMsg) []string {
 			mods, name = mods+m[1], rest
 		}
 	}
-	if n, ok := tmuxKeyNames[name]; ok {
+	switch n, ok := tmuxKeyNames[name]; {
+	case ok:
 		name = n
-	} else if len([]rune(name)) != 1 {
+	case name == "@" && strings.Contains(mods, "C-"): // ctrl+@ is NUL, tmux's C-Space
+		name, mods = "Space", strings.Replace(mods, "C-", "", 1)+"C-"
+	case name == ";":
+		name = `\;` // a key name ending in ";" would be a command separator too
+	case len([]rune(name)) != 1:
 		return nil
 	}
 	return []string{"send-keys", "-t", pane, mods + name}
 }
-
-// maxScroll bounds how far back the wheel scrolls the preview.
-const maxScroll = 2000
 
 // serial runs jobs one at a time in the order they were queued. Forwarded keys go through it:
 // bubbletea runs each tea.Cmd on its own goroutine, so a fast burst ("a b c", split into one
@@ -170,21 +188,35 @@ func (s *serial) do(f func() tea.Msg) tea.Cmd {
 	return func() tea.Msg { return <-done }
 }
 
-// forward sends k to the focused pane and recaptures right after, in the same job, so the
-// capture can't come back before the key arrived.
+// forward sends k to the locked pane (pvPane) and recaptures right after, in the same job, so the
+// capture can't come back before the key arrived. A paste goes through a tmux buffer so the pane
+// gets it as a bracketed paste (several lines are not submitted one by one).
 func (m *Model) forward(k tea.KeyMsg) tea.Cmd {
-	_, _, s, ok := m.current()
-	args := sendKeysArgs(s.TmuxPane, k)
-	if !ok || s.TmuxPane == "" || args == nil {
-		return nil
+	pane := m.pvPane
+	var send func(r Runner) error
+	if k.Paste {
+		text := string(k.Runes)
+		send = func(r Runner) error {
+			if err := r.TmuxIn(text, "load-buffer", "-b", "agmux", "-"); err != nil {
+				return err
+			}
+			_, err := r.Tmux("paste-buffer", "-p", "-d", "-b", "agmux", "-t", pane)
+			return err
+		}
+	} else {
+		args := sendKeysArgs(pane, k)
+		if args == nil {
+			return nil
+		}
+		send = func(r Runner) error { _, err := r.Tmux(args...); return err }
 	}
 	m.scroll, m.capturing = 0, true
-	r, pane, n := m.run, s.TmuxPane, m.previewLinesN()
+	r, n := m.run, m.previewLinesN()
 	return m.keys.do(func() tea.Msg {
-		if _, err := r.Tmux(args...); err != nil {
-			return previewMsg{pane: pane, err: err}
+		if err := send(r); err != nil {
+			return previewMsg{pane: pane, err: err, sendErr: true}
 		}
 		out, err := r.Tmux("capture-pane", "-p", "-e", "-t", pane, "-S", "-"+strconv.Itoa(n))
-		return previewMsg{pane, out, err}
+		return previewMsg{pane: pane, text: out, err: err}
 	})
 }
