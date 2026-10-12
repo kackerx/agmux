@@ -2,12 +2,14 @@ package board
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kackerx/agmux/internal/store"
 )
@@ -18,8 +20,9 @@ func (s staticSrc) Sessions() []store.Session { return s }
 func (s staticSrc) Err() error                { return nil }
 
 type fakeRunner struct {
-	calls [][]string
-	err   error
+	calls  [][]string
+	err    error
+	script string // what Interactive runs (sh -c); default: true
 }
 
 func (f *fakeRunner) Run(args ...string) error {
@@ -29,7 +32,10 @@ func (f *fakeRunner) Run(args ...string) error {
 
 func (f *fakeRunner) Interactive(args ...string) *exec.Cmd {
 	f.calls = append(f.calls, append([]string{"(interactive)"}, args...))
-	return exec.Command("true")
+	if f.script == "" {
+		return exec.Command("true")
+	}
+	return exec.Command("/bin/sh", "-c", f.script)
 }
 
 // two groups: /a has a1 (pane) and a2 (background), /b has b1.
@@ -47,6 +53,10 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEsc}
 	case "ctrl+c":
 		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
+	case "right":
+		return tea.KeyMsg{Type: tea.KeyRight}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
@@ -104,21 +114,23 @@ func TestKeys(t *testing.T) {
 		{"l moves to next column", []string{"l", "enter"}, [][]string{{"switch", "b1"}}, true},
 		{"l then h comes back", []string{"l", "h", "r"}, [][]string{{"restart", "a1"}}, false},
 		{"j/k within column", []string{"j", "j", "r", "k", "r"}, [][]string{{"restart", "a2"}, {"restart", "a1"}}, false},
-		{"H sends /handoff", []string{"H"}, [][]string{{"send", "a1", "/handoff"}}, false},
+		{"H sends /handoff", []string{"H"}, [][]string{{"send", "a1", "--", "/handoff"}}, false},
 		{"d reviews interactively", []string{"d"}, [][]string{{"(interactive)", "review", "a1"}}, false},
 		{"x y kills", []string{"x", "y"}, [][]string{{"kill", "a1"}}, false},
 		{"x other cancels", []string{"x", "n", "x", "q"}, nil, false},
-		{"s types and sends", []string{"s", "hi", " ", "你好", "enter"}, [][]string{{"send", "a1", "hi 你好"}}, false},
+		{"s types and sends", []string{"s", "hi", " ", "你好", "enter"}, [][]string{{"send", "a1", "--", "hi 你好"}}, false},
 		{"s esc cancels", []string{"s", "hi", "esc"}, nil, false},
 		{"s empty cancels", []string{"s", " ", "enter"}, nil, false},
-		{"q in s mode is text", []string{"s", "q", "enter"}, [][]string{{"send", "a1", "q"}}, false},
+		{"q in s mode is text", []string{"s", "q", "enter"}, [][]string{{"send", "a1", "--", "q"}}, false},
 		{"background: enter / H / s refused", []string{"j", "enter", "H", "s", "x", "y"}, [][]string{{"kill", "a2"}}, false},
 		{"q quits", []string{"q"}, nil, true},
+		{"arrow keys move", []string{"down", "r", "right", "r"}, [][]string{{"restart", "a2"}, {"restart", "b1"}}, false},
+		{"text starting with - stays text", []string{"s", "--help", "enter"}, [][]string{{"send", "a1", "--", "--help"}}, false},
 		{"burst of keys = one by one", []string{"lr"}, [][]string{{"restart", "b1"}}, false},
-		{"burst keeps typed order", []string{"Hr"}, [][]string{{"send", "a1", "/handoff"}, {"restart", "a1"}}, false},
+		{"burst keeps typed order", []string{"Hr"}, [][]string{{"send", "a1", "--", "/handoff"}, {"restart", "a1"}}, false},
 		{"ctrl+c quits from the prompt", []string{"s", "hi", "ctrl+c"}, nil, true},
-		{"pasted newlines become spaces", []string{"s", "a\nb", "enter"}, [][]string{{"send", "a1", "a b"}}, false},
-		{"burst into the prompt", []string{"shi", "enter"}, [][]string{{"send", "a1", "hi"}}, false},
+		{"pasted newlines become spaces", []string{"s", "a\nb", "enter"}, [][]string{{"send", "a1", "--", "a b"}}, false},
+		{"burst into the prompt", []string{"shi", "enter"}, [][]string{{"send", "a1", "--", "hi"}}, false},
 	}
 	for _, c := range cases {
 		r := &fakeRunner{}
@@ -203,5 +215,62 @@ func TestPromptSurvivesResults(t *testing.T) {
 	tm, _ = m.Update(cmd()) // its result lands while the kill prompt is open
 	if !strings.Contains(tm.(Model).View(), "y 确认") {
 		t.Error("a finished command must not hide the open prompt")
+	}
+}
+
+func TestPasteIsNotKeys(t *testing.T) {
+	r := &fakeRunner{}
+	tm, cmd := newModel(r).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("xyHr"), Paste: true})
+	m := tm.(Model)
+	run(&m, cmd)
+	if len(r.calls) != 0 {
+		t.Errorf("a paste outside the prompt must not run commands: %q", r.calls)
+	}
+}
+
+func TestReview(t *testing.T) {
+	enableMouse := fmt.Sprintf("%T", tea.EnableMouseCellMotion())
+	for _, c := range []struct {
+		script, wantMsg string
+	}{
+		{"echo progress >&2; echo 'hunk: no changes to review' >&2; exit 1", "ccmux review: hunk: no changes to review"},
+		{"exit 2", "exit status 2"},
+		{"echo fine >&2", "review 结束：one"},
+	} {
+		m := newModel(&fakeRunner{script: c.script})
+		cmd, done := m.review(sessions[0])
+		msg := done(cmd.Run()) // what ExecProcess does once the terminal is back
+		tm, next := m.Update(msg)
+		if v := ansi.Strip(tm.(Model).View()); !strings.Contains(v, c.wantMsg) {
+			t.Errorf("%q: message line missing %q", c.script, c.wantMsg)
+		}
+		if next == nil || fmt.Sprintf("%T", next()) != enableMouse {
+			t.Errorf("%q: coming back from review must turn the mouse back on", c.script)
+		}
+	}
+}
+
+type errSrc struct {
+	staticSrc
+	err error
+}
+
+func (s errSrc) Err() error { return s.err }
+
+func TestPollErrorOnBoard(t *testing.T) {
+	m := New(errSrc{sessions, errors.New("ccmux show --json: boom\n  at x\n  at y")}, &fakeRunner{})
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	v := tm.(Model).View()
+	if n := len(strings.Split(v, "\n")); n != 30 || !strings.Contains(v, "ccmux show --json: boom") {
+		t.Errorf("poll error: %d lines (want 30), shown=%v", n, strings.Contains(v, "boom"))
+	}
+}
+
+func TestBackgroundHintOnce(t *testing.T) {
+	for _, k := range []string{"enter", "H", "s"} {
+		m, _ := press(t, newModel(&fakeRunner{}), "j", k) // a2 is the background session
+		if n := strings.Count(ansi.Strip(m.View()), noPane); n != 1 {
+			t.Errorf("%s on a background session: hint shown %d times, want 1", k, n)
+		}
 	}
 }

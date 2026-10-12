@@ -70,17 +70,21 @@ func TestBindings(t *testing.T) {
 	if len(seen) < 2 {
 		t.Fatalf("hash default gave every session the same avatar: %v", seen)
 	}
-	if err := b.Set("s1", "bot-04"); err != nil {
+	bound := "bot-01" // anything but s1's hash default, so reading the binding is observable
+	if For(nil, "s1").ID == bound {
+		bound = "bot-02"
+	}
+	if err := b.Set("s1", bound); err != nil {
 		t.Fatal(err)
 	}
 	b2, err := LoadBindings(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id, ok := b2.Get("s1"); !ok || id != "bot-04" || For(b2, "s1").ID != "bot-04" {
-		t.Fatalf("read back: %q %v", id, ok)
+	if id, ok := b2.Get("s1"); !ok || id != bound || For(b2, "s1").ID != bound || For(b2, "s1").ID == For(nil, "s1").ID {
+		t.Fatalf("read back: %q %v, For=%s", id, ok, For(b2, "s1").ID)
 	}
-	if data, _ := os.ReadFile(path); strings.TrimSpace(string(data)) != "{\n  \"s1\": \"bot-04\"\n}" {
+	if data, _ := os.ReadFile(path); strings.TrimSpace(string(data)) != "{\n  \"s1\": \""+bound+"\"\n}" {
 		t.Errorf("file format: %s", data)
 	}
 	if err := b2.Set("s2", "no-such-bot"); err != nil {

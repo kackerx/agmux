@@ -2,7 +2,11 @@
 package board
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -74,9 +78,10 @@ type frameMsg struct{}
 
 // doneMsg reports a finished ccmux command.
 type doneMsg struct {
-	ok   string // message on success
-	err  error
-	quit bool // leave the board on success (switch)
+	ok      string // message on success
+	err     error
+	quit    bool // leave the board on success (switch)
+	retrack bool // came back from ExecProcess: bubbletea v1 leaves the mouse off, turn it back on
 }
 
 func nextFrame() tea.Cmd { return tea.Tick(frameEvery, func(time.Time) tea.Msg { return frameMsg{} }) }
@@ -98,6 +103,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		default:
 			m.msg = fg(cMuted, " "+msg.ok)
+		}
+		if msg.retrack {
+			return m, tea.EnableMouseCellMotion
 		}
 	case tea.KeyMsg:
 		return m.key(msg)
@@ -210,7 +218,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.send(s, "/handoff", "已发送 /handoff → "+s.Name)
 	case "s":
 		if s.TmuxPane == "" {
-			return m.say(cMuted, noPane), nil
+			return m, nil // msgLine already shows noPane
 		}
 		m.mode, m.target, m.msg = typing, s, ""
 		return m, nil
@@ -221,9 +229,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.msg = fg(cMuted, " 重启 "+s.Name+"…")
 		return m, m.ccmux("已重启 "+s.Name, "restart", s.ID)
 	case "d":
-		return m, tea.ExecProcess(m.run.Interactive("review", s.ID), func(err error) tea.Msg {
-			return doneMsg{ok: "review 结束：" + s.Name, err: err}
-		})
+		return m, tea.ExecProcess(m.review(s))
 	default:
 		return m, nil
 	}
@@ -238,6 +244,27 @@ func (m Model) say(c lipgloss.Color, text string) Model {
 	return m
 }
 
+// review hands the terminal to `ccmux review`. Its stderr still reaches the terminal, and a
+// copy is kept so a failure shows ccmux's last word instead of a bare "exit status 1".
+func (m Model) review(s store.Session) (*exec.Cmd, tea.ExecCallback) {
+	c := m.run.Interactive("review", s.ID)
+	var buf bytes.Buffer
+	c.Stderr = io.MultiWriter(os.Stderr, &buf)
+	return c, func(err error) tea.Msg {
+		if err != nil {
+			if last := lastLine(buf.String()); last != "" {
+				err = errors.New("ccmux review: " + last)
+			}
+		}
+		return doneMsg{ok: "review 结束：" + s.Name, err: err, retrack: true}
+	}
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
 // ccmux runs `ccmux args...` off the UI goroutine and reports back with a doneMsg.
 func (m Model) ccmux(ok string, args ...string) tea.Cmd {
 	r := m.run
@@ -247,7 +274,7 @@ func (m Model) ccmux(ok string, args ...string) tea.Cmd {
 // jump switches tmux to the session and leaves the board (the popup must close to show it).
 func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	if s.TmuxPane == "" {
-		return m.say(cMuted, noPane), nil
+		return m, nil // msgLine already shows noPane
 	}
 	r := m.run
 	return m, func() tea.Msg { return doneMsg{err: r.Run("switch", s.ID), quit: true} }
@@ -256,11 +283,11 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
 	switch {
 	case s.TmuxPane == "":
-		return m.say(cMuted, noPane), nil
+		return m, nil // msgLine already shows noPane
 	case !m.alive(s.ID):
 		return m.say(cRed, s.Name+" 已经不在了，没有发送"), nil
 	}
-	return m, m.ccmux(ok, "send", s.ID, text)
+	return m, m.ccmux(ok, "send", s.ID, "--", text) // ccmux reads text starting with - as options
 }
 
 func (m Model) kill(s store.Session) (tea.Model, tea.Cmd) {

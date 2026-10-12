@@ -191,7 +191,7 @@ func LoadBindings(path string) (*FileBindings, error) {
 		return b, err
 	}
 	if err := json.Unmarshal(data, &b.m); err != nil {
-		return b, errors.New(path + ": not valid JSON (" + err.Error() + "); fix or delete it to reset avatar bindings")
+		return b, errors.New(path + ": not valid JSON, fix or delete it to reset avatar bindings (" + err.Error() + ")")
 	}
 	return b, nil
 }

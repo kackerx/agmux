@@ -39,7 +39,7 @@ var (
 	cGreen      = lipgloss.Color("#a6e3a1")
 	cYellow     = lipgloss.Color("#f9e2af")
 	cFocus      = lipgloss.Color("#f8f8f2")
-	cOff        = lipgloss.Color("#3b3d4d") // disabled footer keys (ccmux's separator color)
+	cOff        = lipgloss.Color("#45475a") // disabled footer keys: visible on #221e1e, darker than cMuted
 )
 
 func fg(c lipgloss.Color, s string) string { return lipgloss.NewStyle().Foreground(c).Render(s) }
