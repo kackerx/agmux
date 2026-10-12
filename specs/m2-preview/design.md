@@ -9,7 +9,7 @@
  ╭─ card ─╮               ╭─ card ─╮        ┃ │ tmux capture-pane -e 的内容（保留颜色）    │
  ╭─ card ─╮                                 ┃ │ …最后 N 行，N = 预览高度                  │
                                             ┃ ╰──────────────────────────────────────────╯
- j/k/h/l 卡片 · P 预览 · tab 进入预览 · …     ┃ [预览获焦时] 按键直通 pane · tab 回到卡片
+ j/k/h/l 卡片 · p 预览 · tab 进入预览 · …     ┃ [预览获焦时] keys go to the pane · tab back to the cards
 ```
 - `P`（M3 起改 `p`）开关预览；开着时预览占终端宽度 40%（最少 60 列，终端不足 100 列时不开、底栏提示；开着时缩到 100 列以下按 P 就是关掉，不只是提示），卡片区按剩余宽度用 M1 的列数算法重排。
 - 换焦点（键盘、鼠标、展开折叠组）都立即抓一次屏；抓屏在途时焦点变了，结果回来发现 pane 不是当前焦点就马上再抓一次。
@@ -19,8 +19,8 @@
 
 ## 按键直通（回复）
 - `s` = 打开预览（没开就开）并切焦点进预览，直接打字就是回复；原来的一行输入提示去掉（`H` 交接仍是直接 send-keys，不进预览）。
-- `tab` 从卡片区进入预览；**离开用 `ctrl+]`**（审查指出 tab 是 Claude Code 的补全键，直通里要用；M3 配置项 `focus_preview` / `leave_preview`）。预览获焦时边框变 #ff8ebe，底栏换成「keys go to the pane · ctrl+] back to the cards」。
-- 直通目标锁定：进入直通时记下会话 ID 和 pane；每个按键转发前核对三件事都成立：**当前焦点卡 == 记下的会话 ID**（轮询把焦点退回第一张卡、或会话挪进折叠组时，焦点就不再是它）、它还活着、pane 没变。目标 = 记下的 ID/pane，不是 m.focus；但 m.focus 偏离了记下的 ID 同样算失效——预览显示谁，键就只能发给谁。不满足就进入「锁定失效」态：**之后所有按键都吞掉**（不只是那一键——连发的文字会被拆成多条消息，还给看板就变成 r/x/d/f 命令），直到用户按 `ctrl+]` 或 esc 回到卡片；底栏红字 "session is gone · ctrl+] back to the cards"，预览边框恢复普通色；底栏 / 边框 / 按键分发共用同一个「直通有效」判断，不会出现屏幕显示直通而按键被当看板命令的情况。
+- `tab` 从卡片区进入预览（没开预览就先开再进）；**离开也用 `tab`**，预览不关（T21，用户实测 ctrl+] 不顺手后拍板；原「tab 是 Claude Code 补全键要留给直通」的顾虑作废——补全去真终端按，`shift+tab` 仍直通）。配置项 `focus_preview` / `leave_preview` 默认都是 `tab`，想用 ctrl+] 自己绑。预览获焦时边框变 #ff8ebe，底栏换成「keys go to the pane · tab back to the cards」。
+- 直通目标锁定：进入直通时记下会话 ID 和 pane；每个按键转发前核对三件事都成立：**当前焦点卡 == 记下的会话 ID**（轮询把焦点退回第一张卡、或会话挪进折叠组时，焦点就不再是它）、它还活着、pane 没变。目标 = 记下的 ID/pane，不是 m.focus；但 m.focus 偏离了记下的 ID 同样算失效——预览显示谁，键就只能发给谁。不满足就进入「锁定失效」态：**之后所有按键都吞掉**（不只是那一键——连发的文字会被拆成多条消息，还给看板就变成 r/x/d/f 命令），直到用户按 `tab`（leave_preview）或 esc 回到卡片；底栏红字 "session is gone · tab back to the cards"，预览边框恢复普通色；底栏 / 边框 / 按键分发共用同一个「直通有效」判断，不会出现屏幕显示直通而按键被当看板命令的情况。
 - 空粘贴（Runes 为空）直接忽略，不调 tmux；`paste-buffer` 出错时补 `delete-buffer -b agmux`，不让旧文本留在 buffer 里被下一次粘进别的 pane。
 - 终端缩到 100 列以下导致预览关闭时，直通直接退出（回卡片，消息行 "preview closed: terminal too narrow"），不显示 "session is gone"。
 - 轮询导致焦点换卡时 scroll 同样归零。
@@ -29,7 +29,7 @@
 - 键名：tmux 只有 F1–F12，F13 以上忽略；ctrl+@ 单独处理成 `C-Space`，不在表里映射 `@`。
 - 转发失败：消息行显示错误（和 ccmux/tmux 命令出错的约定一致），不只在预览框里。
 - 抓屏也走转发队列，避免按键前发起的定时抓屏晚于转发后的抓屏回来。
-- 预览获焦时，除 `tab` 外**所有**按键原样转给 pane：可打印字符和粘贴用 `tmux send-keys -t <pane> -l -- <text>`，enter / esc / 方向键 / ctrl-x / backspace 等按 tmux 的键名 `tmux send-keys -t <pane> <Key>`（和 ccmux 的做法一致）。这样 Claude Code 的 vim 模式、斜杠命令、shift+tab 都照常工作。
+- 预览获焦时，除 `tab`（leave_preview）外**所有**按键原样转给 pane：可打印字符和粘贴用 `tmux send-keys -t <pane> -l -- <text>`，enter / esc / 方向键 / ctrl-x / backspace 等按 tmux 的键名 `tmux send-keys -t <pane> <Key>`（和 ccmux 的做法一致）。这样 Claude Code 的 vim 模式、斜杠命令、shift+tab 都照常工作。
 - 转发后立刻抓一次屏，不等 500ms。
 - 鼠标滚轮在预览区：本地滚动，每格 3 行，按 `-S -(N+offset)` 抓更早的行；offset 上限 = 抓到的行数 − 可见行数（到顶就停，不空转累加）；任何转发的按键、换卡片都把 offset 归零。点击预览区只认正文区域（标题行 / 底栏不算）。
 
