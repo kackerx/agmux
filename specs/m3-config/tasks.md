@@ -16,7 +16,7 @@
 - `a` 浮层列表、j/k、enter 绑定写 avatars.json、esc 取消；当前绑定高亮。
 - 验收：单测 优先级三层；黑盒 a → 列表出现 6 个 sprite、光标在当前头像行，j 两次 enter 后卡片头像变成当前头像下两格的 sprite、avatars.json 里是 `{"<name>":"<id>"}`，重启看板仍是该头像；esc 不写文件。
 
-### T19 `/` 模糊搜索过滤（第二轮修复 224179b 复审中 / 补测中）
+### T19 `/` 模糊搜索过滤（第二轮测试通过 af8c753；复审退回 1 条一行改，第三轮）
 - 按 design.md「模糊搜索过滤」：fzf algo 封装在 internal/fuzzy（固定版本）、扩展语法、三字段高亮、实时过滤、`3/14` 计数、enter 保留 / esc 清空、no match、ctrl+h 退格。
 - 验收：单测 `orch` 命中 orchestrator、`^sql` 只命中前缀、`!test` 排除、`'main` 精确、smartcase；高亮位置按字素簇；过滤后布局只含命中卡片、组数变化；黑盒 fixture 输入 `orch` 只剩 orchestrator 卡，esc 恢复 9 张。
 - 复审退回（reviewer @d27522d，探针在其 scratch cr-t19-d27522d/probes/）：
@@ -25,6 +25,9 @@
   3. 过滤态下 `f` 不做事 + 消息行 "clear the filter to fold"（TestProbeFoldUnderFilter）。
   4. 测试缺口：收 probes/probe_fold_test.go 的 TestProbeFilterOpensFoldedForEverything 进 keys_test.go（钉住 items/current/方向键/flash/mouse 五处 foldedNow）。
   5. 顺手：输入框过滤条件补 `unicode.Is(unicode.Cf, r)`；n 含直通锁定保留的卡（spec 已写明，不改代码）。
+- 第三轮（reviewer @224179b，口径直接从「空模式 = 不过滤」推出，不升级）：
+  1. 输入框里查询为空时 enter 只关输入框、焦点不动（现在跳到轮询序第一张）：enter 分支加 `m.query != ""`；收探针 cr-t19-224179b/probes/probe_r2_test.go 的两条。
+  2. 保留着没命中的过滤时 esc，焦点留在按 `/` 之前那张（现在落看板第一项）：len(shown)==0 时跳过 esc 前的 current()。
 - 定稿（2026-10-12 tester 退回「折叠 + 空模式计数 9/9 但屏上 6 张」）：计数是命中数/会话总数，不是屏上卡数；空模式不过滤、折叠照旧，9/9 正确，不改代码，tester 改断言。
 
 ### T20 `s` 全局定位 flash + 回复改 `i`（通过 @00fcdab+b6b75e2，补测 4e5d63c / 套件 fa040a5）
