@@ -43,7 +43,7 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
                                ╭─ card ─╮
  ▾ ~/proj/sqlmux (5)           ▾ ~/proj/sqlmux-e2e (1)
  …
- j/k 卡片 · h/l 跨列 · enter 跳转 · f 折叠 · H 交接 · s 发送 · r 重启 · x 杀 · d review · q 退出   ← 底栏，ccmux 同款
+ j/k 卡片 · h/l 跨列 · enter 跳转 · f 折叠 · P 预览 · tab 进入预览 · s 回复 · H 交接 · r 重启 · x 杀 · d review · q 退出   ← 底栏，ccmux 同款
 ```
 - 排序固定，只由数据决定，轮询不会让卡片来回跳：组按 GroupKey（cwd 字符串）字典序；组内按会话名字典序，同名按 id。`ccmux show --json` 的数组顺序不参与排序。
 - 折叠：`f` 收起 / 展开焦点所在的组；收起的组只剩标题行 `▸ ~/路径 (n)`，仍占一个列位、标题可被焦点选中（j/k/h/l 把它当一张高度 1 的卡片），再按 `f` 或 enter 展开。折叠状态只在本次运行内记住。
@@ -74,7 +74,7 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 - 焦点卡片边框高亮；方向键 / hjkl **按屏幕位置空间导航**（第四轮验收：组折到第二带后 j/k 过不去）：j/k = 与当前卡片横向重叠最多、在其下方 / 上方最近的卡片（跨组、跨带）；h/l = **只在当前这一带内**、该方向**最近的一列**里找：列里取与当前卡片纵向重叠最多的，一个都不重叠就取纵向最近的（折叠标题和长短列错位时不至于卡住）；该带那一侧没有列就停住，不跨带。j/k 不做这种退让。折叠的组标题当高度 1 的卡片参与；到边缘停住。鼠标点卡片 = 选中。
 - enter 或双击 / 单击已选中的卡片：`ccmux switch <id>` 然后退出 TUI（popup 关掉才能看到目标 pane）。
 - `H`：`ccmux send <id> /handoff`（agent 正在 working 时会排到下一轮，这是 ccmux 的行为）。
-- `r` = `ccmux restart <id>`，`x` = `ccmux kill <id>`（按 y 执行，其它键取消），`d` = `ccmux review <id>`——它是交互式 TUI（内部起 hunk），用 `tea.ExecProcess` 把终端交给它，退出后回看板；`s` = 提示输入一行后 `ccmux send <id> <text>`。
+- `r` = `ccmux restart <id>`，`x` = `ccmux kill <id>`（按 y 执行，其它键取消），`d` = `ccmux review <id>`——它是交互式 TUI（内部起 hunk），用 `tea.ExecProcess` 把终端交给它，退出后回看板；`s` = 打开预览（没开就开）并把焦点切进预览，之后按键直通 pane——等于 `P` + `tab`，没有单独的输入框（第六轮验收去掉了原来的一行输入提示）。
 - `f` 折叠 / 展开焦点所在的组（见「布局与卡片」）。
 - `q` / esc 退出。`ccmux` 子命令的 stderr 显示在底栏一行，不弹窗。
 - `tmuxPane` 为 null（background）的会话：switch / send 置灰，底栏提示。

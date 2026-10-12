@@ -16,6 +16,7 @@
 - 焦点换卡片，预览跟着换；焦点在折叠标题或 background 会话（无 pane）上时预览显示「没有 pane」。
 
 ## 按键直通（回复）
+- `s` = 打开预览（没开就开）并切焦点进预览，直接打字就是回复；原来的一行输入提示去掉（`H` 交接仍是直接 send-keys，不进预览）。
 - `tab` 在卡片区和预览之间切焦点；预览获焦时边框变 #ff8ebe，底栏换成提示「按键直通 pane · tab 回到卡片」。
 - 预览获焦时，除 `tab` 外**所有**按键原样转给 pane：可打印字符和粘贴用 `tmux send-keys -t <pane> -l -- <text>`，enter / esc / 方向键 / ctrl-x / backspace 等按 tmux 的键名 `tmux send-keys -t <pane> <Key>`（和 ccmux 的做法一致）。这样 Claude Code 的 vim 模式、斜杠命令、shift+tab 都照常工作。
 - 转发后立刻抓一次屏，不等 500ms。
