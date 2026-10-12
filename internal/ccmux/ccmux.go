@@ -56,6 +56,9 @@ func Run(args ...string) ([]byte, error) {
 	cmd.WaitDelay = time.Second // don't hang on children that keep the pipes open after a timeout kill
 	err := cmd.Run()
 	switch {
+	case errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState.Success():
+		// ccmux exited 0 but left a background child holding stdout; what it printed is complete
+		return stdout.Bytes(), nil
 	case errors.Is(err, exec.ErrNotFound):
 		return nil, fmt.Errorf("ccmux not found in $PATH: install ccmux and make sure `ccmux show --json` works")
 	case err != nil && ctx.Err() != nil:

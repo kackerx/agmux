@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeCcmux puts a shell script named ccmux first on $PATH.
@@ -30,6 +31,12 @@ func TestRun(t *testing.T) {
 	fakeCcmux(t, "exit 4")
 	if _, err := Run("kill", "x"); err == nil || err.Error() != "ccmux kill x: exit status 4" {
 		t.Errorf("empty stderr: %v", err)
+	}
+
+	fakeCcmux(t, "echo '[]'; (/bin/sleep 6 &)")
+	start := time.Now()
+	if out, err := Run("show", "--json"); err != nil || string(out) != "[]\n" || time.Since(start) > 3*time.Second {
+		t.Errorf("child holding stdout after exit 0: %q %v after %s", out, err, time.Since(start))
 	}
 
 	t.Setenv("PATH", t.TempDir())

@@ -63,9 +63,12 @@ func TestBindings(t *testing.T) {
 	if _, ok := b.Get("s1"); ok {
 		t.Fatal("missing file should be empty")
 	}
-	def := For(b, "s1")
-	if For(b, "s1").ID != def.ID {
-		t.Fatal("default must be stable")
+	seen := map[string]bool{}
+	for _, id := range []string{"s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"} {
+		seen[For(b, id).ID] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("hash default gave every session the same avatar: %v", seen)
 	}
 	if err := b.Set("s1", "bot-04"); err != nil {
 		t.Fatal(err)
@@ -80,11 +83,15 @@ func TestBindings(t *testing.T) {
 	if data, _ := os.ReadFile(path); strings.TrimSpace(string(data)) != "{\n  \"s1\": \"bot-04\"\n}" {
 		t.Errorf("file format: %s", data)
 	}
-	b2.Set("s2", "no-such-bot")
-	if For(b2, "s2").ID == "no-such-bot" {
-		t.Error("unknown bound id should fall back to default")
+	if err := b2.Set("s2", "no-such-bot"); err != nil {
+		t.Fatal(err)
 	}
-	os.WriteFile(path, []byte("{oops"), 0o644)
+	if got, want := For(b2, "s2").ID, For(nil, "s2").ID; got != want {
+		t.Errorf("unknown bound id: got %s, want the hash default %s", got, want)
+	}
+	if err := os.WriteFile(path, []byte("{oops"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := LoadBindings(path); err == nil {
 		t.Error("corrupt file should error")
 	}
