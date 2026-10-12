@@ -70,7 +70,7 @@ type Session struct {
 - 换算放在 store 里做一次，view 只读结果。
 - 底栏或消息行的错误只取第一行（ccmux 的 stderr 常是多行），总行数永远等于终端高度。
 - 这些字段 T1 没解析（`attentionState`、`lastPrompt`），T3 补进 `ccmux.Session` / `store.Session`，T1 不返工。
-- 上下文条：■（U+25A0）10 格，空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 10 格全暗 + `--`。
+- 上下文条：■（U+25A0）10 格，空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 10 格全暗 + `--`。格数四舍五入（29% → 3 格，数字仍显示截断后的 29）。
 - 第 3 行左边：background 模式用 `backgroundDetail`，否则按 `lastPrompt` 的形态取一行再截断：
   - cross-session message → `← <from-name>: <正文第一行>`
   - task-notification → 其 `<summary>` 文本
