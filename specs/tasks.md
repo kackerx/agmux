@@ -29,5 +29,19 @@
 - 键位和鼠标照 design.md；`ccmux` 子命令通过一个可替换的 runner 接口 exec（测试里换成记录命令的假 runner）。
 - 验收：单测断言按键 → 期望的 ccmux 命令行；tmux 黑盒：按 q 退出、enter 后进程退出。
 
+## S1.1 验收改版（用户 2026-10-12 验收意见）
+
+### T5 卡片改版（待做）
+- 列最小宽 56 → 40；头像 6×6 → 4×4（4 列 × 2 行，6 个 sprite 重画，色带保留）；名字前加 agent 图标（claude U+EC82 / codex U+EC81 / 其它 U+EC20，色带同色）。
+- 行内重排：第 1 行 图标+名 · 状态 · 时间；第 2 行 分支 · 模型·effort；第 3 行 上下文条+百分比 · ⚇ agents · ⚙ shell。去掉 prompt 行，删掉 promptLine / Detail 及其测试和 fixture 字段。
+- 验收：TestColumns 改成 {113→2, 81→1, 82→2, 232→5×44, 200→4×48}；`agmux avatars` 每块 2 行每行 4 格；卡片单测覆盖三行字段与让位顺序；`tmux -L` 232×50 真机 5 列。
+
+### T6 `agmux statusline` + `agmux setup`（待做）
+- 按 design.md「数据源 B」做。statusline：echo 一份假 payload 进去，文件落盘且原命令的 stdout 原样出来、退出码透传；写目录不可写时仍透传。setup：对临时 HOME 下的 settings.json 三种情况（无 statusLine / 有 X / 已是 agmux）打印正确，`--write` 后 JSON 其它键原样、有 .bak。
+- 验收：store 读到 `model.display_name` 显示在卡片；effort 字段等用户跑 `agmux setup --write` 后抓到真实 payload 再接（dev 不能改用户的 settings.json）。
+
+## S2 备忘
+- 预览窗口：选中卡片后在旁边 / 下方看最近对话（ccmux `last` / `screen`），替代 S1 去掉的 prompt 行。
+
 ## 待用户定
-- [ ] 批准在 ~/.config/bin/claude-hud 里加一行落盘 payload（数据源 B）。批准后 dev 抓一份真实 payload 定字段名。
+- [ ] T6 做完后用户自己跑 `agmux setup --write`，然后把 `~/.local/state/agmux/<自己会话 id>.json` 给 dev 核实 model / effort 字段名。
