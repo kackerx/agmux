@@ -956,12 +956,15 @@ func TestPreviewWheelAndClicks(t *testing.T) {
 func TestSReplies(t *testing.T) {
 	r := &fakeRunner{}
 	m := wide(r, 232, 50)
+	m, _ = press(t, m, "j", "k") // focus on a1 first: a focus change would capture on its own
 	tm, cmd := m.Update(key("i"))
 	m = tm.(Model)
 	if !m.previewOn() || !m.pvFocus || cmd == nil {
 		t.Fatalf("s: preview %v, keys %v", m.previewOn(), m.pvFocus)
 	}
-	cmd() // the opening capture
+	if msg, ok := cmd().(previewMsg); !ok || msg.pane != "%1" { // the opening capture
+		t.Fatalf("i captures the pane it opened on: %#v", msg)
+	}
 	m.capturing = false
 	r.calls = nil
 	m, quit := press(t, m, "hi", "q", "enter")
@@ -1716,5 +1719,71 @@ func TestAvatarBindError(t *testing.T) {
 	m, _ = press(t, tm.(Model), "a", "enter")
 	if v := ansi.Strip(m.View()); m.mode != browsing || !strings.Contains(v, "avatars.json: not valid JSON") || strings.Contains(v, "second line") || strings.Contains(v, "wears") {
 		t.Errorf("mode %v\n%s", m.mode, v)
+	}
+}
+
+// Every [colors] entry reaches the element design.md names for it (effort: never shown yet,
+// its field is unverified and never set).
+func TestEveryColorWired(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	toml := "[colors]\n"
+	sgr := map[string]string{}
+	for i, n := range config.Colors {
+		toml += fmt.Sprintf("%s = \"#0000%02x\"\n", n, i+1)
+		sgr[n] = fmt.Sprintf("38;2;0;0;%dm", i+1)
+	}
+	c, err := config.Parse("cfg", []byte(toml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	useConfig(c)
+	defer useConfig(config.Default())
+	has := func(what, s, color string, after ...string) {
+		t.Helper()
+		if !strings.Contains(s, sgr[color]+strings.Join(after, "")) {
+			t.Errorf("%s: no %s color in %q", what, color, s)
+		}
+	}
+	idle := store.Session{Name: "nm", Branch: "br", Model: "claude-opus-5-5", Status: "idle", AvatarID: "bot-01", AgentType: "claude", ContextPct: -1, TmuxPane: "%1"}
+	has("idle border", card(idle, 48, 5, false, 0, now), "idle")
+	has("focused border", card(idle, 48, 5, true, 0, now), "focus")
+	has("idle word", card(idle, 48, 5, false, 0, now), "muted")
+	has("name", card(idle, 48, 5, false, 0, now), "name", "nm")
+	has("branch", card(idle, 48, 5, false, 0, now), "branch", "\ue725 br")
+	has("model", card(idle, 48, 5, false, 0, now), "model")
+	done := idle
+	done.Done = true
+	has("done border", card(done, 48, 5, false, 0, now), "done")
+	working := idle
+	working.Status = "working"
+	has("working word", card(working, 48, 5, false, 0, now), "working", "⏵ working")
+	waiting := idle
+	waiting.Status = "waiting"
+	has("waiting word", card(waiting, 48, 5, false, 0, now), "attention", "⏳ waiting")
+	has("bar low", contextBar(10), "bar_low")
+	has("bar mid", contextBar(40), "bar_mid")
+	has("bar high", contextBar(70), "bar_high")
+	has("bar empty", contextBar(10), "bar_empty")
+	has("disabled footer keys", footer(true, 300), "disabled")
+	has("group title", header(group{key: "/x", sessions: []store.Session{idle}}, 40, false, false), "dir")
+	has("preview box", strings.Join(previewLines(idle, true, previewMsg{}, 60, 10, 0, false), "\n"), "idle")
+}
+
+// confirm and leave_preview may share keys with the board: each acts only in its own mode.
+func TestModalKeysShareBoardKeys(t *testing.T) {
+	m := withConfig(t, "[keys]\nconfirm = [\"enter\"]\nleave_preview = [\"tab\"]\n")
+	r := m.run.(*fakeRunner)
+	m, _ = press(t, m, "x", "enter")
+	if len(r.calls) == 0 || r.calls[len(r.calls)-1][0] != "kill" {
+		t.Errorf("enter confirms the kill: %q", r.calls)
+	}
+	m, _ = press(t, m, "p", "tab")
+	if !m.pvFocus {
+		t.Fatal("tab still enters the preview")
+	}
+	if m, _ = press(t, m, "tab"); m.pvFocus {
+		t.Error("and in pass-through tab leaves it")
 	}
 }

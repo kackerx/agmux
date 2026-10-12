@@ -263,7 +263,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// the preview has the keys: everything but leave_preview's keys (ctrl+]) goes to the locked
 	// pane, tab and ctrl+c included (Claude Code completes and interrupts with them)
 	if m.pvFocus {
-		if m.keymap[k.String()] == "leave_preview" || !m.passThrough() && k.Type == tea.KeyEsc {
+		if m.cfg.Is("leave_preview", k.String()) || !m.passThrough() && k.Type == tea.KeyEsc {
 			m.pvFocus = false
 			return m, nil
 		}
@@ -291,7 +291,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case confirmKill:
 		m.mode = browsing
-		if m.keymap[k.String()] != "confirm" {
+		if !m.cfg.Is("confirm", k.String()) {
 			return m, nil
 		}
 		return m.kill(m.target)

@@ -61,7 +61,7 @@ type Config struct {
 func Default() *Config {
 	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, AvatarDefault: "hash", AvatarBind: map[string]string{}}
 	for k, v := range defaultKeys {
-		c.Keys[k] = v
+		c.Keys[k] = slices.Clone(v) // callers may change c; the defaults stay
 	}
 	for k, v := range defaultColors {
 		c.Colors[k] = v
@@ -133,8 +133,14 @@ func Parse(path string, data []byte) (*Config, error) {
 			return nil, fmt.Errorf("%s: keys.%s: needs at least one key", path, action)
 		}
 		for _, k := range keys {
+			if as, ok := sentAs[k]; ok {
+				return nil, fmt.Errorf("%s: keys.%s: %q arrives as %s (the terminal sends the same byte); write %q", path, action, k, as, as)
+			}
 			if !validKey(k) {
 				return nil, fmt.Errorf("%s: keys.%s: %q is not a key name (examples: j, ctrl+k, enter, tab, shift+tab, esc, space, f5)", path, action, k)
+			}
+			if norm(k) == "ctrl+c" {
+				return nil, fmt.Errorf("%s: keys.%s: ctrl+c can't be bound (it always quits)", path, action)
 			}
 		}
 		c.Keys[action] = keys
@@ -160,27 +166,57 @@ func Parse(path string, data []byte) (*Config, error) {
 		}
 		c.AvatarBind[name] = id
 	}
-	seen := map[string]string{}
-	for _, action := range Actions {
-		for _, k := range c.Keys[action] {
-			if other, ok := seen[norm(k)]; ok && other != action {
-				return nil, fmt.Errorf("%s: keys.%s: %q is already bound to %s", path, action, k, other)
-			}
-			seen[norm(k)] = action
+	// what the file binds wins: two actions it binds can't share a key, but a key it binds is
+	// taken from the action that had it by default (so new default keys never break a config)
+	owner := map[string]string{}
+	for _, a := range Actions {
+		if modal[a] {
+			continue
 		}
+		for _, k := range raw.Keys[a] {
+			if o, ok := owner[norm(k)]; ok && o != a {
+				return nil, fmt.Errorf("%s: keys.%s: %q is already bound to %s", path, a, k, o)
+			}
+			owner[norm(k)] = a
+		}
+	}
+	for _, a := range Actions {
+		if _, set := raw.Keys[a]; set || modal[a] {
+			continue
+		}
+		kept := slices.DeleteFunc(slices.Clone(c.Keys[a]), func(k string) bool { return owner[norm(k)] != "" })
+		if len(kept) == 0 {
+			k := c.Keys[a][0]
+			return nil, fmt.Errorf("%s: keys.%s: no key left after %q was taken by %s; bind one", path, a, k, owner[norm(k)])
+		}
+		c.Keys[a] = kept
 	}
 	return c, nil
 }
 
-// KeyMap maps a key, as bubbletea's KeyMsg.String() spells it, to its action.
+// modal actions only act in their own mode (the kill prompt, pass-through), so they may share
+// keys with the board's; KeyMap leaves them out, Is asks about them.
+var modal = map[string]bool{"confirm": true, "leave_preview": true}
+
+// sentAs: key names bubbletea never reports, and what it reports instead.
+var sentAs = map[string]string{"ctrl+i": "tab", "ctrl+m": "enter"}
+
+// KeyMap maps a key, as bubbletea's KeyMsg.String() spells it, to its board action.
 func (c *Config) KeyMap() map[string]string {
 	m := map[string]string{}
 	for action, keys := range c.Keys {
 		for _, k := range keys {
-			m[norm(k)] = action
+			if !modal[action] {
+				m[norm(k)] = action
+			}
 		}
 	}
 	return m
+}
+
+// Is reports whether key (as KeyMsg.String() spells it) is bound to action.
+func (c *Config) Is(action, key string) bool {
+	return slices.ContainsFunc(c.Keys[action], func(k string) bool { return norm(k) == key })
 }
 
 // First is the key shown for action in the footer and prompts.
@@ -219,12 +255,17 @@ func spriteIDs() string {
 	return strings.Join(ids, ", ")
 }
 
-// norm spells a configured key the way bubbletea's KeyMsg.String() does.
+// norm spells a configured key the way bubbletea's KeyMsg.String() does: "space" is " ",
+// with alt+ too.
 func norm(k string) string {
-	if k == "space" {
-		return " "
+	rest, alt := strings.CutPrefix(k, "alt+")
+	if rest == "space" {
+		rest = " "
 	}
-	return k
+	if alt {
+		return "alt+" + rest
+	}
+	return rest
 }
 
 var keyNames = map[string]bool{

@@ -70,8 +70,15 @@ func TestParseErrors(t *testing.T) {
 		{"[keys]\ndown = [\"ctrl+\"]\n", `cfg: keys.down: "ctrl+" is not a key name`},
 		{"[keys]\ndown = [\"enterr\"]\n", `cfg: keys.down: "enterr" is not a key name`},
 		{"[keys]\ndown = []\n", "cfg: keys.down: needs at least one key"},
-		{"[keys]\nquit = [\"j\"]\n", `"j" is already bound to down`},
-		{"[keys]\nfold = [\"x\"]\n", `"x" is already bound to`}, // x is kill's default
+		{"[keys]\nquit = [\"j\"]\ndown = [\"j\"]\n", `cfg: keys.quit: "j" is already bound to down`}, // both written: error
+		{"[keys]\nfold = [\"x\"]\n", `cfg: keys.kill: no key left after "x" was taken by fold; bind one`},
+		{"[keys]\njump = [\"ctrl+m\"]\n", `cfg: keys.jump: "ctrl+m" arrives as enter (the terminal sends the same byte); write "enter"`},
+		{"[keys]\nfocus_preview = [\"ctrl+i\"]\n", `"ctrl+i" arrives as tab`},
+		{"[keys]\nkill = [\"ctrl+c\"]\n", "cfg: keys.kill: ctrl+c can't be bound (it always quits)"},
+		{"[keys]\nleave_preview = [\"ctrl+c\"]\n", "cfg: keys.leave_preview: ctrl+c can't be bound"},
+		{"colors = \"dark\"\n", "cfg: colors: must be a table, [colors]"},
+		{"avatars = 3\n", "cfg: toml:"},
+		{"[colors]\nworking = \"-1\"\n", `"-1" is neither`},
 		{"[colors]\nworking = \"#12345\"\n", `cfg: colors.working: "#12345" is neither #rrggbb nor an ANSI color 0-255`},
 		{"[colors]\nworking = \"256\"\n", `"256" is neither`},
 		{"[colors]\nworking = \"red\"\n", `"red" is neither`},
@@ -124,5 +131,55 @@ func TestAvatars(t *testing.T) {
 	}
 	if c, err := Parse("cfg", []byte("[avatars]\ndefault = \"bot-06\"\nbind = { x = \"bot-01\" }\n")); err != nil || c.AvatarDefault != "bot-06" || c.AvatarBind["x"] != "bot-01" {
 		t.Errorf("a sprite as default: %v", err)
+	}
+}
+
+// A key the file binds is taken from the action that had it by default; confirm and
+// leave_preview may share keys with the board's actions.
+func TestExplicitBindingWins(t *testing.T) {
+	c, err := Parse("cfg", []byte("[keys]\nquit = [\"j\"]\nconfirm = [\"enter\"]\nleave_preview = [\"tab\"]\nfold = [\"alt+space\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := c.KeyMap()
+	if !reflect.DeepEqual(c.Keys["down"], []string{"down"}) || m["j"] != "quit" || m["down"] != "down" {
+		t.Errorf("down %v, j → %q", c.Keys["down"], m["j"])
+	}
+	if m["enter"] != "jump" || m["tab"] != "focus_preview" || !c.Is("confirm", "enter") || !c.Is("leave_preview", "tab") || c.Is("confirm", "y") {
+		t.Errorf("modal keys: %v", m)
+	}
+	if m["ctrl+]"] != "" || m["y"] != "" {
+		t.Errorf("KeyMap is the board's keys only: %v", m)
+	}
+	if m["alt+ "] != "fold" {
+		t.Errorf(`alt+space is bubbletea's "alt+ ": %v`, m)
+	}
+	if _, err := Parse("cfg", []byte(c.String())); err != nil {
+		t.Errorf("round trip: %v", err)
+	}
+}
+
+// A board action taking confirm's / leave_preview's default key leaves them theirs.
+func TestModalKeepsDefaults(t *testing.T) {
+	c, err := Parse("cfg", []byte("[keys]\nhandoff = [\"y\"]\nreply = [\"ctrl+]\"]\n"))
+	if err != nil || !c.Is("confirm", "y") || !c.Is("leave_preview", "ctrl+]") || c.KeyMap()["y"] != "handoff" {
+		t.Errorf("%v %v %v", err, c.Keys["confirm"], c.Keys["leave_preview"])
+	}
+}
+
+// The defaults never share a key among the board's actions, and handing them out doesn't share the slices.
+func TestDefaultKeys(t *testing.T) {
+	seen := map[string]string{}
+	for _, a := range Actions {
+		for _, k := range Default().Keys[a] {
+			if o, ok := seen[k]; ok && !modal[a] && !modal[o] {
+				t.Errorf("%q: %s and %s", k, o, a)
+			}
+			seen[k] = a
+		}
+	}
+	Default().Keys["up"][0] = "z"
+	if Default().Keys["up"][0] != "k" {
+		t.Error("changing one config changed the defaults")
 	}
 }
