@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kackerx/agmux/internal/avatar"
+	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -23,24 +24,40 @@ const (
 	barCells = avatar.Width // the bar sits right under the avatar, same width
 )
 
-// Colors: ANSI slots match claude-hud's segments, so they follow the terminal theme like the HUD does;
-// hex values are ccmux's picker palette and claude-hud's context bar.
+// Colors; defaults match claude-hud's segments (ANSI slots) and ccmux's palette, and
+// useConfig replaces them with config.toml's [colors].
 var (
-	cName    = lipgloss.Color("5")  // claude-hud session name (35)
-	cModel   = lipgloss.Color("14") // hud model segment
-	cEffort  = lipgloss.Color("13")
-	cDir     = lipgloss.Color("11") // hud directory icon
-	cBranch  = lipgloss.Color("12") // hud git segment
-	cMuted   = lipgloss.Color("#6272a4")
-	cWorking = lipgloss.Color("#ffb86c")
-	cDone    = lipgloss.Color("#50fa7b")
-	cRed     = lipgloss.Color("#ff6188")
-	cDim     = lipgloss.Color("#585b70")
-	cGreen   = lipgloss.Color("#a6e3a1")
-	cYellow  = lipgloss.Color("#f9e2af")
-	cFocus   = lipgloss.Color("#ff8ebe")
-	cOff     = lipgloss.Color("#45475a") // disabled footer keys: visible on #221e1e, darker than cMuted
+	cName     = lipgloss.Color("5")
+	cModel    = lipgloss.Color("14")
+	cEffort   = lipgloss.Color("13")
+	cDir      = lipgloss.Color("11")
+	cBranch   = lipgloss.Color("12")
+	cMuted    = lipgloss.Color("#6272a4") // secondary text
+	cWorking  = lipgloss.Color("#ffb86c")
+	cDone     = lipgloss.Color("#50fa7b")
+	cRed      = lipgloss.Color("#ff6188") // attention / waiting, errors
+	cDim      = lipgloss.Color("#585b70") // idle border, preview box
+	cGreen    = lipgloss.Color("#a6e3a1") // context bar < 30%
+	cYellow   = lipgloss.Color("#f9e2af") // 30–60%
+	cBarHigh  = lipgloss.Color("#ff6188") // ≥ 60%
+	cBarEmpty = lipgloss.Color("#585b70")
+	cFocus    = lipgloss.Color("#ff8ebe")
+	cOff      = lipgloss.Color("#45475a") // disabled footer keys
 )
+
+// useConfig applies config.toml: colors, and the footer built from the key bindings.
+func useConfig(c *config.Config) {
+	for name, v := range map[string]*lipgloss.Color{
+		"working": &cWorking, "idle": &cDim, "done": &cDone, "attention": &cRed, "focus": &cFocus,
+		"name": &cName, "branch": &cBranch, "model": &cModel, "effort": &cEffort, "dir": &cDir,
+		"bar_low": &cGreen, "bar_mid": &cYellow, "bar_high": &cBarHigh, "bar_empty": &cBarEmpty,
+		"muted": &cMuted, "disabled": &cOff,
+	} {
+		*v = lipgloss.Color(c.Colors[name])
+	}
+	avatar.AlertColor = cRed
+	footerKeys = footerFor(c)
+}
 
 func fg(c lipgloss.Color, s string) string { return lipgloss.NewStyle().Foreground(c).Render(s) }
 
@@ -315,12 +332,12 @@ func line3(s store.Session, w int) string {
 // contextBar draws claude-hud's ■ bar, no number; pct<0 = unknown (all dark).
 func contextBar(pct int) string {
 	if pct < 0 {
-		return fg(cDim, strings.Repeat("■", barCells))
+		return fg(cBarEmpty, strings.Repeat("■", barCells))
 	}
 	c := cGreen
 	switch {
 	case pct >= 60:
-		c = cRed
+		c = cBarHigh
 	case pct >= 30:
 		c = cYellow
 	}
@@ -328,7 +345,7 @@ func contextBar(pct int) string {
 	if pct > 0 && filled == 0 {
 		filled = 1
 	}
-	return fg(c, strings.Repeat("■", filled)) + fg(cDim, strings.Repeat("■", barCells-filled))
+	return fg(c, strings.Repeat("■", filled)) + fg(cBarEmpty, strings.Repeat("■", barCells-filled))
 }
 
 // modelName turns claude-opus-5-5 into "Opus 5.5" and drops date suffixes; other models pass through.
@@ -368,12 +385,23 @@ func relTime(t, now time.Time) string {
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
-var footerKeys = []struct {
+type footerKey struct {
 	text     string
 	needPane bool
-}{
-	{"j/k h/l move", false}, {"enter jump", true}, {"f fold", false}, {"p preview", false}, {"tab focus preview", true},
-	{"s reply", true}, {"H handoff", true}, {"r restart", false}, {"x kill", false}, {"d review", false}, {"q quit", false},
+}
+
+// footerKeys is the key line, each action shown with its first configured key.
+var footerKeys = footerFor(config.Default())
+
+func footerFor(c *config.Config) []footerKey {
+	k := c.First
+	return []footerKey{
+		{k("down") + "/" + k("up") + " " + k("left") + "/" + k("right") + " move", false},
+		{k("jump") + " jump", true}, {k("fold") + " fold", false}, {k("preview") + " preview", false},
+		{k("focus_preview") + " focus preview", true}, {k("reply") + " reply", true}, {k("handoff") + " handoff", true},
+		{k("restart") + " restart", false}, {k("kill") + " kill", false}, {k("review") + " review", false},
+		{k("quit") + " quit", false},
+	}
 }
 
 // footer is ccmux's key line; keys that need a tmux pane go dark for background sessions.

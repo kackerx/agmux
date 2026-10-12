@@ -11,8 +11,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
+	"github.com/kackerx/agmux/internal/avatar"
+	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -353,7 +357,7 @@ func TestFold(t *testing.T) {
 		}
 	}
 
-	m, _ = press(t, m, "r", "x", "y", "H", "s", "j") // session keys do nothing on a title
+	m, _ = press(t, m, "r", "x", "y", "H", "i", "j") // session keys do nothing on a title
 	if len(r.calls) != 0 || m.mode != browsing {
 		t.Fatalf("keys on a folded title ran %q", r.calls)
 	}
@@ -437,7 +441,7 @@ func TestSpatialNav(t *testing.T) {
 }
 
 func TestNearestEmpty(t *testing.T) {
-	if nearest(nil, "x", directions["j"]) != "" || nearest([]rect{{"a", 0, 0, 10, 5, 0}}, "zz", directions["j"]) != "" {
+	if nearest(nil, "x", directions["down"]) != "" || nearest([]rect{{"a", 0, 0, 10, 5, 0}}, "zz", directions["down"]) != "" {
 		t.Error("unknown focus or no rects: stay")
 	}
 }
@@ -634,15 +638,15 @@ func TestSpatialNavBands(t *testing.T) {
 func TestNearestTies(t *testing.T) {
 	cur := rect{"c", 10, 0, 10, 5, 0}
 	rs := []rect{cur, {"less", 0, 6, 12, 3, 0}, {"more", 14, 6, 10, 3, 0}, {"far", 10, 20, 10, 3, 0}}
-	if got := nearest(rs, "c", directions["j"]); got != "more" {
+	if got := nearest(rs, "c", directions["down"]); got != "more" {
 		t.Errorf("j: same distance, most overlap wins: got %s", got)
 	}
 	side := []rect{cur, {"low", 30, 4, 10, 5, 0}, {"level", 30, 1, 10, 3, 0}, {"farcol", 50, 0, 10, 5, 0}, {"otherband", 22, 0, 5, 5, 1}}
-	if got := nearest(side, "c", directions["l"]); got != "level" {
+	if got := nearest(side, "c", directions["right"]); got != "level" {
 		t.Errorf("l: closest column, most vertical overlap: got %s", got)
 	}
 	apart := []rect{cur, {"below", 30, 9, 10, 3, 0}, {"further", 30, 20, 10, 3, 0}}
-	if got := nearest(apart, "c", directions["l"]); got != "below" {
+	if got := nearest(apart, "c", directions["right"]); got != "below" {
 		t.Errorf("l with no overlap: vertically closest: got %s", got)
 	}
 }
@@ -939,7 +943,7 @@ func TestPreviewWheelAndClicks(t *testing.T) {
 func TestSReplies(t *testing.T) {
 	r := &fakeRunner{}
 	m := wide(r, 232, 50)
-	tm, cmd := m.Update(key("s"))
+	tm, cmd := m.Update(key("i"))
 	m = tm.(Model)
 	if !m.previewOn() || !m.pvFocus || cmd == nil {
 		t.Fatalf("s: preview %v, keys %v", m.previewOn(), m.pvFocus)
@@ -959,20 +963,20 @@ func TestSReplies(t *testing.T) {
 		t.Errorf("after s, keys go to the pane: quit=%v %q", quit, sends)
 	}
 
-	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "p", "s") // already open: s only takes the keys
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "p", "i") // already open: s only takes the keys
 	if !m.previewOn() || !m.pvFocus {
 		t.Error("s with the preview open focuses it")
 	}
-	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "j", "s") // a2: no pane
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "j", "i") // a2: no pane
 	if m.preview || m.pvFocus {
 		t.Error("s on a session without a pane does nothing")
 	}
-	m, _ = press(t, wide(&fakeRunner{}, 99, 40), "s")
+	m, _ = press(t, wide(&fakeRunner{}, 99, 40), "i")
 	if m.preview || !strings.Contains(ansi.Strip(m.View()), "at least 100 columns") {
 		t.Error("s on a narrow terminal says why it can't open the preview")
 	}
-	if !strings.Contains(ansi.Strip(wide(&fakeRunner{}, 232, 50).View()), "tab focus preview · s reply · H handoff") {
-		t.Error("footer order: … tab focus preview · s reply · H handoff …")
+	if !strings.Contains(ansi.Strip(wide(&fakeRunner{}, 232, 50).View()), "tab focus preview · i reply · H handoff") {
+		t.Error("footer order: … tab focus preview · i reply · H handoff …")
 	}
 }
 
@@ -1134,7 +1138,7 @@ func TestPassThroughLock(t *testing.T) {
 		m := New(src, r)
 		m.getenv = func(string) string { return "" }
 		tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
-		m, _ = press(t, tm.(Model), "s") // locked on a1 / %1
+		m, _ = press(t, tm.(Model), "i") // locked on a1 / %1
 		src.ss = c.after
 		r.calls = nil
 		raw := m.View()
@@ -1184,7 +1188,7 @@ func TestLockedOutEsc(t *testing.T) {
 	m := New(src, &fakeRunner{})
 	m.getenv = func(string) string { return "" }
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
-	m, _ = press(t, tm.(Model), "s")
+	m, _ = press(t, tm.(Model), "i")
 	src.ss = sessions[1:]
 	if m, _ = press(t, m, "esc"); m.pvFocus {
 		t.Error("esc leaves the locked-out state")
@@ -1194,7 +1198,7 @@ func TestLockedOutEsc(t *testing.T) {
 // Keys go to the pane pass-through was entered on, whatever card the focus is on.
 func TestForwardGoesToLockedPane(t *testing.T) {
 	r := &fakeRunner{}
-	m, _ := press(t, wide(r, 232, 50), "s") // locked on a1 / %1
+	m, _ := press(t, wide(r, 232, 50), "i") // locked on a1 / %1
 	m.focus = "b1"                          // however the focus moved, the lock holds
 	r.calls = nil
 	m, _ = press(t, m, "x")
@@ -1236,7 +1240,7 @@ func TestSendKeysEscaping(t *testing.T) {
 // A paste goes in as one bracketed paste through a tmux buffer, not line by line.
 func TestPastePassThrough(t *testing.T) {
 	r := &fakeRunner{}
-	m, _ := press(t, wide(r, 232, 50), "s")
+	m, _ := press(t, wide(r, 232, 50), "i")
 	r.calls = nil
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("line 1\rline 2;"), Paste: true})
 	cmd()
@@ -1253,14 +1257,14 @@ func TestPastePassThrough(t *testing.T) {
 func TestPassThroughFailuresAndMouse(t *testing.T) {
 	// a key that fails to reach the pane says so on the message line
 	r := &fakeRunner{tmuxFail: map[string]error{"send-keys": errors.New("tmux send-keys: can't find pane %1")}}
-	m, _ := press(t, wide(r, 232, 50), "s")
+	m, _ := press(t, wide(r, 232, 50), "i")
 	tm, cmd := m.Update(key("x"))
 	tm, _ = tm.(Model).Update(cmd())
 	if m = tm.(Model); !strings.Contains(ansi.Strip(m.msg), "can't find pane %1") {
 		t.Error("a failed forward shows on the message line")
 	}
 	// pvFocus left set while the preview is closed: no pass-through footer
-	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "s")
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "i")
 	m.preview = false
 	if strings.Contains(ansi.Strip(m.View()), "keys go to the pane") {
 		t.Error("no pass-through footer with the preview closed")
@@ -1318,7 +1322,7 @@ func TestScrollLimit(t *testing.T) {
 func TestCaptureQueuedWithKeys(t *testing.T) {
 	for range 20 {
 		r := &fakeRunner{}
-		m, _ := press(t, wide(r, 232, 50), "s")
+		m, _ := press(t, wide(r, 232, 50), "i")
 		m.capturing = false
 		r.mu.Lock()
 		r.calls = nil
@@ -1349,7 +1353,7 @@ func TestPreviewOpenEdges(t *testing.T) {
 	if _, cmd := m.Update(key("p")); cmd == nil {
 		t.Error("p captures right away")
 	}
-	if m, _ := press(t, wide(&fakeRunner{}, 100, 40), "s"); !m.previewOn() || !m.pvFocus {
+	if m, _ := press(t, wide(&fakeRunner{}, 100, 40), "i"); !m.previewOn() || !m.pvFocus {
 		t.Error("s opens the preview at exactly 100 columns")
 	}
 	for h := 5; h >= 1; h-- {
@@ -1357,5 +1361,98 @@ func TestPreviewOpenEdges(t *testing.T) {
 		m.pv, m.scroll = previewMsg{pane: "%1", text: "a\nb\nc\nd\ne\nf\n"}, 3
 		tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: h})
 		_ = tm.(Model).View()
+	}
+}
+
+func withConfig(t *testing.T, toml string) Model {
+	t.Helper()
+	c, err := config.Parse("cfg", []byte(toml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(sessions, &fakeRunner{})
+	m.getenv = func(string) string { return "" }
+	m.cfg, m.keymap = c, c.KeyMap()
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	return tm.(Model)
+}
+
+// Key bindings come from the config: n moves down instead of j, and the preview only keeps
+// focus_preview's key for itself.
+func TestConfiguredKeys(t *testing.T) {
+	m, _ := press(t, withConfig(t, "[keys]\ndown = [\"n\"]\n"), "j")
+	if m.focus != "a1" {
+		t.Errorf("j unbound: focus %s, want a1", m.focus)
+	}
+	if m, _ = press(t, m, "n"); m.focus != "a2" {
+		t.Errorf("n moves down: focus %s", m.focus)
+	}
+
+	r := &fakeRunner{}
+	m = withConfig(t, "[keys]\nfocus_preview = [\"ctrl+o\"]\nleave_preview = [\"ctrl+g\"]\n")
+	m.run = r
+	m, _ = press(t, m, "p", "tab")
+	if m.pvFocus {
+		t.Fatal("tab no longer enters the preview")
+	}
+	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if m = tm.(Model); !m.pvFocus {
+		t.Fatal("ctrl+o focuses the preview")
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "ctrl+g back to the cards") {
+		t.Error("the pass-through footer names the configured leave key")
+	}
+	r.calls = nil
+	m, _ = press(t, m, "tab")
+	if !m.pvFocus || len(r.calls) == 0 || r.calls[0][len(r.calls[0])-1] != "Tab" {
+		t.Errorf("tab is just a key for the pane: %q", r.calls)
+	}
+	tm, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlCloseBracket})
+	if m = tm.(Model); !m.pvFocus {
+		t.Error("ctrl+] is no longer the leave key: it goes to the pane")
+	}
+	tm, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	if tm.(Model).pvFocus {
+		t.Error("ctrl+g gives the keys back")
+	}
+
+	r = &fakeRunner{}
+	m = withConfig(t, "[keys]\nconfirm = [\"Y\"]\nquit = [\"Q\"]\n")
+	m.run = r
+	m, _ = press(t, m, "x")
+	if !strings.Contains(ansi.Strip(m.View()), "Y to confirm") {
+		t.Error("the kill prompt names the configured confirm key")
+	}
+	m, quit := press(t, m, "y", "q")
+	if len(r.calls) != 0 || quit {
+		t.Errorf("y no longer confirms, q no longer quits: %q quit=%v", r.calls, quit)
+	}
+	if _, quit = press(t, m, "Q"); !quit {
+		t.Error("Q quits")
+	}
+}
+
+// Colors come from the config: borders, the context bar, the eyes, the footer.
+func TestConfiguredColors(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	c, err := config.Parse("cfg", []byte("[keys]\ndown = [\"n\"]\n[colors]\nworking = \"#123456\"\nbar_empty = \"#010203\"\nattention = \"#0a0b0c\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	useConfig(c)
+	defer useConfig(config.Default())
+	s := store.Session{Status: "working", AvatarID: "bot-01", AgentType: "claude", ContextPct: -1}
+	if cd := card(s, 48, 5, false, 0, now); !strings.HasPrefix(cd, "\x1b[38;2;18;52;86m╭") {
+		t.Errorf("working border from the config: %q", cd[:30])
+	}
+	if !strings.Contains(contextBar(-1), "38;2;1;2;3m■") {
+		t.Error("empty context cells from the config")
+	}
+	sp, _ := avatar.ByID("bot-01")
+	if !strings.Contains(avatar.Render(sp, "claude", avatar.Alert, 0), ";2;10;11;12") {
+		t.Error("the eyes blink in the configured attention color")
+	}
+	if f := ansi.Strip(footer(false, 300)); !strings.HasPrefix(f, " n/k h/l move · enter jump") {
+		t.Errorf("footer from the key bindings: %q", f)
 	}
 }

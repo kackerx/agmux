@@ -32,7 +32,7 @@ agmux avatars   # 打印全部头像
 | `f` | 折叠 / 展开焦点所在的组 |
 | `p` | 开关右侧预览（终端至少 100 列） |
 | `tab` | 进入 / 离开预览；在预览里时除 `tab` 外所有按键都发给那个 pane（含 `ctrl-c`），滚轮往回翻 |
-| `s` | 回复：开预览并把按键交给这个会话（等于 `p` + `tab`），之后打的字直接进它的 pane |
+| `i` | 回复：开预览并把按键交给这个会话（等于 `p` + `tab`），之后打的字直接进它的 pane；`ctrl+]` 回到卡片 |
 | `H` | 发 `/handoff` |
 | `r` | 重启会话 |
 | `x` | 杀掉会话（按 `y` 确认） |
@@ -72,3 +72,19 @@ agmux setup --write   # 改 ~/.claude/settings.json 的 statusLine.command，原
 ```
 
 原来的状态栏照常显示；只改 `statusLine.command` 这一个键。`settings.json` 是软链接时改的是链接指向的文件，`.bak` 也放在那旁边。
+
+### 配置
+
+`~/.config/agmux/config.toml`（设了 `XDG_CONFIG_HOME` 就在它下面），没有就全用默认值。`agmux config` 打印生效的完整配置，复制出来改即可；`agmux config --path` 打印路径。
+
+```toml
+[keys]          # 动作 = 一个或多个键名（j、ctrl+k、enter、tab、shift+tab、esc、space、f5…）
+down = ["n", "down"]
+leave_preview = ["ctrl+]"]
+
+[colors]        # #rrggbb 或 ANSI 0–255
+working = "#ffb86c"
+focus = "#ff8ebe"
+```
+
+未知的键、动作、颜色，键名写错，或同一个键绑了两个动作：启动时报一行错误（文件、哪一项、原因）并退出。

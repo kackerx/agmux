@@ -72,10 +72,10 @@ const (
 	Dim         // idle: whole head darkened
 )
 
-const (
-	eyeColor   = lipgloss.Color("#221e1e") // popup background: eyes read as holes
-	alertColor = lipgloss.Color("#ff6188")
-)
+const eyeColor = lipgloss.Color("#221e1e") // popup background: eyes read as holes
+
+// AlertColor is what the eyes blink in when a session needs attention (config colors.attention).
+var AlertColor = lipgloss.Color("#ff6188")
 
 // BandColor is the agentType color (ccmux's agent label colors).
 func BandColor(agentType string) lipgloss.Color {
@@ -104,7 +104,7 @@ func Render(s Sprite, agentType string, mood Mood, frame int) string {
 	}
 	eye := eyeColor
 	if mood == Alert && frame%2 == 0 {
-		eye = alertColor
+		eye = AlertColor
 	}
 	for y, row := range s.Pixels {
 		for x, c := range row {

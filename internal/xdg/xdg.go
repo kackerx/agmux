@@ -19,3 +19,15 @@ func StateDir() (string, error) {
 	}
 	return filepath.Join(home, ".local", "state", "agmux"), nil
 }
+
+// ConfigDir is $XDG_CONFIG_HOME/agmux, defaulting to ~/.config/agmux.
+func ConfigDir() (string, error) {
+	if d := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(d) {
+		return filepath.Join(d, "agmux"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot locate the config directory: %w; set $HOME or an absolute $XDG_CONFIG_HOME", err)
+	}
+	return filepath.Join(home, ".config", "agmux"), nil
+}

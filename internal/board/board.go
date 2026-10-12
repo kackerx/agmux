@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/kackerx/agmux/internal/ccmux"
+	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/execx"
 	"github.com/kackerx/agmux/internal/store"
 )
@@ -85,18 +86,26 @@ type Model struct {
 	scroll    int        // lines the preview is scrolled back with the wheel
 	pvLines   int        // lines in the last capture, the most scroll can show
 	keys      *serial    // forwarded keys reach the pane in the order they were typed
+
+	cfg    *config.Config
+	keymap map[string]string // key (as KeyMsg.String() spells it) → action
 }
 
 func New(src Source, run Runner) Model {
-	return Model{src: src, run: run, now: time.Now, getenv: os.Getenv, folded: map[string]bool{}, keys: newSerial()}
+	cfg := config.Default()
+	return Model{src: src, run: run, now: time.Now, getenv: os.Getenv, folded: map[string]bool{}, keys: newSerial(),
+		cfg: cfg, keymap: cfg.KeyMap()}
 }
 
 // Run polls p in the background and runs the board until the user quits.
-func Run(p *store.Poller) error {
+func Run(p *store.Poller, cfg *config.Config) error {
+	useConfig(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go p.Run(ctx)
-	_, err := tea.NewProgram(New(p, realRunner{}), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	m := New(p, realRunner{})
+	m.cfg, m.keymap = cfg, cfg.KeyMap()
+	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }
 
@@ -221,9 +230,6 @@ func (m Model) alive(id string) bool {
 	return false
 }
 
-// leaveKey takes the keys back from the preview (tab is Claude Code's completion key).
-const leaveKey = "ctrl+]"
-
 // passThrough: keys go to the pane — the preview is on and the session pass-through was entered
 // on still exists with the same pane. Keys, the footer and the border all ask this one question.
 func (m Model) passThrough() bool {
@@ -244,10 +250,10 @@ func (m *Model) lock(s store.Session) {
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// the preview has the keys: everything but ctrl+] goes to the locked pane, tab and ctrl+c
-	// included (Claude Code completes and interrupts with them); quitting means ctrl+] first
+	// the preview has the keys: everything but leave_preview's keys (ctrl+]) goes to the locked
+	// pane, tab and ctrl+c included (Claude Code completes and interrupts with them)
 	if m.pvFocus {
-		if k.String() == leaveKey || !m.passThrough() && k.Type == tea.KeyEsc {
+		if m.keymap[k.String()] == "leave_preview" || !m.passThrough() && k.Type == tea.KeyEsc {
 			m.pvFocus = false
 			return m, nil
 		}
@@ -275,13 +281,17 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case confirmKill:
 		m.mode = browsing
-		if k.String() != "y" {
+		if m.keymap[k.String()] != "confirm" {
 			return m, nil
 		}
 		return m.kill(m.target)
 	}
+	return m.do(m.keymap[k.String()])
+}
 
-	if k.String() == "q" || k.Type == tea.KeyEsc {
+// do runs a configured action on the focused card.
+func (m Model) do(action string) (tea.Model, tea.Cmd) {
+	if action == "quit" {
 		return m, tea.Quit
 	}
 	gs, gi, s, ok := m.current()
@@ -289,7 +299,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	key := gs[gi].key
-	if d, ok := directions[k.String()]; ok {
+	if d, ok := directions[action]; ok {
 		if m.w == 0 { // no layout before the first WindowSizeMsg
 			return m, nil
 		}
@@ -300,24 +310,24 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	switch k.String() {
-	case "tab":
+	switch action {
+	case "focus_preview":
 		if m.previewOn() && ok && s.TmuxPane != "" {
 			m.lock(s)
 		}
 		return m, nil
-	case "p":
+	case "preview":
 		if m.w < previewMinTerm && !m.preview { // too narrow to open; an open one still closes
 			return m.say(cMuted, "the preview needs a terminal at least 100 columns wide"), nil
 		}
 		m.preview, m.msg = !m.preview, ""
 		cmd := m.capture()
 		return m, cmd
-	case "f": // fold / unfold the focused group; the focus stays on it
+	case "fold": // fold / unfold the focused group; the focus stays on it
 		m.folded[key] = !m.folded[key]
 		m.focus, m.msg = m.items(gs)[gi][0], ""
 		return m, nil
-	case "enter":
+	case "jump":
 		if !ok { // a folded title: unfold it
 			m.folded[key] = false
 			m.focus, m.msg = m.items(gs)[gi][0], ""
@@ -328,10 +338,10 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !ok { // the rest act on a session; a folded title has none
 		return m, nil
 	}
-	switch k.String() {
-	case "H":
+	switch action {
+	case "handoff":
 		return m.send(s, "/handoff", "sent /handoff → "+s.Name)
-	case "s": // reply: open the preview if needed and give it the keys (p + tab)
+	case "reply": // open the preview if needed and give it the keys (preview + focus_preview)
 		if s.TmuxPane == "" {
 			return m, nil // msgLine already shows noPane
 		}
@@ -342,23 +352,20 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.lock(s)
 		cmd := m.capture()
 		return m, cmd
-	case "x":
+	case "kill":
 		m.mode, m.target, m.msg = confirmKill, s, ""
 		return m, nil
-	case "r":
+	case "restart":
 		m.msg = fg(cMuted, " restarting "+s.Name+"…")
 		return m, m.ccmux("restarted "+s.Name, "restart", s.ID)
-	case "d":
+	case "review":
 		return m, tea.ExecProcess(m.review(s))
 	}
 	return m, nil
 }
 
-// directions maps the movement keys to a unit step on screen.
-var directions = map[string][2]int{
-	"j": {0, 1}, "down": {0, 1}, "k": {0, -1}, "up": {0, -1},
-	"l": {1, 0}, "right": {1, 0}, "h": {-1, 0}, "left": {-1, 0},
-}
+// directions maps the movement actions to a unit step on screen.
+var directions = map[string][2]int{"down": {0, 1}, "up": {0, -1}, "right": {1, 0}, "left": {-1, 0}}
 
 // nearest finds where the focus moves from rect id in direction d ("" = at the edge, stay).
 //   - j/k: among the rects entirely below / above that overlap it horizontally, the closest,
@@ -606,7 +613,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.focus, m.msg = r.id, ""
 				return m, nil
 			}
-			return m.key(tea.KeyMsg{Type: tea.KeyEnter}) // second click = enter: jump, or unfold a title
+			return m.do("jump") // second click: jump, or unfold a title
 		}
 	}
 	return m, nil
@@ -617,7 +624,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m Model) msgLine(focused store.Session) string {
 	switch m.mode {
 	case confirmKill:
-		return fg(cRed, " kill "+m.target.Name+"? y to confirm, any other key cancels")
+		return fg(cRed, " kill "+m.target.Name+"? "+m.cfg.First("confirm")+" to confirm, any other key cancels")
 	}
 	var parts []string
 	if m.msg != "" {
@@ -644,9 +651,9 @@ func (m Model) View() string {
 	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right)
 	switch { // the footer is always the last line
 	case m.passThrough():
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · "+leaveKey+" back to the cards")
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · "+m.cfg.First("leave_preview")+" back to the cards")
 	case m.pvFocus: // locked out: the target is gone, keys are being swallowed
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cRed, " session is gone · "+leaveKey+" back to the cards")
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cRed, " session is gone · "+m.cfg.First("leave_preview")+" back to the cards")
 	}
 	return out
 }
