@@ -200,3 +200,28 @@ func TestDone(t *testing.T) {
 		t.Errorf("Done = %v %v %v, want true false false", ss[0].Done, ss[1].Done, ss[2].Done)
 	}
 }
+
+func TestCorruptAvatarsShownNotFatal(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "agmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agmux", "avatars.json"), []byte("{oops"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := NewPoller()
+	if err != nil {
+		t.Fatalf("corrupt avatars.json must not stop the board: %v", err)
+	}
+	p.Show = func() ([]ccmux.Session, error) { return []ccmux.Session{{ID: "a"}}, nil }
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if e := p.Err(); e == nil || !strings.Contains(e.Error(), "avatars.json") {
+		t.Errorf("Err() = %v, want the avatars.json problem", e)
+	}
+	if p.Sessions()[0].AvatarID == "" {
+		t.Error("sessions still get hash-default avatars")
+	}
+}

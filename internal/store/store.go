@@ -53,6 +53,8 @@ type Poller struct {
 	refreshMu sync.Mutex        // serializes Refresh; guards models
 	models    map[string]string // session ID → last model found in its jsonl
 
+	avatarErr error // avatars.json could not be read
+
 	mu       sync.Mutex
 	sessions []Session
 	err      error
@@ -63,9 +65,9 @@ func NewPoller() (*Poller, error) {
 	if err != nil {
 		return nil, err
 	}
-	// ponytail: a corrupt avatars.json silently falls back to hash defaults; S1 never writes it, so nothing is lost.
-	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
-	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b}, nil
+	// a corrupt avatars.json means no bindings (hash defaults); the error shows on the board, it never exits
+	b, err := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
+	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b, avatarErr: err}, nil
 }
 
 func (p *Poller) Sessions() []Session {
@@ -74,11 +76,15 @@ func (p *Poller) Sessions() []Session {
 	return p.sessions
 }
 
-// Err is the last poll's error; the previous sessions are kept when it fails.
+// Err is the last poll's error (the previous sessions are kept when it fails),
+// else the avatars.json error.
 func (p *Poller) Err() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.err
+	if p.err != nil {
+		return p.err
+	}
+	return p.avatarErr
 }
 
 // Refresh polls ccmux once.

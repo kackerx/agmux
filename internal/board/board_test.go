@@ -50,7 +50,7 @@ func TestView(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	ss := fixture(t)
 	for _, w := range []int{60, 114, 120, 200} {
-		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "")
+		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "", false)
 		lines := strings.Split(out, "\n")
 		if len(lines) != 200 {
 			t.Errorf("w=%d: %d lines, want the full height", w, len(lines))
@@ -77,7 +77,7 @@ func TestView(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", "/Users/dev") // the fixture's home, so headers shorten to ~ on any machine
-	out, _, _ := view(ss, 200, 50, "", 0, now, "")
+	out, _, _ := view(ss, 200, 50, "", 0, now, "", false)
 	plain := ansi.Strip(out)
 	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "← sqlmux-code-reviewer: review notes", "q 退出"} {
 		if !strings.Contains(plain, want) {
@@ -90,7 +90,7 @@ func TestScrollKeepsFocusVisible(t *testing.T) {
 	ss := fixture(t)
 	last := groups(ss)
 	id := last[len(last)-1].sessions[0].ID
-	out, rects, off := view(ss, 60, 20, id, 0, now, "")
+	out, rects, off := view(ss, 60, 20, id, 0, now, "", false)
 	if off == 0 || len(strings.Split(out, "\n")) != 20 {
 		t.Fatalf("expected a scrolled 20-line screen, off=%d", off)
 	}

@@ -38,6 +38,7 @@ var (
 	cGreen   = lipgloss.Color("#a6e3a1")
 	cYellow  = lipgloss.Color("#f9e2af")
 	cFocus   = lipgloss.Color("#f8f8f2")
+	cOff     = lipgloss.Color("#3b3d4d") // disabled footer keys (ccmux's separator color)
 )
 
 func fg(c lipgloss.Color, s string) string { return lipgloss.NewStyle().Foreground(c).Render(s) }
@@ -309,10 +310,29 @@ func relTime(t, now time.Time) string {
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
-const footerKeys = "j/k 卡片 · h/l 跨列 · enter 跳转 · H 交接 · s 发送 · r 重启 · x 杀 · d review · q 退出"
+var footerKeys = []struct {
+	text     string
+	needPane bool
+}{
+	{"j/k 卡片", false}, {"h/l 跨列", false}, {"enter 跳转", true}, {"H 交接", true}, {"s 发送", true},
+	{"r 重启", false}, {"x 杀", false}, {"d review", false}, {"q 退出", false},
+}
+
+// footer is ccmux's key line; keys that need a tmux pane go dark for background sessions.
+func footer(noPane bool, w int) string {
+	parts := make([]string, len(footerKeys))
+	for i, k := range footerKeys {
+		c := cMuted
+		if k.needPane && noPane {
+			c = cOff
+		}
+		parts[i] = fg(c, k.text)
+	}
+	return ansi.Truncate(" "+strings.Join(parts, fg(cMuted, " · ")), w, "…")
+}
 
 // view assembles top bar, body (scrolled so the focused card is visible), message line and footer.
-func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string) (string, []rect, int) {
+func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool) (string, []rect, int) {
 	top := " " + lipgloss.NewStyle().Bold(true).Render("agmux") + fg(cMuted, fmt.Sprintf(" · %d sessions", len(ss)))
 	body, rects := layout(groups(ss), w, focus, frame, now)
 	bodyH := max(h-3, 1) // top bar, message line, footer
@@ -328,6 +348,6 @@ func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, 
 		vis = append(vis, "")
 	}
 	out := append([]string{top}, vis...)
-	out = append(out, ansi.Truncate(msg, w, "…"), fg(cMuted, ansi.Truncate(" "+footerKeys, w, "…")))
+	out = append(out, ansi.Truncate(msg, w, "…"), footer(noPane, w))
 	return strings.Join(out, "\n"), rects, off
 }
