@@ -53,13 +53,15 @@ type Config struct {
 	Keys   map[string][]string // action → key names (bubbletea's, "space" for the space bar)
 	Colors map[string]string   // name → "#rrggbb" or an ANSI index "0".."255"
 
+	MaxColumns int // [layout] max_columns: the most columns of cards, if the terminal is wide enough
+
 	AvatarDefault string            // [avatars] default: "hash" or a sprite ID
 	AvatarBind    map[string]string // [avatars.bind]: session name → sprite ID
 }
 
 // Default is the configuration with no file.
 func Default() *Config {
-	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, AvatarDefault: "hash", AvatarBind: map[string]string{}}
+	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, AvatarDefault: "hash", AvatarBind: map[string]string{}}
 	for k, v := range defaultKeys {
 		c.Keys[k] = slices.Clone(v) // callers may change c; the defaults stay
 	}
@@ -96,14 +98,20 @@ func Load() (*Config, error) {
 	return Parse(path, data)
 }
 
+// The range of [layout] max_columns.
+const minMaxColumns, maxMaxColumns = 1, 8
+
 var colorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 // Parse merges a config file over the defaults (an action set in the file replaces its default
 // keys) and checks it. Every error is one line naming the file, the setting and the reason.
 func Parse(path string, data []byte) (*Config, error) {
 	var raw struct {
-		Keys    map[string][]string `toml:"keys"`
-		Colors  map[string]string   `toml:"colors"`
+		Keys   map[string][]string `toml:"keys"`
+		Colors map[string]string   `toml:"colors"`
+		Layout struct {
+			MaxColumns int `toml:"max_columns"`
+		} `toml:"layout"`
 		Avatars struct {
 			Default string            `toml:"default"`
 			Bind    map[string]string `toml:"bind"`
@@ -121,7 +129,7 @@ func Parse(path string, data []byte) (*Config, error) {
 		}
 	}
 	if u := md.Undecoded(); len(u) > 0 {
-		return nil, fmt.Errorf("%s: %s: unknown setting (sections are [keys], [colors], [avatars] and [avatars.bind])", path, u[0])
+		return nil, fmt.Errorf("%s: %s: unknown setting (sections are [keys], [colors], [layout], [avatars] and [avatars.bind])", path, u[0])
 	}
 	c := Default()
 	c.Path = path
@@ -157,6 +165,12 @@ func Parse(path string, data []byte) (*Config, error) {
 			return nil, fmt.Errorf("%s: colors.%s: %q is neither #rrggbb nor an ANSI color 0-255", path, name, v)
 		}
 		c.Colors[name] = v
+	}
+	if md.IsDefined("layout", "max_columns") {
+		if n := raw.Layout.MaxColumns; n < minMaxColumns || n > maxMaxColumns {
+			return nil, fmt.Errorf("%s: layout.max_columns: %d is out of range (%d to %d columns)", path, n, minMaxColumns, maxMaxColumns)
+		}
+		c.MaxColumns = raw.Layout.MaxColumns
 	}
 	if d := raw.Avatars.Default; d != "" {
 		if d != "hash" && !isSprite(d) {
@@ -247,6 +261,7 @@ func (c *Config) String() string {
 	for _, n := range Colors {
 		fmt.Fprintf(&b, "%s = %q\n", n, c.Colors[n])
 	}
+	fmt.Fprintf(&b, "\n[layout]\nmax_columns = %d\n", c.MaxColumns)
 	fmt.Fprintf(&b, "\n[avatars]\ndefault = %q\n\n[avatars.bind]\n", c.AvatarDefault)
 	names := slices.Sorted(maps.Keys(c.AvatarBind))
 	for _, n := range names {

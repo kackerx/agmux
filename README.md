@@ -95,6 +95,9 @@ working = "#ffb86c"
 focus = "#ff8ebe"
 match = "#f2d06b"   # 搜索命中字符的底色（字固定深色 #2d2a2e）
 
+[layout]
+max_columns = 4                     # 终端够宽时最多几列卡片（1–8）；每列至少 40 列宽，所以窄终端到不了这个数（5 列约需 ≥ 200 列）
+
 [avatars]
 default = "hash"                    # 没绑定的会话：hash = 按名字固定挑一个；或写某个头像 id（agmux avatars 看全部）
 [avatars.bind]

@@ -3112,3 +3112,30 @@ func TestBoardShowsPaneCursor(t *testing.T) {
 		t.Error("scrolled back: the cursor isn't drawn")
 	}
 }
+
+// T25: [layout] max_columns caps the columns; the minimum column width still decides how many fit.
+func TestMaxColumnsLayout(t *testing.T) {
+	defer useConfig(config.Default())
+	for _, c := range []struct{ max, w, want int }{
+		{4, 232, 4}, {5, 232, 5}, {5, 180, 4}, {1, 232, 1}, {8, 232, 5}, {8, 400, 8}, {2, 232, 2},
+	} {
+		cfg := config.Default()
+		cfg.MaxColumns = c.max
+		useConfig(cfg)
+		if n, _ := columns(c.w); n != c.want {
+			t.Errorf("max %d at %d columns: %d, want %d", c.max, c.w, n, c.want)
+		}
+	}
+	// and what is drawn follows it: nine one-card groups in a row of five
+	cfg := config.Default()
+	cfg.MaxColumns = 5
+	useConfig(cfg)
+	var ss staticSrc
+	for i := range 9 {
+		ss = append(ss, store.Session{ID: fmt.Sprintf("g%d", i), Name: fmt.Sprintf("n%d", i), GroupKey: fmt.Sprintf("/g%d", i), ContextPct: -1})
+	}
+	m := psized(ss, 232, 30)
+	if v := strings.Split(ansi.Strip(m.View()), "\n")[1]; strings.Count(v, "▾") != 5 {
+		t.Errorf("five groups in the first row: %q", v)
+	}
+}

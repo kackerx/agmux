@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -219,5 +220,38 @@ func TestMatchColorAndKeys(t *testing.T) {
 	}
 	if _, err := Parse("cfg", []byte("[keys]\nnext_match = [\"j\"]\n")); err != nil {
 		t.Errorf("taking j from down is allowed: %v", err) // the file's own bindings win
+	}
+}
+
+// T25: [layout] max_columns, 1 to 8, default 4.
+func TestMaxColumns(t *testing.T) {
+	if Default().MaxColumns != 4 {
+		t.Errorf("default %d", Default().MaxColumns)
+	}
+	for _, n := range []int{1, 5, 8} {
+		c, err := Parse("cfg", []byte(fmt.Sprintf("[layout]\nmax_columns = %d\n", n)))
+		if err != nil || c.MaxColumns != n {
+			t.Errorf("%d: %v %d", n, err, c.MaxColumns)
+		}
+		if back, err := Parse("cfg", []byte(c.String())); err != nil || back.MaxColumns != n || !strings.Contains(c.String(), fmt.Sprintf("[layout]\nmax_columns = %d\n", n)) {
+			t.Errorf("printed back: %v\n%s", err, c.String())
+		}
+	}
+	if c, _ := Parse("cfg", []byte("[layout]\n")); c.MaxColumns != 4 {
+		t.Error("a section without the key keeps the default")
+	}
+	for toml, want := range map[string]string{
+		"[layout]\nmax_columns = 0\n":     "cfg: layout.max_columns: 0 is out of range (1 to 8 columns)",
+		"[layout]\nmax_columns = 9\n":     "cfg: layout.max_columns: 9 is out of range (1 to 8 columns)",
+		"[layout]\nmax_columns = -1\n":    "layout.max_columns: -1 is out of range",
+		"[layout]\nmax_columns = 4.5\n":   "cfg: toml:",
+		"[layout]\nmax_columns = \"5\"\n": "cfg: toml:",
+		"[layout]\nwidth = 5\n":           "cfg: layout.width: unknown setting",
+		"layout = 5\n":                    "cfg: toml:",
+	} {
+		_, err := Parse("cfg", []byte(toml))
+		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "\n") {
+			t.Errorf("%q: %v, want one line with %q", toml, err, want)
+		}
 	}
 }

@@ -21,11 +21,14 @@ import (
 
 const (
 	minColW  = 40
-	maxCols  = 4 // wider screens get wider cards, not more columns
 	colGap   = 2
 	cardH    = 5
 	barCells = avatar.Width // the bar sits right under the avatar, same width
 )
+
+// maxCols is the most columns of cards; wider screens get wider cards, not more columns.
+// useConfig sets it from [layout] max_columns.
+var maxCols = 4
 
 // Colors; defaults match claude-hud's segments (ANSI slots) and ccmux's palette, and
 // useConfig replaces them with config.toml's [colors].
@@ -60,6 +63,7 @@ func useConfig(c *config.Config) {
 		*v = lipgloss.Color(c.Colors[name])
 	}
 	avatar.AlertColor = cRed
+	maxCols = c.MaxColumns
 	footerKeys = footerFor(c)
 }
 
