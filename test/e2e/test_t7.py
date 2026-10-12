@@ -119,7 +119,7 @@ class Fold(unittest.TestCase):
         self.assertTrue(wait(lambda: structure(self.t)[0][1][0].startswith("▸"), 3))
         for k in ("H", "r", "d"):
             self.t.keys(k); time.sleep(0.4)
-        self.t.keys("s"); time.sleep(0.3)
+        self.t.keys("i"); time.sleep(0.3)
         self.assertNotIn("keys go to the pane", foot(self.t, 4), "`s` on a folded title opens nothing and focuses nothing")
         self.t.keys("x"); time.sleep(0.3)
         self.assertNotRegex(foot(self.t, 4), "kill .*\\?|y to confirm", "no kill confirm on a folded title")

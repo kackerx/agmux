@@ -32,9 +32,10 @@ AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 | `test_t4.py` | 每个键的命令行（send 正文在 `--` 之后）、x 确认、粘贴不当命令、d 的 ExecProcess（回来后鼠标仍可用、失败时底栏显示 stderr 最后一行）、后台会话置灰（提示只出现一次，和错误行同时可见）、连按、鼠标、2s 轮询、会话消失的竞态、popup 里的真鼠标 |
 | `test_t6.py` | `agmux statusline`（逐字节透传、退出码、sh -c、写失败不影响透传、session_id 白名单、原子写）和 `agmux setup`（文案、`--write` 保留其它键、`.bak`、损坏 / 无权限、软链接、端到端）；只用临时 HOME，收尾校验真 `~/.claude/settings.json` 哈希没变 |
 | `test_t9.py` | 空间导航：120 列（2 列 3 带）下 j 走遍整列（跨带）再停住、k 原路回来、j/k 不退让；h/l 取纵向重叠最多的卡，没有重叠时退到最近一列里纵向最近的卡；方向键等价；折叠标题作为一行高的卡参与；焦点从屏幕上读（#ff8ebe 粗线边框），不用按 enter |
-| `test_t10.py` | enter / H / s 直接走 tmux：假 `tmux`（PATH 里记录 argv 的脚本）下的 client 选择（`$AGMUX_CLIENT` / session 环境 / 启发式 / 普通 pane 单终端 / 没有 client）、`detach-client -t` 只在 AGMUX_CLIENT 时做、会话名含空格、display-message 失败退让、`send-keys -l --` 后 ≥150ms 再 Enter、`s` 开预览并进入直通；真 tmux（`-L agmux-test`）嵌套浮窗：外层 client 切到目标、浮窗按规则关闭、目标在浮窗自己 session 里时外层仍 attached、真 pane 收到文本 |
+| `test_t10.py` | enter / H / i（T17 起回复键，原 s）直接走 tmux：假 `tmux`（PATH 里记录 argv 的脚本）下的 client 选择（`$AGMUX_CLIENT` / session 环境 / 启发式 / 普通 pane 单终端 / 没有 client）、`detach-client -t` 只在 AGMUX_CLIENT 时做、会话名含空格、display-message 失败退让、`send-keys -l --` 后 ≥150ms 再 Enter、`i` 开预览并进入直通；真 tmux（`-L agmux-test`）嵌套浮窗：外层 client 切到目标、浮窗按规则关闭、目标在浮窗自己 session 里时外层仍 attached、真 pane 收到文本 |
 | `test_t11.py` | 预览窗口：P 开关、92 列预览 + 卡片区 3×45、标题行、pane 末尾行带颜色且不漏到边框、<100 列拒绝 / 100 列 60 宽、换焦点预览跟着换、没有 pane 提示、resize（含 ≤5 行不崩）、点另一张卡立即抓屏、折叠 / 展开后预览跟随；被预览的是真 tmux pane |
 | `test_t12.py` | 按键直通 + 本地滚动：tab 进入、ctrl+] 离开（tab 在直通里是转发给 pane 的）、边框 #ff8ebe、目标失效后锁定并吞掉所有按键（诱饵 pane 零字节、ccmux 零调用）、`;` 结尾、F13 忽略、粘贴走 load-buffer + paste-buffer -p（真 pane 验证 bracketed paste）、滚轮到顶停住、点标题行/底栏不进直通、按键 / 中文 / `-` 开头 / 粘贴 / 特殊键到达 pane（`fixtures/catv.py` 做按字节回显）、连发按键保持顺序、滚轮每格 3 行、点击获焦 |
+| `test_t17.py` | 配置文件（临时 `XDG_CONFIG_HOME`）：无文件 = 默认；`down=["n","down"]` 后 n 下移、j 无动作、底栏同步；`reply` 默认 `i`、`s` 不再进直通；`working="#123456"` 边框转义码；重复绑定 / 坏颜色 / 未知键 / 坏 TOML 各一行 stderr、退出 1、不进 alt screen；`agmux config` 输出写回后行为一致且幂等、`--path`；真 pane 下直通只拦 `leave_preview`（默认 ctrl+] 被转发、tab / ctrl+c 转发） |
 | `test_t7.py` | 固定排序（假 ccmux 每次轮询换数组顺序，卡片不动；同名按 id；组按 cwd 字符串）、`f` 折叠 / 展开（标题 ▾ ↔ ▸、其它组位置不动、折叠标题可获焦点且不响应 H/r/d/s/x、enter 展开、轮询不展开、不跨运行记忆） |
 
 `fixtures/catv.py` 是假 pane 里用的原始模式回显（BSD `cat -v` 会把被拆开的 UTF-8 弄乱码）；`fixtures/paste_probe.py` 是要求 bracketed paste 并回显收到字节的 pane。

@@ -208,7 +208,7 @@ class FakeTmux(unittest.TestCase):
 
     def test_s_opens_the_preview_with_the_focus_and_typing_goes_to_the_pane(self):
         self.start()
-        self.t.keys("s"); time.sleep(0.6)
+        self.t.keys("i"); time.sleep(0.6)
         self.assertEqual(self.preview_open_and_focused(), (True, True), "s = P + tab: preview open, border #ff8ebe\n" + self.t.text())
         self.assertIn("keys go to the pane", foot(self.t))
         self.t.lit("hello world"); time.sleep(0.5)
@@ -220,7 +220,7 @@ class FakeTmux(unittest.TestCase):
 
     def test_chinese_and_dash_text_arrive_whole_and_in_order(self):
         self.start()
-        self.t.keys("s"); time.sleep(0.6)
+        self.t.keys("i"); time.sleep(0.6)
         for text in ("你好 世界，请继续", "--help", "- 修一下", "-n", "a'b\"c $HOME `x`"):
             before = len(self.sent_text()); self.t.lit(text); time.sleep(0.5)
             self.assertEqual(self.sent_text()[before:], text, f"{text!r}")
@@ -232,7 +232,7 @@ class FakeTmux(unittest.TestCase):
         self.start()
         self.t.keys("p"); time.sleep(0.6)
         self.assertEqual(self.preview_open_and_focused(), (True, False))
-        self.t.keys("s"); time.sleep(0.5)
+        self.t.keys("i"); time.sleep(0.5)
         self.assertEqual(self.preview_open_and_focused(), (True, True), "still open (s is not a toggle), now focused")
         self.t.keys("C-]"); time.sleep(0.4)
         self.assertEqual(self.preview_open_and_focused(), (True, False))
@@ -241,7 +241,7 @@ class FakeTmux(unittest.TestCase):
         self.start()
         self.t.keys("l"); time.sleep(0.25); self.t.keys("j"); time.sleep(0.3)  # b2: background
         n = len(self.env.tmux_calls())
-        self.t.keys("s"); time.sleep(0.5)
+        self.t.keys("i"); time.sleep(0.5)
         self.assertEqual(self.preview_open_and_focused(), (False, False), "no preview")
         self.assertIn("background session, no tmux pane", foot(self.t)); self.assertEqual(foot(self.t).count("background session, no tmux pane"), 1)
         self.t.lit("zzz"); time.sleep(0.3)
@@ -251,13 +251,13 @@ class FakeTmux(unittest.TestCase):
         self.start(); self.t.close()
         t = Term(self.env, w=99, h=50, extra_env="TMUX_PANE=%9"); self.addCleanup(t.close)
         self.assertTrue(ready(t) or wait(lambda: len([c for c in find_cards(t.snap()) if c.ok]) >= 1, 5))
-        t.keys("s"); time.sleep(0.5)
+        t.keys("i"); time.sleep(0.5)
         self.assertIn("at least 100 columns", "\n".join(r.text for r in t.snap()[-3:]))
         t.lit("zzz"); time.sleep(0.3); self.assertEqual(self.sent_text(), "")
 
     def test_paste_goes_through_load_buffer_and_paste_buffer(self):
         self.start()
-        self.t.keys("s"); time.sleep(0.6)
+        self.t.keys("i"); time.sleep(0.6)
         self.t.lit("\x1b[200~first line\nsecond; line\x1b[201~"); time.sleep(0.8)
         c = [x for x in self.env.tmux_calls() if x[0] in ("load-buffer", "paste-buffer", "send-keys")]
         self.assertEqual(c, [["load-buffer", "-b", "agmux", "-"], ["paste-buffer", "-p", "-d", "-b", "agmux", "-t", A1_PANE]],
@@ -266,7 +266,7 @@ class FakeTmux(unittest.TestCase):
 
     def test_forwarding_failure_is_shown_on_the_message_line(self):
         self.start()
-        self.t.keys("s"); time.sleep(0.6)
+        self.t.keys("i"); time.sleep(0.6)
         (self.env.fake / "tmux.fail").write_text("send-keys")
         self.t.lit("x"); time.sleep(0.8)
         self.assertIn("boom from fake tmux", foot(self.t)); self.assertNotIn("second tmux line", self.t.text()); self.assertTrue(self.t.alive())
@@ -274,11 +274,11 @@ class FakeTmux(unittest.TestCase):
     def test_footer_says_reply(self):
         self.start()
         bar = last_text_row(self.t.snap())
-        self.assertIn("s reply", bar); self.assertNotIn("s send", bar)
+        self.assertIn("i reply", bar); self.assertNotIn("i send", bar)
 
     def test_blank_and_cancel_prompts_are_gone(self):  # the old prompt is deleted: `s` then Esc is just Esc going to the pane
         self.start()
-        self.t.keys("s"); time.sleep(0.5); self.t.esc(); time.sleep(0.4)
+        self.t.keys("i"); time.sleep(0.5); self.t.esc(); time.sleep(0.4)
         self.assertTrue(self.t.alive(), "esc goes to the pane, it does not quit")
         self.assertEqual(self.sent_text(), "[Escape]")
 
@@ -463,7 +463,7 @@ class RealTmux(unittest.TestCase):
         tm("new-session", "-d", "-s", "fl-x", "-x", "232", "-y", "50", f"sh -c '{self.agmux}; sleep 600'")
         self.wait_board("fl-x")
         d = self.drive("fl-x")
-        d("s"); time.sleep(0.6)
+        d("i"); time.sleep(0.6)
         tm("send-keys", "-t", "fl-x", "-l", "--", "你好 world"); time.sleep(0.3); d("Enter")
         self.assertTrue(wait(lambda: self.pane_text().count("你好 world") >= 2, 5), f"cat did not echo it:\n{self.pane_text()}")
         tm("send-keys", "-t", "fl-x", "-l", "--", "--help -x"); time.sleep(0.3); d("Enter")

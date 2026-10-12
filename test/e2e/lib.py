@@ -390,7 +390,10 @@ class Term:
         tm("send-keys", "-t", self.name, *k)
 
     def lit(self, s):
-        tm("send-keys", "-t", self.name, "-l", "--", s)  # "--": literal text may itself start with a dash
+        # "--": literal text may itself start with a dash. tmux parses an argument ending in `;` as a command
+        # separator and eats it, so each trailing `;` is passed as its own `\;` argument (same as agmux's literal()).
+        body = s.rstrip(";")
+        tm("send-keys", "-t", self.name, "-l", "--", *([body] if body else []), *["\\;"] * (len(s) - len(body)))
 
     def esc(self):
         self.keys("Escape"); time.sleep(0.4)  # ESC + next key would otherwise merge into Alt-<key>

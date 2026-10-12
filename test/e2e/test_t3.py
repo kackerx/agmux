@@ -26,7 +26,7 @@ def group_cards(snap, cards):
     return out
 
 
-BAR_KEYS = ("j/k h/l move", "enter jump", "H handoff", "s reply", "r restart", "x kill", "d review", "q quit")
+BAR_KEYS = ("j/k h/l move", "enter jump", "H handoff", "i reply", "r restart", "x kill", "d review", "q quit")
 
 
 def last_text_row(snap):

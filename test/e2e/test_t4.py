@@ -142,7 +142,7 @@ class Keys(Base):
             self.assertEqual(self.env.actions(), [], f"{k} on background session must not call ccmux")
             self.assertTrue(self.t.alive(), f"{k}: TUI must stay open")
             self.assertEqual(self.t.text().count(hint), 1, f"after {k}: the hint is shown exactly once")
-        self.t.keys("s"); time.sleep(0.4)
+        self.t.keys("i"); time.sleep(0.4)
         self.assertEqual(self.t.text().count(hint), 1, "after s: the hint is shown exactly once")
         self.assertEqual(self.env.actions(), [], "s on background session must not open the prompt / send")
         self.t.lit("x"); self.t.keys("Enter"); time.sleep(0.3)  # (an `x` then lands on the kill confirm, Enter cancels it)

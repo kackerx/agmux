@@ -202,7 +202,7 @@ class PassthroughReview(PreviewBase):
         return "".join(tm("capture-pane", "-p", "-J", "-t", self.panes[sid]).stdout.split("\n")).rstrip()
 
     def enter_passthrough_on_a3(self):
-        self.press("j", "j", "s")
+        self.press("j", "j", "i")
         self.assertTrue(wait(lambda: self.preview_focused(), 3), self.t.text())
 
     def preview_focused(self):
@@ -254,7 +254,6 @@ class PassthroughReview(PreviewBase):
         self.t.esc(); time.sleep(0.4)
         self.assertNotIn("session is gone", self.footer()); self.assertEqual(self.cat("a1"), "")
 
-    @unittest.expectedFailure  # KNOWN BUG at f0e3354: a run of n trailing `;` loses one (`end;` -> `end`, `;` -> nothing, `x;;` -> `x;`); remove this line when fixed
     def test_semicolons_arrive_verbatim(self):
         self.enter_passthrough_on_a3()
         for text in ("end;", ";", "x;;", "a;b"):
