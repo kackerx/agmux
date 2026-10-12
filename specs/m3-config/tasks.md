@@ -51,16 +51,16 @@
 - 代价（已知，用户决定）：直通里 `tab` 到不了 pane——Claude Code 的路径补全、shell 补全要在真终端里按；`shift+tab` 照常直通。
 - 验收：黑盒 预览关着按 tab → 预览开 + 边框粉 + 底栏 "keys go to the pane · tab back to the cards"；再按 tab → 边框普通色、预览还在、底栏回卡片提示；p 关预览；直通里 shift+tab 仍 send-keys 到 pane；config `leave_preview=["ctrl+]"]` 时 ctrl+] 也能退。
 
-### T22 搜索高亮改黄底 + 保留过滤后 n/N 上下跳（审查退回 2 必改，待修）
+### T22 搜索高亮改黄底 + 保留过滤后 n/N 上下跳（修复 2069326 复审 / 测试中）
 - 用户 2026-10-12 验收：命中字符不要粉色前景，要像 nvim 的 Search——**黄底深字**（截图：浅黄底 #f2d06b 左右、字 #2d2a2e）。新增颜色项 `colors.match`（默认那个黄），命中字符画成 match 底 + 深字；design.md「命中字符用 focus 色高亮」那句改掉。
 - enter 保留过滤后，`n` / `N` 在命中的卡里按布局顺序跳下一张 / 上一张，到头回绕；新增动作 `next_match` / `prev_match`（默认 n / N，和现有默认键不冲突）；没保留过滤时 n/N 不做事；底栏在保留过滤态显示 `n/N next/prev · esc clear`。
 - 定稿（dev 提议照准）：保留过滤态底栏是在原整条底栏前面加 `n/N next/prev · esc clear ·`，不整行替换（enter jump 等提示还在）；n/N 和 j/k 一样从 m.current()（屏幕上画着焦点的那张）出发走下一张 / 上一张，不看原始 m.focus（审查退回：焦点卡被轮询改名后不再命中时，屏上焦点已退到第一张，按 n 却原地不动）。
 - 审查退回（reviewer @60c2217，探针 cr-t22-60c2217/probes/）：1. n/N 改走 m.current()，删「隐藏卡」分支（TestProbeNFromDisplayedFocus）；2. 补测布局序 ≠ 得分序时 n 按布局序（收 TestProbeNLayoutOrder）；3. 底栏 n/N 提示有哪个键显示哪个；README 配置示例 `down = ["n", "down"]` 换成不撞默认键的键。
 - 验收：黑盒 `/ a` enter 后抓屏带色，命中字符格子是黄底；n 三次焦点按布局序循环；N 反向；esc 后 n 无效。
 
-### T23 `s` flash 改成 flash.nvim 式：先打子串再按标签（开发中）
+### T23 `s` flash 改成 flash.nvim 式：先打子串再按标签（b4b5351 审查 / 测试中）
 - 用户 2026-10-12 验收：现在「一个字母跳一张卡」不对，要和 flash.nvim 一致——按 `s` 后输入字符，卡片的 name/branch/dir 里**子串命中**（大小写不敏感，不用 fzf 模糊）的位置黄底高亮（同 T22 的 match 色），每张命中卡在命中子串后一格盖一个标签字母（focus 底深字）；标签字母**避开**所有命中后紧跟的下一个字符（这样继续打字和按标签不会撞）；按标签跳过去并退出；继续打字缩小范围；退格；esc 取消；无命中时标签全无、继续打字或 esc。按 sqlmux 的 internal/app/jump.go 做（字母表 asdfghjklqwertyuiopzxcvbnm → 大写、按离焦点距离分配、跳过匹配后紧跟字符）；design.md「全局定位」一节按此重写（T20 的「直接标签」作废：用户实测后拍板）。
-- 折叠标题也参与（标题文字里命中）。打一个字符就出标签（flash.nvim 默认）。底栏 `flash: type to narrow · label to jump · esc`。
+- 折叠标题也参与（标题文字里命中）。dev 定稿（照准）：dir 只在组标题里找（卡片上看不到 cwd）；组标题命中的标签放在标题行，展开的组按标签跳到它的第一张卡、折叠的落到标题；消息行显示已打的内容；再次按 s 清空重来；改窗口大小重扫。打一个字符就出标签（flash.nvim 默认）。底栏 `flash: type to narrow · label to jump · esc`。
 - 验收：单测 标签避开后续字符（卡名 "alpha" "alps"，打 "al" 后标签不能是 p / s）；黑盒 `s` 打 `br` → 只有 bravo-* 卡有黄底 + 标签，按标签焦点到位；打到无命中时无标签、esc 退出。
 
 ### T24 预览里画出 pane 的光标（开发中，先实测 cursor_* 变量）
