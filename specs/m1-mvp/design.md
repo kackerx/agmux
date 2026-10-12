@@ -57,7 +57,7 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 │ ■■■□□□             ⚇ 2 agents  ⚙ 1 shell │   上下文条 6 格顶在头像下面 · 子 agent 数 · 后台 shell 数
 ╰──────────────────────────────────────────╯
 ```
-- 窄时让位顺序：第 1 行状态词和时间永远在，pendingTool 只拿剩下的宽度、先截它（MCP 工具名可能几十个字符），再截名字，名字至少留 12 格；第 2 行先截分支，模型·effort 永远在。
+- 窄时让位顺序：第 1 行状态词和时间永远在；名字是身份、优先完整显示，pendingTool 只拿名字之后剩下的宽度，放不下就截它（截到空时连 ` · ` 一起去掉）；pendingTool 已经没了还放不下，才截名字（尽量留 12 格，最窄的 40 列卡片上可能只剩 10–11 格，状态词和时间优先）。第 2 行先截分支，模型·effort 永远在。
 - 字段颜色和用户的 claude-hud 段一一对应：名洋红、模型青、effort 紫、目录黄、分支橙红。
 - 状态，照 ccmux 1.4.3 的 `getEffectiveStatus` 换算后再显示：原始 idle 且有子 agent 在 working / waiting → `⏵ working · agents`（不算 done，眼睛扫动）；原始 working → `⏵ working`，有 pendingTool 接 pendingTool，不接 agents；`⏸ idle` 蓝灰；`● done` 绿 = 原始 idle、无子 agent 在跑、`attentionState` 非空（"unread" 或 "read" 都算，ccmux 同样）；`⏳ waiting` 红 = status waiting（含 plan_approval，不像 ccmux 那样用青色）。**边框色 = 状态色**（working 橙、done 绿、idle 暗灰 #585b70、需要处理 / waiting 红）。焦点卡片边框换成 **#ff8ebe** 粗线（lipgloss ThickBorder），盖掉状态色——第二轮验收：只换粗线看不出焦点在哪。不单独拎出需要处理的会话。
 - 换算放在 store 里做一次，view 只读结果。
