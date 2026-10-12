@@ -63,7 +63,7 @@
 - 折叠标题也参与（标题文字里命中）。dev 定稿（照准）：dir 只在组标题里找（卡片上看不到 cwd）；组标题命中的标签放在标题行，展开的组按标签跳到它的第一张卡、折叠的落到标题；消息行显示已打的内容；再次按 s 清空重来；改窗口大小重扫。打一个字符就出标签（flash.nvim 默认）。底栏 `flash: type to narrow · label to jump · esc`。
 - 验收：单测 标签避开后续字符（卡名 "alpha" "alps"，打 "al" 后标签不能是 p / s）；黑盒 `s` 打 `br` → 只有 bravo-* 卡有黄底 + 标签，按标签焦点到位；打到无命中时无标签、esc 退出。
 
-### T24 预览里画出 pane 的光标（开发中；实测结果已写进 m2-preview/design.md「光标」）
+### T24 预览里画出 pane 的光标（4e0985d 审查 / 测试中；光标行落在被裁掉的空行时补白再画）
 - 用户 2026-10-12 验收：预览里看不到光标。能解决：抓屏时顺带 `tmux display -p -t <pane> '#{cursor_x} #{cursor_y} #{cursor_flag} #{cursor_shape}'`（tmux 3.7 有这些变量，已查 man），在预览对应格子上画光标：cursor_flag=0 不画；shape 块状 → 该格反色；竖线/下划线 → 该格加 focus 色下划线（终端里画不出细竖线，用下划线替代）。滚动（scroll 偏移非 0）时不画。预览和直通态都画，直通态随每次抓屏刷新。
 - **先实测再写死**：dev 先用一个真 pane 验证 cursor_shape 的取值（0/1/2 还是文字）和 cursor_flag 在 vim 插入态 / Claude Code 输入框里的值，把结果写进 design.md 再实现。
 - 验收：黑盒 真 pane 里跑 `printf 'abc'` 后预览第一行第 4 格反色；`tput civis` 后不画；滚动后不画。
