@@ -54,7 +54,7 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 ╭──────────────────────────────────────────────╮
 │ ▄▀▀▀▀▄  qa-acceptance-pap-be-dev          3h │   名字（洋红）全宽 · 上次活动相对时间
 │ ▀▄▄▄▄▀   feature/qa-acceptance-pap-be-dev   │   分支（橙红）全宽，图标 nf-dev-git_branch U+E725
-│ ■■■□□□  ⏸ idle · Bash  ⚇ 2   Opus 5.5·high │   上下文条 · 状态 + pendingTool/agents · 子 agent / shell · 模型·effort 靠右
+│ ■■■□□□  ⏵ working · Bash  ⚇ 2  Opus 5.5·high │   上下文条 · 状态 + pendingTool/agents · 子 agent / shell · 模型·effort 靠右
 ╰──────────────────────────────────────────────╯
 ```
 - 名字前不再放 agent 图标（头像色带已区分 agentType）。
@@ -68,7 +68,7 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 - 子 agent / shell 为 0 时该段不显示。
 - PR 号（`branchPRs`）M1 不显示：真机全是 null / []，看到真实元素再接。
 - 卡片里不画按钮；所有操作走底栏键位。鼠标：点卡片 = 选中，再点 = 跳转。
-- 紧凑变体（3 行，给 M2 sidebar）：M1 不实现，但卡片渲染函数接受「高度」参数预留。
+- 紧凑变体（3 行，给以后的 sidebar）：M1 不实现，但卡片渲染函数接受「高度」参数预留；改版后第 1 行只有名字 + 时间，紧凑卡那一行放什么到时另定。
 
 ## 交互
 - 焦点卡片边框高亮；方向键 / hjkl **按屏幕位置空间导航**（第四轮验收：组折到第二带后 j/k 过不去）：j/k = 与当前卡片横向重叠最多、在其下方 / 上方最近的卡片（跨组、跨带）；h/l = **只在当前这一带内**、该方向**最近的一列**里找：列里取与当前卡片纵向重叠最多的，一个都不重叠就取纵向最近的（折叠标题和长短列错位时不至于卡住）；该带那一侧没有列就停住，不跨带。j/k 不做这种退让。折叠的组标题当高度 1 的卡片参与；到边缘停住。鼠标点卡片 = 选中。
