@@ -341,7 +341,7 @@ func (m Model) msgLine(focused store.Session) string {
 		parts = append(parts, m.msg)
 	}
 	if err := m.src.Err(); err != nil {
-		parts = append(parts, fg(cRed, " "+err.Error()))
+		parts = append(parts, fg(cRed, " "+firstLine(err.Error()))) // or the hint after it is cut off
 	}
 	if focused.ID != "" && focused.TmuxPane == "" {
 		parts = append(parts, fg(cMuted, " "+noPane))

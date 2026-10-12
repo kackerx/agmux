@@ -266,6 +266,16 @@ func TestPollErrorOnBoard(t *testing.T) {
 	}
 }
 
+// A multi-line poll error must not swallow what follows it on the message line.
+func TestPollErrorKeepsBackgroundHint(t *testing.T) {
+	m := New(errSrc{sessions, errors.New("ccmux show --json: boom\n  at x")}, &fakeRunner{})
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 200, Height: 30})
+	m, _ = press(t, tm.(Model), "j") // a2: background
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "boom") || !strings.Contains(v, noPane) || strings.Contains(v, "at x") {
+		t.Errorf("message line should be the error's first line plus the hint: %q", strings.Split(v, "\n")[28])
+	}
+}
+
 func TestBackgroundHintOnce(t *testing.T) {
 	for _, k := range []string{"enter", "H", "s"} {
 		m, _ := press(t, newModel(&fakeRunner{}), "j", k) // a2 is the background session
