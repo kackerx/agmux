@@ -235,30 +235,27 @@ func agentIcon(agentType string) string {
 	return "\uec20" // cod-robot
 }
 
-// minName is how much of the name line 1 keeps before anything but the status word and time.
-const minName = 12
-
 // line1: icon + name, then the status word, its detail (pending tool / agents) and the time.
-// The status word and time always show; the detail is cut first (MCP tool names run to 40+
-// characters), then the name, which keeps at least minName cells.
+// The status word and time always show. The name gets all it needs first; the detail (MCP tool
+// names run to 40+ characters) takes what is left and is dropped, " · " included, when nothing
+// of it would show; only then is the name cut.
 func line1(s store.Session, w int, now time.Time) string {
 	word, detail := status(s)
 	ago := relTime(s.LastActivity, now)
 	if ago != "" {
 		ago = "  " + ago
 	}
-	icon := agentIcon(s.AgentType) + " "
-	avail := w - ansi.StringWidth(icon) - ansi.StringWidth(word) - ansi.StringWidth(ago) - 1
-	name := min(ansi.StringWidth(s.Name), max(avail-ansi.StringWidth(detail), minName), max(avail, 0))
-	if room := avail - name; room < ansi.StringWidth(detail) {
+	icon := agentIcon(s.AgentType)
+	avail := w - ansi.StringWidth(icon) - 1 - ansi.StringWidth(word) - ansi.StringWidth(ago) - 1
+	if room := avail - ansi.StringWidth(s.Name); room < ansi.StringWidth(detail) {
 		full := detail
 		detail = ""
-		if room >= 4 { // " · x…" at least
+		if room >= 5 { // " · " plus at least one character and "…"
 			detail = ansi.Truncate(full, room, "…")
 		}
 	}
-	left := fg(avatar.BandColor(s.AgentType), icon[:len(icon)-1]) + " " + fg(cName, ansi.Truncate(s.Name, name, "…"))
-	return spread(left, word+fg(cMuted, detail+ago), w)
+	left := fg(avatar.BandColor(s.AgentType), icon) + " " + fg(cName, s.Name)
+	return spread(left, word+fg(cMuted, detail+ago), w) // spread cuts the name if it still doesn't fit
 }
 
 // status is the colored status word and its plain detail (" · Bash", " · agents" or "").

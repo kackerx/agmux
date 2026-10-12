@@ -199,7 +199,8 @@ func TestCardLines(t *testing.T) {
 		s.Model, s.Effort = c.model, c.effort
 		l := ansi.Strip(line2(s, c.w))
 		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, "⑂ feature/") || !strings.HasSuffix(l, c.right) ||
-			strings.Contains(l, "feature/qa-acceptance-pap") == c.branchCut || (c.right == "" && strings.Contains(l, "high")) {
+			strings.Contains(l, "feature/qa-acceptance-pap") == c.branchCut || strings.Contains(l, "…") != c.branchCut ||
+			(c.right == "" && strings.Contains(l, "high")) {
 			t.Errorf("w=%d line 2 %q: want %q flush right, branch cut=%v", c.w, l, c.right, c.branchCut)
 		}
 	}
@@ -321,23 +322,32 @@ func TestOrderIgnoresCcmuxOrder(t *testing.T) {
 	}
 }
 
-// A long pending tool (MCP names run past 40 characters) gives way before the name and time.
-func TestLine1LongTool(t *testing.T) {
-	s := store.Session{Name: "qa-acceptance-pap-be-dev", AgentType: "claude", Status: "working",
-		PendingTool: "mcp__claude_ai_Claude_Docs__batch", LastActivity: now.Add(-2 * time.Minute)}
-	for _, w := range []int{28, 30, 36, 60} { // 28 = text width of the narrowest (40-column) card
-		l := ansi.Strip(line1(s, w, now))
-		name := strings.TrimPrefix(strings.Fields(l)[1], "")
-		if ansi.StringWidth(l) != w || !strings.HasSuffix(l, "  2m") || !strings.Contains(l, "⏵ working") ||
-			ansi.StringWidth(name) < min(minName, len(s.Name)) {
-			t.Errorf("w=%d %q: want the time last, the status word, and ≥%d cells of name (got %q)", w, l, minName, name)
+// Line 1: the name gets all it needs first; the pending tool takes what is left and goes
+// (" · " included) when none of it would show; the status word and time always stay.
+func TestLine1NameFirst(t *testing.T) {
+	base := store.Session{Name: "qa-acceptance-pap-be-dev", AgentType: "claude", Status: "working", LastActivity: now.Add(-2 * time.Minute)}
+	for _, c := range []struct {
+		w          int
+		tool, want string // want: what follows "⏵ working" before the time
+		nameWhole  bool
+	}{
+		{44, "Bash", "", true}, // 56-column card: whole name, " · Bash" doesn't fit and goes
+		{48, "Bash", " · Bash", true},
+		{46, "Bash", " · Ba…", true}, // 30 cells left of the status: 24 name + 6
+		{60, "mcp__claude_ai_Claude_Docs__batch", " · mcp__claude_ai_C…", true},
+		{28, "mcp__claude_ai_Claude_Docs__batch", "", false}, // 40-column card: tool gone, then the name is cut
+		{80, "mcp__claude_ai_Claude_Docs__batch", " · mcp__claude_ai_Claude_Docs__batch", true},
+	} {
+		s := base
+		s.PendingTool = c.tool
+		l := ansi.Strip(line1(s, c.w, now))
+		if ansi.StringWidth(l) != c.w || !strings.HasSuffix(l, " ⏵ working"+c.want+"  2m") ||
+			strings.Contains(l, s.Name) != c.nameWhole || strings.Contains(l, " · …") {
+			t.Errorf("w=%d tool=%s: %q, want name whole=%v then \"⏵ working%s  2m\"", c.w, c.tool, l, c.nameWhole, c.want)
 		}
-	}
-	if l := ansi.Strip(line1(s, 36, now)); !strings.Contains(l, "qa-acceptan") || !strings.Contains(l, " · mcp") {
-		t.Errorf("w=36: name keeps 12, the tool gets the rest: %q", l)
-	}
-	if l := ansi.Strip(line1(s, 80, now)); !strings.Contains(l, s.Name) || !strings.Contains(l, s.PendingTool) {
-		t.Errorf("wide enough for everything: %q", l)
+		if !c.nameWhole && ansi.StringWidth(strings.Fields(l)[1]) < 10 {
+			t.Errorf("w=%d: the name should still keep 10+ cells on the narrowest card: %q", c.w, l)
+		}
 	}
 }
 
