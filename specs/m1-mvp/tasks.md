@@ -46,6 +46,10 @@
 - `f` 折叠 / 展开焦点所在的组；收起只剩 `▸ ~/路径 (n)` 标题行，标题可获焦点，再按 f 或 enter 展开；状态只在本次运行内。底栏加 `f 折叠`。
 - 验收：单测把 fixture 数组打乱两种顺序喂进去，渲染结果逐字节相同；折叠后该组卡片不渲染、标题变 ▸、其它组位置不变；黑盒：`-L agmux-test` 里连续 3 次轮询（假 ccmux 每次输出不同顺序）capture-pane 一致；按 f 后标题变 ▸、再按 f 恢复。
 
+### T8 最多 4 列 + 去掉百分比数字（待做，用户第三轮验收意见）
+- 列数上限 4：n = min(4, floor((W+2)/42))；232 → 4×56。上下文条后面不再显示百分比数字，未知时也不显示 `--`，只剩 6 格全暗。
+- 验收：TestColumns 加 232→4×56、300→4×73；卡片第 3 行无数字；黑盒 232×50 为 4 列。
+
 ## 待用户定
 - [ ] 注意：~/.claude/settings.json 软链到 ~/.config/claude/settings.json，`--write` 的 .bak 会落在 dotfiles 仓库里，用户自己决定 gitignore 还是删。
 - [ ] T6 做完后用户自己跑 `agmux setup --write`，然后把 `~/.local/state/agmux/<自己会话 id>.json` 给 dev 核实 model / effort 字段名。
