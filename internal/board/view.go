@@ -498,7 +498,7 @@ func overlay(screen string, box []string, w int) string {
 func put(line string, x int, s string) string {
 	end := x + ansi.StringWidth(s)
 	right := ansi.TruncateLeft(line, end, "")
-	if ansi.StringWidth(right) > ansi.StringWidth(line)-end { // a wide character straddles the cut: a space for its half
+	if ansi.StringWidth(right) > max(ansi.StringWidth(line)-end, 0) { // a wide character straddles the cut: a space for its half
 		right = " " + ansi.TruncateLeft(line, end+1, "")
 	}
 	// resets: an SGR left open where the line is cut must not color s, nor s the rest

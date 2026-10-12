@@ -103,9 +103,10 @@ func (p *Poller) SetAvatar(s Session, id string) error {
 	p.refreshMu.Lock() // a poll in flight read the old binding; it must not land after this
 	defer p.refreshMu.Unlock()
 	err := p.Avatars.Set(s.AvatarKey(), id)
+	aerr := p.Avatars.Reload() // avatarErr is about reading the file; a failed write is err's alone
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.avatarErr = err // the file was read just now: fixed, or still broken
+	p.avatarErr = aerr
 	if err != nil {
 		return err
 	}

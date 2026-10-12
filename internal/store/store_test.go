@@ -357,3 +357,15 @@ func TestPollFollowsAvatarsFile(t *testing.T) {
 		t.Errorf("a bind reads the file now: fixed, no error: %v %v", err, p.Err())
 	}
 }
+
+// A bind that can't be written says so once (its own error); the file reads fine, so no avatars error.
+func TestSetAvatarWriteErrorNotAvatarErr(t *testing.T) {
+	dir := t.TempDir()
+	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
+	p := &Poller{Avatars: b}
+	os.Chmod(dir, 0o555)
+	defer os.Chmod(dir, 0o755)
+	if err := p.SetAvatar(Session{ID: "a", Name: "n"}, "bot-01"); err == nil || p.Err() != nil {
+		t.Errorf("err %v, Err() %v", err, p.Err())
+	}
+}

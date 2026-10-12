@@ -813,8 +813,17 @@ func (m Model) View() string {
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " enter keep the filter · esc clear it")
 	case m.mode == pickAvatar:
 		k := m.cfg.First
+		var hint []string // actions the config left with no key aren't offered
+		if k("down") != "" && k("up") != "" {
+			hint = append(hint, k("down")+"/"+k("up")+" move")
+		}
+		for _, a := range [][2]string{{"jump", " bind"}, {"quit", " cancel"}} {
+			if k(a[0]) != "" {
+				hint = append(hint, k(a[0])+a[1])
+			}
+		}
 		out = overlay(out, avatarList(m.target, m.pick), m.w)
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+k("down")+"/"+k("up")+" move · "+k("jump")+" bind · "+k("quit")+" cancel")
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+strings.Join(hint, " · "))
 	case m.passThrough():
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · "+m.cfg.First("leave_preview")+" back to the cards")
 	case m.pvFocus: // locked out: the target is gone, keys are being swallowed

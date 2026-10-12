@@ -1710,6 +1710,9 @@ func TestOverlay(t *testing.T) {
 	if got := ansi.Strip(put("a你cd", 0, "XY")); got != "XY cd" {
 		t.Errorf("right cut: %q", got)
 	}
+	if got := ansi.Strip(put("ab", 1, "XYZ")); got != "aXYZ" {
+		t.Errorf("a line shorter than the box: nothing after it: %q", got)
+	}
 	if got := ansi.Strip(put("你cd", 1, "X")); got != " Xcd" {
 		t.Errorf("left cut: %q", got)
 	}
@@ -2016,5 +2019,19 @@ func TestFooterSkipsKeylessAction(t *testing.T) {
 	}
 	if strings.Contains(f, "avatar") || !strings.Contains(f, "a fold") || strings.Contains(f, " avatar") {
 		t.Errorf("%s", f)
+	}
+}
+
+// The picker's footer offers only the keys there are.
+func TestPickerFooterSkipsKeyless(t *testing.T) {
+	m := withConfig(t, "[keys]\nfold = [\"enter\"]\n") // jump is left with no key
+	m, _ = press(t, m, "a")
+	v := strings.Split(ansi.Strip(m.View()), "\n")
+	if last := v[len(v)-1]; last != " j/k move · q cancel" {
+		t.Errorf("footer %q", last)
+	}
+	m, _ = press(t, withConfig(t, "[keys]\nfold = [\"k\", \"up\"]\n"), "a") // up: no key, so no "move"
+	if v := strings.Split(ansi.Strip(m.View()), "\n"); v[len(v)-1] != " enter bind · q cancel" {
+		t.Errorf("footer %q", v[len(v)-1])
 	}
 }
