@@ -143,8 +143,9 @@ class Fold(unittest.TestCase):
     def test_h_back_onto_a_folded_title_then_f_unfolds(self):
         self.t.keys("l"); time.sleep(0.3); self.t.keys("f")
         self.assertTrue(wait(lambda: structure(self.t)[0][1][0].startswith("▸"), 3), "G2 folded")
-        self.t.keys("l"); time.sleep(0.3)  # G2 folded, focus on c1
-        self.t.keys("h"); time.sleep(0.3)  # back on the folded title
+        self.t.keys("h"); time.sleep(0.3)  # a1 (the focus left the folded title)
+        self.t.keys("j"); time.sleep(0.3); self.t.keys("j"); time.sleep(0.3)  # a3: the only card whose rows overlap nothing on the right
+        self.t.keys("l"); time.sleep(0.3)  # spatial fallback (T9): the nearest column to the right is the folded title
         self.t.keys("f")
         self.assertTrue(wait(lambda: structure(self.t)[0][1][0].startswith("▾"), 3), "f on a folded title unfolds it")
         self.assertEqual(self.calls(), [])

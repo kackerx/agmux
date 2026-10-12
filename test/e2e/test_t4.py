@@ -1,8 +1,7 @@
 """T4 interaction + store polling. Spec: specs/m1-mvp/design.md「交互」, specs/m1-mvp/tasks.md T4 (x: y runs / any other key cancels; s: enter sends, esc or empty cancels).
 
 The fake `ccmux` on PATH records argv of every non-`show` call, so each key is checked end-to-end as the exact command line.
-Focus order (d966219: h/l step through groups sorted by cwd, j/k within a group; ci is clamped):
-G1 a1,a2,a3 | G2 b1,b2(background, no pane) | G3 c1,c2 | G4 d1 | G5 e1.
+Focus order since T9 is spatial (see test_t9); at 200 columns: band 1 = G1 a1,a2,a3 | G2 b1,b2(background, no pane) | G3 c1,c2 | G4 d1, band 2 = G5 e1.
 """
 import fcntl, json, os, re, pty, struct, subprocess, termios, unittest
 from lib import *
@@ -45,8 +44,8 @@ class Keys(Base):
         self.assertEqual(self.t.exit_status(), 0, "enter must exit the TUI after ccmux switch")
 
     def test_navigation(self):
-        cases = [("j", "a2"), ("j j", "a3"), ("j j j j j", "a3"), ("k", "a1"), ("l", "b1"), ("l l", "c1"), ("l l l", "d1"), ("l l l l", "e1"),
-                 ("l l l l l", "e1"), ("j j l l", "c2"), ("j j j l", "b2"), ("Down", "a2"), ("Right", "b1"), ("Right Left", "a1"),
+        cases = [("j", "a2"), ("j j", "a3"), ("j j j j j", "e1"), ("k", "a1"), ("l", "b1"), ("l l", "c1"), ("l l l", "d1"), ("l l l l", "d1"),
+                 ("l l l l l", "d1"), ("j j l l", "c2"), ("j j j l", "b2"), ("Down", "a2"), ("Right", "b1"), ("Right Left", "a1"),
                  ("j Up", "a1"), ("l h", "a1"), ("h", "a1"), ("l l l h h", "b1")]
         for keys, want in cases:
             with self.subTest(keys=keys):

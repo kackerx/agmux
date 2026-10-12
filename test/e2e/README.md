@@ -31,6 +31,7 @@ AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 | `test_t3.py` | 列数与列宽（最小列宽 40：81 / 82 / 124 / 200 / 208 / 232 列等）、resize、卡片三行字段与让位顺序、agent 图标、边框色 = 状态色 / 焦点 #ff8ebe 粗线、6 格上下文条与阈值、模型缓存、`agmux statusline` 抓到的 model / 百分比显示到卡片、多行 stderr |
 | `test_t4.py` | 每个键的命令行（send 正文在 `--` 之后）、x 确认、s 输入（含中文、`-` 开头）、粘贴、d 的 ExecProcess（回来后鼠标仍可用、失败时底栏显示 stderr 最后一行）、后台会话置灰（提示只出现一次，和错误行同时可见）、连按、鼠标、2s 轮询、会话消失的竞态、popup 里的真鼠标 |
 | `test_t6.py` | `agmux statusline`（逐字节透传、退出码、sh -c、写失败不影响透传、session_id 白名单、原子写）和 `agmux setup`（文案、`--write` 保留其它键、`.bak`、损坏 / 无权限、软链接、端到端）；只用临时 HOME，收尾校验真 `~/.claude/settings.json` 哈希没变 |
+| `test_t9.py` | 空间导航：120 列（2 列 3 带）下 j 走遍整列（跨带）再停住、k 原路回来、j/k 不退让；h/l 取纵向重叠最多的卡，没有重叠时退到最近一列里纵向最近的卡；方向键等价；折叠标题作为一行高的卡参与；焦点从屏幕上读（#ff8ebe 粗线边框），不用按 enter |
 | `test_t7.py` | 固定排序（假 ccmux 每次轮询换数组顺序，卡片不动；同名按 id；组按 cwd 字符串）、`f` 折叠 / 展开（标题 ▾ ↔ ▸、其它组位置不动、折叠标题可获焦点且不响应 H/r/d/s/x、enter 展开、轮询不展开、不跨运行记忆） |
 
 `internal/store/store_ext_test.go`、`internal/avatar/avatar_ext_test.go` 是同一轮测试写的补充 Go 测试（模型缓存、64KB 边界、并发刷新、avatars.json 读写与坏文件、sprite 渲染）。
