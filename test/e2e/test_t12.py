@@ -331,6 +331,8 @@ class PassthroughReview2(PreviewBase):
         if not self.log.exists():
             return []
         cs = [[a for a in l.split("\x1f") if a != ""] for l in self.log.read_text().split("\n") if l]
+        # T24: a preview capture is ONE tmux call, `display-message -p -t P <cursor format> ; capture-pane ...`: report it as the capture-pane it contains
+        cs = [c[c.index("capture-pane"):] if c[0] == "display-message" and ";" in c and "capture-pane" in c else c for c in cs]
         return [c for c in cs if name is None or c[0] == name]
 
     def red_rows(self):  # red text in the message / footer rows only (the cards' own borders and eyes are red for sessions that need attention)

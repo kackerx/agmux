@@ -94,7 +94,8 @@ class Preview(PreviewBase):
         self.assertRegex(title, rf"^alpha-main · {re.escape(self.panes['a1'])} · ⏵ working · Bash$", "title: name · pane id · status")
         texts = [r.text.strip() for r in rows]
         self.assertEqual(len(texts), 44, "50 rows - top bar - msg - footer - title - 2 borders")
-        self.assertEqual(texts[-1], "line 200"); self.assertEqual(texts[0], "line 157", "the last 44 lines of the pane's history")
+        self.assertEqual(texts[-2:], ["line 200", ""], "T24: the cursor sits on the empty line below `line 200`: that line is the last row of the box")
+        self.assertEqual(texts[0], "line 158", "the last 44 lines of the pane's history + capture-pane's own trailing blank line counted out: 43 lines and the cursor row")
 
     def test_colours_reach_the_preview_and_do_not_leak_to_the_border(self):
         self.open_preview()

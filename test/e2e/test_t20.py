@@ -1,7 +1,9 @@
-"""T20 `s` global jump (flash). Spec: specs/m3-config/design.md「`s` 全局定位（flash）」, tasks.md T20.
+"""T20 + T23 `s` flash, flash.nvim style. Spec: specs/m3-config/design.md「`s` 全局定位（flash）」, tasks.md T23.
 
-`s` puts a one-letter label on the top border of every visible card (and on folded group titles), ordered by distance from the focused card
-(the focused card is `a`); the other content is dimmed; pressing a label only MOVES THE FOCUS (no jump to the session); esc cancels.
+`s` enters the JUMP state: nothing has a label yet. Every printable character narrows: each card on screen (and each group title) whose name / branch (dir: group titles only) contains the typed text
+as a case-insensitive substring gets the match on the yellow `colors.match` background and ONE label in the cell right after the hit (focus background, dark text). Labels come from
+`asdfghjklqwertyuiopzxcvbnm` then upper case, in order of distance from the focused card, and never use a character that follows any hit (typing on and pressing a label cannot collide).
+A label moves the focus (it never jumps to the session) and leaves JUMP; esc leaves with the focus unchanged.
 """
 import json, unittest
 import test_t12 as _t12
@@ -11,21 +13,31 @@ from test_t11 import PreviewBase, CAT_CMD
 
 ALPHABET = "asdfghjklqwertyuiopzxcvbnm"
 LABELS = list(ALPHABET) + list(ALPHABET.upper())
-INK, MUTED = (40, 42, 54), (98, 114, 164)  # label text #282a36 on the focus colour; the dimmed content is `muted` #6272a4
+MATCH = ("rgb", 242, 208, 107)
+INK, MUTED = (40, 42, 54), (98, 114, 164)
+PROMPT = "flash: type to narrow · label to jump · esc"
 
 
-def label_cells(snap):
-    """(row, col, char) of every label: a cell on a card's top border (or a folded title) drawn dark-on-focus-colour"""
-    out = []
-    for r, row in enumerate(snap):
-        for c, cell in enumerate(row.cells):
-            if cell[0].strip() and cell[2] == C_FOCUS and cell[1] == ("rgb", *INK) and r > 0 and r < len(snap) - 1:
-                out.append((r, c, cell[0]))
-    return out
+def name_of(c):
+    return c.line(1)[8:-6].strip()
+
+
+KNOWN = ["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字符截断-再多写一些字让它超过列宽", "bravo-29", "bravo-bg", "charlie-30", "charlie-59", "delta-60", "echo-long",
+         "aaa-new", "bnew-card", "zed-one", "alpha", "alps", "alpine"] + [f"alp-{i:02d}" for i in range(20)] + [f"sess-{i:02d}" for i in range(30)]
+
+
+def resolve(shown):
+    """the card name behind what is on screen: in flash a label overwrites the character after the hit, so allow one wrong cell"""
+    s = shown.rstrip("…").rstrip()
+    for k in KNOWN:
+        k2 = k[:len(s)]
+        if len(k2) == len(s) and sum(a != b for a, b in zip(k2, s)) <= 1:
+            return k
+    return shown
 
 
 def near(a, b, d=3):
-    return a[0] == "rgb" and all(abs(x - y) <= d for x, y in zip(a[1:], b))
+    return a is not None and a[0] == "rgb" and all(abs(x - y) <= d for x, y in zip(a[1:], b))
 
 
 class Base(unittest.TestCase):
@@ -45,147 +57,272 @@ class Base(unittest.TestCase):
         return last_text_row(self.t.snap())
 
     def focused(self):
-        return [c.line(1)[8:-6].strip() for c in find_cards(self.t.snap()) if border_colours(c) == {C_FOCUS}]
+        return [resolve(name_of(c)) for c in find_cards(self.t.snap()) if border_colours(c) == {C_FOCUS}]
 
-    def flash(self):
-        self.t.keys("s"); self.assertTrue(wait(lambda: "jump: press a label" in self.bar(), 3), self.t.text())
-        time.sleep(0.2)
+    def flash(self, text=""):
+        self.t.keys("s"); self.assertTrue(wait(lambda: PROMPT in self.bar(), 3), self.t.text())
+        if text:
+            self.t.lit(text)
+        time.sleep(0.5)
 
-    def labels_by_name(self):
-        snap = self.t.snap(); out = {}
+    def in_flash(self):
+        return PROMPT in self.bar()
+
+    def message_row(self):
+        return next((r.text.strip() for r in self.t.snap() if "▏" in r.text), None)
+
+    def label_cells(self):
+        """(row, col, char) of every label cell: dark text on the focus colour"""
+        return [(r, c, cell[0]) for r, row in enumerate(self.t.snap()) for c, cell in enumerate(row.cells)
+                if cell[0].strip() and cell[2] == C_FOCUS and cell[1] == ("rgb", *INK)]
+
+    def card_labels(self):
+        """{card name: label} for the cards on screen (the label sits on the name / branch row), plus {"title:<text>": label} for group titles"""
+        snap = self.t.snap(); out = {}; cells = self.label_cells()
         for c in find_cards(snap):
-            out[c.line(1)[8:-6].strip()] = snap[c.r].cells[c.c + 1][0]
+            labs = [ch for r, col, ch in cells if c.r < r < c.r + len(c.rows) - 1 and c.c <= col < c.c + c.w]
+            if labs:
+                out[resolve(name_of(c))] = labs
+        for r, ch_col, ch in cells:
+            row = snap[r]
+            if row.text.lstrip().startswith(("▾", "▸")):
+                out.setdefault("title:" + re.search(r"[▾▸] \S+", row.text[row.text.find("▾") if "▾" in row.text else 0:]).group(0) if False else "titles", []).append(ch)
         return out
 
-    def expected_order(self, focus_name):
-        """card names in label order: by distance from the focused card (rows first, then columns, then reading order)"""
-        cs = find_cards(self.t.snap()); f = next(c for c in cs if c.line(1)[8:-6].strip() == focus_name)
-        return [c.line(1)[8:-6].strip() for c in sorted(cs, key=lambda c: (abs(c.r - f.r), abs(c.c - f.c), c.r, c.c)) if True]
+    def hits(self, row):
+        return "".join(c[0] for c in row.cells if c[2] == MATCH and c[0].strip())
 
 
-class Labels(Base):
+class Prompt(Base):
     def test_default_footer_lists_s(self):
         self.assertIn("s flash", self.bar())
 
-    def test_every_card_gets_a_label_nearest_first_the_focused_one_is_a(self):
-        before = border_colours(find_cards(self.t.snap())[0]); self.flash()
-        got = self.labels_by_name()
-        self.assertEqual(got["alpha-main"], "a", "the focused card is a")
-        self.assertEqual(got, dict(zip(self.expected_order("alpha-main"), "asdfghjkl")), "9 cards, 9 labels, in the order of distance")
-        self.assertEqual(got["bravo-29"] + got["charlie-30"] + got["delta-60"], "sdf", "the first row left to right")
-        self.assertIn("jump: press a label · esc cancel", self.bar())
-        self.assertEqual(sorted(l[2] for l in label_cells(self.t.snap())), sorted("asdfghjkl"), "exactly 9 label cells on screen")
-
-    def test_labels_follow_the_distance_from_the_focus_not_the_screen_order(self):
-        self.t.keys("l"); self.t.keys("l"); self.t.keys("j"); time.sleep(0.3)
-        self.assertEqual(self.focused(), ["charlie-59"]); self.flash()
-        got = self.labels_by_name(); order = self.expected_order("charlie-59")
-        self.assertEqual(got["charlie-59"], "a"); self.assertEqual(order[0], "charlie-59")
-        self.assertEqual(got, dict(zip(order, "asdfghjkl")))
-        self.assertEqual([got[n] for n in ("charlie-59", "bravo-bg", "pj-fallback", "charlie-30")], list("asdf"),
-                         "same row first (nearest left, then the next one), then the row above: distance = |dy| * width + |dx|")
-        self.assertEqual(got["bravo-29"] + got["delta-60"], "gh", "equal distance (one column left / right): reading order, left first")
-
-    def test_label_style_and_the_rest_is_dimmed(self):
-        normal = {c.line(1)[8:-6].strip(): [x[1] for x in c.rows[1].cells if x[0].strip() and x[0] not in "│┃"] for c in find_cards(self.t.snap())}
-        self.flash(); snap = self.t.snap(); cs = find_cards(snap)
-        for c in cs:
-            lab = snap[c.r].cells[c.c + 1]
-            self.assertEqual((lab[1], lab[2]), (("rgb", *INK), C_FOCUS), "dark text on the focus colour, one cell right of the corner")
-            self.assertTrue(snap[c.r].cells[c.c][0] in "╭┏", "the corner itself is still there")
+    def test_s_alone_shows_the_prompt_and_the_empty_input_and_no_labels(self):
+        self.flash()
+        self.assertEqual(self.label_cells(), [], "no label until something is typed")
+        self.assertEqual(self.message_row(), "s ▏")
+        snap = self.t.snap()
+        for c in find_cards(snap):
             inside = {x[1] for r in c.rows[1:4] for x in r.cells[1:-1] if x[0].strip()}
-            self.assertEqual(len(inside), 1, f"{c.line(1)}: all card content in one colour")
-            self.assertTrue(near(next(iter(inside)), MUTED), f"{c.line(1)}: content is `muted`: {inside}")
-        self.assertNotEqual(normal["alpha-main"], [("rgb", *MUTED)] * len(normal["alpha-main"]))
+            self.assertEqual(len(inside), 1, f"{c.line(1)}: content in one colour"); self.assertTrue(near(next(iter(inside)), MUTED), f"dimmed to `muted`: {inside}")
 
-    def test_folded_group_titles_get_labels_too(self):
-        self.t.keys("f"); time.sleep(0.4); self.flash()
-        title = self.t.snap()[1]; self.assertIn("▸", title.text); self.assertEqual(title.cells[1][2], C_FOCUS, "the label sits right of the ▸ and is drawn like the card labels")
-        lab = title.cells[1][0]; self.assertIn(lab, "asdfghjkl")
-        self.t.keys(lab); time.sleep(0.4)
-        self.assertTrue(self.t.alive()); self.assertTrue("jump:" not in self.bar())
-        self.t.keys("Enter"); time.sleep(0.5)
-        self.assertIn("▾ ~/work/alpha (3)", self.t.text(), "the focus is on the folded title: enter expands it, it does not jump")
-        self.assertEqual(self.env.actions(), [])
+    def test_the_message_row_shows_what_is_typed(self):
+        self.flash("br"); self.assertEqual(self.message_row(), "s br▏")
+        self.t.keys("a"); time.sleep(0.3); self.assertEqual(self.message_row(), "s bra▏")
+        self.t.keys("BSpace"); time.sleep(0.3); self.assertEqual(self.message_row(), "s br▏")
+        self.t.keys("C-h"); time.sleep(0.3); self.assertEqual(self.message_row(), "s b▏", "ctrl+h is a backspace too")
+
+    def test_s_inside_flash_is_text_or_a_label_not_a_second_flash(self):
+        self.flash("br"); labs = self.label_cells()
+        self.assertTrue(self.in_flash())
+
+
+class Matches(Base):
+    def test_typing_marks_substring_hits_yellow_with_one_label_right_after_each(self):
+        self.flash("br")
+        cs = {resolve(name_of(c)): c for c in find_cards(self.t.snap())}
+        for n in ("bravo-29", "bravo-bg"):
+            self.assertEqual(self.hits(cs[n].rows[1]), "br", f"{n}: the hit is on the yellow background")
+            row = cs[n].rows[1]; i = row.find("br")
+            lab = row.cells[i + 2]; self.assertEqual((lab[2], lab[1]), (C_FOCUS, ("rgb", *INK)), f"{n}: the label is the cell right after `br`"); self.assertIn(lab[0], ALPHABET)
+        for n in ("alpha-main", "pj-fallback", "charlie-30", "delta-60", "echo-long"):
+            self.assertEqual(self.hits(cs[n].rows[1]), "", n); self.assertNotIn(n, self.card_labels())
+        title = next(r for r in self.t.snap() if r.text.lstrip().startswith("▾") and "~/work/br" in r.text)
+        self.assertEqual(self.hits(title), "br", "the group title is searched too (its directory text)")
+        self.assertEqual(len(self.label_cells()), 3, "one label per hit: two cards and one group title")
+
+    def test_the_search_is_a_case_insensitive_substring_not_fuzzy(self):
+        self.flash("BR"); self.assertEqual(len(self.label_cells()), 3, "upper case finds the same hits")
+        self.t.keys("BSpace"); self.t.keys("BSpace"); time.sleep(0.3)
+        self.t.lit("bvo"); time.sleep(0.4)
+        self.assertEqual(self.label_cells(), [], "b..v..o is a fuzzy match, not a substring: nothing")
+
+    def test_the_directory_is_searched_in_group_titles_only(self):
+        self.flash("work/br")
+        self.assertEqual(len(self.label_cells()), 1, "cards do not show their directory: only the bravo group title matches")
+        title = next(r for r in self.t.snap() if r.text.lstrip().startswith("▾") and "~/work/br" in r.text); self.assertEqual(self.hits(title), "work/br")
+        for c in find_cards(self.t.snap()):
+            self.assertEqual(self.hits(c.rows[1]) + self.hits(c.rows[2]), "")
+
+    def test_name_and_branch_together_have_one_hit_and_one_label_per_card(self):
+        S = json.loads((self.env.fake / "show.json").read_text()); base = S[0]
+        two = dict(base, id="zz", summary="zed-one", project="zzp", cwd=f"{self.env.home}/work/zzp", mainRepoRoot=f"{self.env.home}/work/zzp", gitBranch="zed-two", tmuxPane="%190",
+                   status="idle", subagents=[], pendingTool=None, nativeSessionId="n-zz", logPath=None)
+        self.env.write_show(S + [two]); self.t.close(); self.t = self.board(200, 50, 10)
+        self.flash("zed")
+        self.assertEqual(len([1 for r, c, ch in self.label_cells()]), 1, "the name and the branch both contain `zed`: still one hit, one label")
+
+    def test_continuing_to_type_narrows_and_reassigns_the_labels(self):
+        self.flash("b"); n1 = len(self.label_cells()); self.t.lit("ravo-b"); time.sleep(0.5)
+        self.assertEqual(len(self.label_cells()), 1, "only bravo-bg has `bravo-b`"); self.assertGreater(n1, 1)
+        self.assertEqual([resolve(name_of(c)) for c in find_cards(self.t.snap()) if self.hits(c.rows[1])], ["bravo-bg"])
+
+    def test_no_match_has_no_labels_and_one_can_keep_typing_or_erase(self):
+        self.flash("qqq"); self.assertEqual(self.label_cells(), []); self.assertTrue(self.in_flash())
+        for _ in range(3):
+            self.t.keys("BSpace")
+        self.t.lit("br"); time.sleep(0.4); self.assertEqual(len(self.label_cells()), 3, "erasing and typing again works after a dead end")
+
+    def test_hits_use_the_match_colour_from_the_config(self):
+        self.config('[colors]\nmatch = "#00ff00"\n'); self.t.close(); self.t = self.board(); self.flash("br")
+        c = next(c for c in find_cards(self.t.snap()) if resolve(name_of(c)) == "bravo-bg")
+        self.assertEqual("".join(x[0] for x in c.rows[1].cells if x[2] == ("rgb", 0, 255, 0) and x[0].strip()), "br")
+
+
+class LabelLetters(Base):
+    def sessions(self, names, project=None):
+        base = json.loads((self.env.fake / "show.json").read_text())[0]
+        proj = lambda i: project or f"p{i % 4}"  # four groups: a grid, not one endless column
+        return [dict(base, id=f"x{i:02d}", summary=n, project=proj(i), cwd=f"{self.env.home}/work/{proj(i)}", mainRepoRoot=f"{self.env.home}/work/{proj(i)}", gitBranch="main",
+                     tmuxPane=f"%{600 + i}", status="idle", subagents=[], pendingTool=None, nativeSessionId=f"n-x{i}", logPath=None) for i, n in enumerate(names)]
+
+    def restart_with(self, sessions):
+        self.env.write_show(sessions); self.env.pane_ids = {s["tmuxPane"]: s["id"] for s in sessions}
+        self.t.close(); self.t = self.board(200, 50, len(sessions))
+
+    def test_labels_never_use_the_character_after_a_hit(self):
+        self.restart_with(self.sessions(["alpha", "alps", "alpine"], project="pp"))
+        self.flash("al")
+        labs = [ch for _, _, ch in self.label_cells()]
+        self.assertEqual(len(labs), 3); self.assertNotIn("p", labs + [l.lower() for l in labs], "every hit is followed by `p`: no label may be p")
+        self.assertEqual(sorted(labs), sorted("asd"), "the first free letters in distance order")
+
+    def test_twenty_hits_followed_by_p_skip_p_in_the_alphabet(self):
+        self.restart_with(self.sessions([f"alp-{i:02d}" for i in range(20)]))
+        self.flash("al"); labs = [ch for _, _, ch in self.label_cells()]
+        self.assertEqual(len(labs), 20); self.assertEqual(len(set(labs)), 20); self.assertNotIn("p", labs, "the 19th letter of the alphabet is the skipped one")
+        self.assertEqual(sorted(labs), sorted((ALPHABET.replace("p", ""))[:20]))
+
+    def test_the_skipped_characters_follow_the_text_typed_so_far(self):
+        self.flash("br"); labs = [ch for _, _, ch in self.label_cells()]
+        self.assertNotIn("a", labs, "`br` is followed by `a` in bravo")
+        self.t.keys("a"); time.sleep(0.4); labs = [ch for _, _, ch in self.label_cells()]
+        self.assertIn("a", labs, "after `bra` the next character is `v`: `a` is free again"); self.assertNotIn("v", labs)
+
+    def test_labels_are_given_by_distance_from_the_focused_card(self):
+        self.t.keys("l"); self.t.keys("j"); time.sleep(0.3); f = next(c for c in find_cards(self.t.snap()) if border_colours(c) == {C_FOCUS})  # focus bravo-bg: not the first card
+        self.flash("o")  # `o` is in many places: group titles (work), bravo-*, echo-long, a branch
+        cells = self.label_cells(); self.assertGreaterEqual(len(cells), 6)
+        by_distance = sorted(cells, key=lambda x: (abs(x[0] - f.r) * 200 + abs(x[1] - f.c), x[0], x[1]))
+        got = [ch for _, _, ch in by_distance]
+        self.assertEqual(got, LABELS[:len(got)], f"the nearest hit (measured from the focused card) gets `a`, then s d f ...: {[(r, c, ch) for r, c, ch in by_distance]}")
 
     def test_thirty_cards_second_round_is_upper_case(self):
-        S = json.loads((self.env.fake / "show.json").read_text()); base = S[0]; many = []
-        for i in range(30):
-            many.append(dict(base, id=f"s{i:02d}", summary=f"sess-{i:02d}", project=f"p{i % 4}", cwd=f"{self.env.home}/work/p{i % 4}", mainRepoRoot=f"{self.env.home}/work/p{i % 4}",
-                             tmuxPane=f"%{200 + i}", status="idle", subagents=[], pendingTool=None, nativeSessionId=f"n-s{i}", logPath=None))
-        self.env.write_show(many); self.t.close()
-        t = self.t = self.board(200, 60, 30)
-        self.flash(); got = self.labels_by_name(); order = self.expected_order("sess-00")
-        self.assertEqual(len(got), 30)
-        self.assertEqual([got[n] for n in order], LABELS[:30], "26 lower-case, then A S D F for the 27th..30th card")
-        self.assertEqual(got[order[26]], "A")
-        t.keys("A"); time.sleep(0.3); self.assertEqual(self.focused(), [order[26]], "an upper-case label moves the focus too")
+        self.env.write_show(self.sessions([f"sess-{i:02d}" for i in range(30)])); self.env.pane_ids = {}
+        self.t.close(); self.t = self.board(200, 60, 30)
+        self.flash("sess"); labs = [ch for _, _, ch in self.label_cells()]
+        self.assertEqual(len(labs), 30)
+        self.assertEqual(sorted(labs), sorted(LABELS[:30]), "26 lower case, then A S D F")
+        self.assertIn("A", labs)
 
 
-class Behaviour(Base):
-    def test_a_label_moves_the_focus_and_nothing_else(self):
-        self.flash(); self.t.keys("d"); time.sleep(0.4)
-        self.assertEqual(self.focused(), ["charlie-30"], "d = the third nearest card: charlie-30 (c1)")
-        self.assertEqual(self.env.actions(), [], "no ccmux / tmux call: the session is not jumped to"); self.assertEqual(self.env.tmux_calls(), [])
-        self.assertTrue(self.t.alive()); self.assertNotIn("jump:", self.bar()); self.assertIn("j/k h/l move", self.bar())
-        self.assertEqual(label_cells(self.t.snap()), [], "labels are gone"); self.assertEqual(self.env.tmux_calls(), [])
-        self.t.keys("Enter"); self.assertTrue(wait(lambda: self.env.actions(), 3)); self.assertEqual(self.env.actions(), [["switch", "c1"]], "enter then jumps from the new focus")
+class Pressing(Base):
+    def test_a_card_label_moves_the_focus_and_leaves_flash_without_jumping(self):
+        self.flash("br")
+        lab = next(ch for r, c, ch in self.label_cells() if r == next(cc.r for cc in find_cards(self.t.snap()) if resolve(name_of(cc)) == "bravo-bg") + 1)
+        self.t.keys(lab); time.sleep(0.5)
+        self.assertEqual(self.focused(), ["bravo-bg"]); self.assertFalse(self.in_flash()); self.assertIn("j/k h/l move", self.bar())
+        self.assertEqual(self.env.actions(), [], "no ccmux / tmux call"); self.assertEqual(self.env.tmux_calls(), [])
+        self.assertEqual(self.label_cells(), [], "labels and yellow are gone"); self.assertTrue(self.t.alive())
+
+    def test_a_group_title_label_goes_to_the_first_card_of_an_open_group(self):
+        self.flash("br")
+        title_row = next(r for r, row in enumerate(self.t.snap()) if row.text.lstrip().startswith("▾") and "~/work/br" in row.text)
+        lab = next(ch for r, c, ch in self.label_cells() if r == title_row)
+        self.t.keys(lab); time.sleep(0.5)
+        self.assertEqual(self.focused(), ["bravo-29"], "the first card of the group"); self.assertFalse(self.in_flash()); self.assertEqual(self.env.actions(), [])
+
+    def test_a_folded_group_title_label_lands_on_the_title(self):
+        self.t.keys("f"); time.sleep(0.4)  # alpha folded, focus on its title
+        self.flash("alpha")
+        labs = self.label_cells(); self.assertEqual(len(labs), 1, "only the folded title matches (its cards are hidden)")
+        self.t.keys(labs[0][2]); time.sleep(0.5)
+        self.assertFalse(self.in_flash()); self.t.keys("Enter"); time.sleep(0.5)
+        self.assertEqual(self.env.actions(), [], "enter on the title expands it, it does not jump"); self.assertIn("▾ ~/work/alpha (3)", self.t.text())
 
     def test_esc_cancels_and_the_focus_stays(self):
-        self.t.keys("l"); time.sleep(0.3); before = self.focused(); self.flash()
+        self.t.keys("l"); time.sleep(0.3); before = self.focused(); self.flash("br")
         self.t.esc(); time.sleep(0.4)
-        self.assertEqual(self.focused(), before); self.assertTrue(self.t.alive()); self.assertEqual(label_cells(self.t.snap()), []); self.assertIn("j/k h/l move", self.bar())
-        self.assertEqual(self.env.actions(), [])
+        self.assertEqual(self.focused(), before); self.assertTrue(self.t.alive()); self.assertEqual(self.label_cells(), []); self.assertIn("j/k h/l move", self.bar())
 
-    def test_other_characters_are_ignored_and_do_not_quit(self):
-        self.flash()
-        for k in ("q", "z", "1", "x", "r", "Enter", "Tab"):  # 9 cards: the labels are a..l, so none of these is one
+    def test_keys_that_are_neither_labels_nor_text_are_ignored(self):
+        self.flash("br")
+        for k in ("Tab", "Enter", "Up", "Down", "F5"):
             self.t.keys(k); time.sleep(0.2)
-        self.assertTrue(self.t.alive(), "q is not a label with 9 cards and must not quit")
-        self.assertIn("jump: press a label", self.bar(), "still waiting for a label")
-        self.assertEqual(self.env.actions(), [], "x / r / enter did not fire")
-        self.t.esc(); time.sleep(0.4); self.assertEqual(self.focused(), ["alpha-main"], "none of them moved the focus")
+        self.assertTrue(self.t.alive()); self.assertTrue(self.in_flash()); self.assertEqual(self.message_row(), "s br▏"); self.assertEqual(self.env.actions(), [])
+        self.t.esc(); time.sleep(0.3); self.assertEqual(self.focused(), ["alpha-main"], "none of them moved the focus")
 
-    def test_the_label_of_a_card_that_vanished_is_ignored_and_the_jump_goes_on(self):
-        self.flash(); lab = self.labels_by_name()["bravo-29"]
-        S = json.loads((self.env.fake / "show.json").read_text())
-        self.env.write_show([s for s in S if s["id"] != "b1"])
-        n = self.env.show_calls(); self.assertTrue(wait(lambda: self.env.show_calls() >= n + 2, 8)); time.sleep(0.4)
-        self.t.keys(lab); time.sleep(0.5)
-        self.assertTrue(self.t.alive(), "no crash"); self.assertEqual(self.env.actions(), [])
-        self.assertIn("jump: press a label", self.bar(), "still waiting for a label: the dead one was ignored like any other non-label")
-        self.assertEqual(len(find_cards(self.t.snap())), 8)
-        self.t.esc(); time.sleep(0.4)
-        self.assertEqual(self.focused(), ["alpha-main"], "the focus did not move (it did not fall to the first card by accident)")
-        self.t.keys("j"); time.sleep(0.3); self.assertTrue(self.t.alive(), "the board still works"); self.t.keys("q"); self.assertEqual(self.t.exit_status(), 0)
+    def test_a_label_is_not_a_command_and_text_keys_are_not_commands(self):
+        self.flash("q")  # q / x / r are text here, never quit / kill / restart
+        self.assertTrue(self.t.alive()); self.assertEqual(self.env.actions(), [])
+        self.t.keys("x"); self.t.keys("r"); time.sleep(0.3); self.assertEqual(self.env.actions(), []); self.assertTrue(self.t.alive())
 
-    def test_a_short_terminal_labels_only_the_cards_whose_top_border_is_on_screen(self):
-        S = json.loads((self.env.fake / "show.json").read_text()); base = S[0]
-        ten = [dict(base, id=f"s{i:02d}", summary=f"sess-{i:02d}", project="onecol", cwd=f"{self.env.home}/work/onecol", mainRepoRoot=f"{self.env.home}/work/onecol", tmuxPane=f"%{300 + i}",
-                    status="idle", subagents=[], pendingTool=None, nativeSessionId=f"n-s{i}", logPath=None) for i in range(10)]
-        self.env.write_show(ten); self.env.pane_ids = {t_["tmuxPane"]: t_["id"] for t_ in ten}; self.t.close()
-        t = self.t = Term(self.env, w=100, h=20, extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t.close)
-        self.assertTrue(wait(lambda: "agmux ·" in t.text(), 8), t.text())
-        for _ in range(9):
-            t.keys("j"); time.sleep(0.12)
-        time.sleep(0.4)
-        tops = [r for r, row in enumerate(t.snap()) if row.cells and row.cells[0][0] in "╭┏" and r < 19]
-        self.assertTrue(0 < len(tops) < 10, f"a 20-row terminal cannot show 10 cards: {len(tops)} tops on screen\n{t.text()}")
-        self.flash(); labs = label_cells(t.snap())
-        self.assertEqual(sorted(r for r, _, _ in labs), tops, "one label per top border that is on screen, none for cards that are not")
-        self.assertEqual(sorted(l for _, _, l in labs), sorted(ALPHABET[:len(tops)]), "and they use the first letters only")
-        hidden = ALPHABET[len(tops)]  # the next letter would belong to a card nobody can see
-        t.keys(hidden); time.sleep(0.4)
-        self.assertIn("jump: press a label", last_text_row(t.snap()), f"{hidden!r} is no label: ignored, still waiting")
-        t.esc(); time.sleep(0.3)
-        t.keys("Enter"); self.assertTrue(wait(lambda: self.env.actions(), 3)); self.assertEqual(self.env.actions(), [["switch", "s09"]], "the focus never left the last card")
+    def test_mouse_clicks_and_wheel_are_swallowed(self):
+        self.flash("br"); c = next(c for c in find_cards(self.t.snap()) if resolve(name_of(c)) == "echo-long")
+        self.t.click(c.c + c.w // 2, c.r + 2); self.t.wheel(c.c + 5, c.r + 2, up=False, n=3); time.sleep(0.5)
+        self.assertTrue(self.in_flash(), "still in flash"); self.assertEqual(self.env.actions(), []); self.assertEqual(self.message_row(), "s br▏")
+        self.t.esc(); time.sleep(0.3); self.assertEqual(self.focused(), ["alpha-main"], "the click did not select the card")
 
-    def test_with_a_filter_only_the_visible_cards_are_labelled(self):
+    def test_with_a_filter_only_the_visible_cards_are_searched(self):
         self.t.keys("/"); self.t.lit("brav"); self.t.keys("Enter"); time.sleep(0.5)
         self.assertEqual(len(find_cards(self.t.snap())), 2)
-        self.flash(); got = self.labels_by_name()
-        self.assertEqual(got, {"bravo-29": "a", "bravo-bg": "s"}); self.assertEqual(len(label_cells(self.t.snap())), 2)
-        self.t.keys("s"); time.sleep(0.4); self.assertEqual(self.focused(), ["bravo-bg"])
+        self.flash("b")
+        self.assertEqual(len(self.label_cells()), 3, "two visible cards + their group title; the hidden ones have no label")
+        for n in ("alpha-main", "charlie-30"):
+            self.assertNotIn(n, [resolve(name_of(c)) for c in find_cards(self.t.snap())])
+
+
+class Polling(Base):
+    def test_the_label_of_a_card_that_vanished_is_ignored_and_flash_goes_on(self):
+        self.flash("br")
+        row = next(c.r for c in find_cards(self.t.snap()) if resolve(name_of(c)) == "bravo-29") + 1
+        lab = next(ch for r, c, ch in self.label_cells() if r == row)
+        S = json.loads((self.env.fake / "show.json").read_text())
+        self.env.write_show([s for s in S if s["id"] != "b1"])
+        n = self.env.show_calls(); self.assertTrue(wait(lambda: self.env.show_calls() >= n + 2, 8)); time.sleep(0.5)
+        self.t.keys(lab); time.sleep(0.5)
+        self.assertTrue(self.t.alive()); self.assertTrue(self.in_flash(), "ignored: still waiting"); self.assertEqual(self.env.actions(), [])
+        self.assertEqual(self.message_row(), "s br▏", "the dead label did not enter the typed text either (it is not text: it is a label that no longer exists)")
+        self.assertEqual(len(find_cards(self.t.snap())), 8)
+        self.t.esc(); time.sleep(0.4); self.assertEqual(self.focused(), ["alpha-main"])
+
+    def test_a_new_card_shifting_the_layout_moves_hits_and_labels_with_their_cards(self):
+        self.flash("br")
+        labels_before = {resolve(name_of(c)): [ch for r, col, ch in self.label_cells() if c.r < r < c.r + 4 and c.c <= col < c.c + c.w][0]
+                         for c in find_cards(self.t.snap()) if resolve(name_of(c)) in ("bravo-29", "bravo-bg")}
+        pos_before = {resolve(name_of(c)): (c.r, c.c) for c in find_cards(self.t.snap())}
+        S = json.loads((self.env.fake / "show.json").read_text()); base = S[0]
+        new = dict(base, id="aa", summary="aaa-new", project="aaa", cwd=f"{self.env.home}/work/aaa", mainRepoRoot=f"{self.env.home}/work/aaa", gitBranch="main", tmuxPane="%199",
+                   status="idle", subagents=[], pendingTool=None, nativeSessionId="n-aa", logPath=None)
+        self.env.write_show(S + [new]); n = self.env.show_calls(); self.assertTrue(wait(lambda: self.env.show_calls() >= n + 2, 8)); time.sleep(0.8)
+        cs = {resolve(name_of(c)): c for c in find_cards(self.t.snap())}
+        self.assertNotEqual({k: (cs[k].r, cs[k].c) for k in labels_before}, {k: pos_before[k] for k in labels_before}, "the layout really moved")
+        for n_, lab in labels_before.items():
+            c = cs[n_]
+            self.assertEqual(self.hits(c.rows[1]), "br", f"{n_}: the yellow follows the card to its new place")
+            now = [ch for r, col, ch in self.label_cells() if c.r < r < c.r + 4 and c.c <= col < c.c + c.w]
+            self.assertEqual(now, [lab], f"{n_}: the same letter, drawn at the new place")
+        self.assertEqual(len(self.label_cells()), 3)
+        self.t.keys(labels_before["bravo-bg"]); time.sleep(0.5)
+        self.assertEqual(self.focused(), ["bravo-bg"], "the label still jumps to the right card")
+
+    def test_a_card_gone_and_a_new_one_in_the_same_poll_do_not_swap_letters(self):
+        self.flash("b")
+        row = next(c.r for c in find_cards(self.t.snap()) if resolve(name_of(c)) == "bravo-29") + 1
+        old = next(ch for r, c, ch in self.label_cells() if r == row)
+        S = json.loads((self.env.fake / "show.json").read_text()); base = S[0]
+        new = dict(base, id="bn", summary="bnew-card", project="bnew", cwd=f"{self.env.home}/work/bnew", mainRepoRoot=f"{self.env.home}/work/bnew", gitBranch="main", tmuxPane="%198",
+                   status="idle", subagents=[], pendingTool=None, nativeSessionId="n-bn", logPath=None)
+        self.env.write_show([s for s in S if s["id"] != "b1"] + [new])  # one poll: bravo-29 disappears, a card that also contains `b` appears
+        n = self.env.show_calls(); self.assertTrue(wait(lambda: self.env.show_calls() >= n + 2, 8)); time.sleep(0.6)
+        cs = {resolve(name_of(c)): c for c in find_cards(self.t.snap())}
+        self.assertIn("bnew-card", cs, "the new card is on screen"); nc = cs["bnew-card"]
+        mine = [ch for r, col, ch in self.label_cells() if nc.r < r < nc.r + 4 and nc.c <= col < nc.c + nc.w]
+        self.assertEqual(len(mine), 1, "the new card has a label"); self.assertNotEqual(mine[0], old, "but not the letter the user saw on the card that just vanished")
+        self.assertNotIn(old, [ch for _, _, ch in self.label_cells()], "nobody has it")
+        self.t.keys(old); time.sleep(0.5)
+        self.assertTrue(self.in_flash()); self.assertEqual(self.message_row(), "s b▏", "pressing the freed letter is ignored: not text, not a jump")
+        self.assertEqual(self.env.actions(), [])
 
 
 class Esc(Base):
@@ -201,12 +338,10 @@ class Esc(Base):
 
     def test_esc_in_flash_cancels_the_flash_and_does_not_clear_the_filter(self):
         self.t.keys("/"); self.t.lit("alpha"); self.t.keys("Enter"); time.sleep(0.5)
-        self.flash(); self.t.esc(); time.sleep(0.4)
+        self.flash("al"); self.t.esc(); time.sleep(0.4)
         self.assertTrue(self.t.alive()); self.assertEqual(len(find_cards(self.t.snap())), 3, "the filter is still on")
         self.assertIn("j/k h/l move", self.bar())
 
-
-class EscRule(Base):
     def test_a_kept_filter_clears_on_esc_even_when_quit_is_only_q(self):
         self.config('[keys]\nquit = ["q"]\n'); self.t.close(); self.t = self.board()
         self.t.keys("/"); self.t.lit("alpha"); self.t.keys("Enter"); time.sleep(0.5); self.assertEqual(len(find_cards(self.t.snap())), 3)
@@ -217,7 +352,7 @@ class EscRule(Base):
 
     def test_two_escapes_in_a_row_are_alt_esc_and_do_not_clear_the_filter(self):
         self.t.keys("/"); self.t.lit("alpha"); self.t.keys("Enter"); time.sleep(0.5)
-        self.t.lit("\x1b\x1b"); time.sleep(0.6)  # ESC ESC arrives as one alt+esc key
+        self.t.lit("\x1b\x1b"); time.sleep(0.6)
         self.assertEqual(len(find_cards(self.t.snap())), 3, "alt+esc is not esc: the filter stays")
         self.assertIn("/ alpha", self.t.snap()[0].text)
 
@@ -226,13 +361,13 @@ class Config(Base):
     def test_flash_key_is_configurable(self):
         self.config('[keys]\nflash = ["g"]\n'); self.t.close(); self.t = self.board()
         self.assertIn("g flash", self.bar()); self.assertNotIn("s flash", self.bar())
-        self.t.keys("s"); time.sleep(0.4); self.assertNotIn("jump:", self.bar(), "s is not bound any more")
-        self.t.keys("g"); self.assertTrue(wait(lambda: "jump: press a label" in self.bar(), 3), self.t.text())
-        self.t.keys("s"); time.sleep(0.3); self.assertEqual(self.focused(), ["bravo-29"], "s is now simply a label")
+        self.t.keys("s"); time.sleep(0.4); self.assertFalse(self.in_flash(), "s is not bound any more")
+        self.t.keys("g"); self.assertTrue(wait(self.in_flash, 3), self.t.text())
+        self.t.lit("br"); time.sleep(0.4); self.assertEqual(len(self.label_cells()), 3); self.assertEqual(self.message_row(), "g br▏", "the message row shows the configured key")
 
     def test_dim_colour_follows_the_muted_setting(self):
         self.config('[colors]\nmuted = "#336699"\n'); self.t.close(); self.t = self.board(); self.flash()
-        snap = self.t.snap(); c = find_cards(snap)[1]
+        c = find_cards(self.t.snap())[1]
         self.assertTrue({x[1] for r in c.rows[1:4] for x in r.cells[1:-1] if x[0].strip()} == {("rgb", 51, 102, 153)}, "dimmed content uses colors.muted")
 
 
@@ -242,9 +377,9 @@ class InPassthrough(PreviewBase):
 
     def test_s_is_forwarded_to_the_pane(self):
         self.enter_passthrough_on_a3(); self.t.lit("s"); time.sleep(0.5)
-        self.assertEqual(self.cat("a3"), "s"); self.assertNotIn("jump: press a label", self.t.text()); self.assertTrue(self.preview_focused())
+        self.assertEqual(self.cat("a3"), "s"); self.assertNotIn(PROMPT, self.t.text()); self.assertTrue(self.preview_focused())
         self.t.keys("Tab"); time.sleep(0.4); self.t.keys("s"); time.sleep(0.4)
-        self.assertIn("jump: press a label", self.t.text(), "back on the cards, s starts the jump")
+        self.assertIn(PROMPT, self.t.text(), "back on the cards, s starts the flash")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from test_t3 import ready, last_text_row, border_colours, STATUS_COLOUR, C_FOCUS
 
 DEFAULT_KEYS = ["up", "down", "left", "right", "jump", "fold", "preview", "focus_preview", "leave_preview",
                 "reply", "handoff", "search", "next_match", "prev_match", "flash", "restart", "kill", "review", "avatar", "quit", "confirm"]
-DEFAULT_COLOURS = ["working", "idle", "done", "attention", "focus", "match", "name", "branch", "model", "effort", "dir",
+DEFAULT_COLOURS = ["working", "idle", "done", "attention", "focus", "match", "border", "name", "branch", "model", "effort", "dir",
                    "bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled"]
 
 
@@ -54,7 +54,7 @@ class Defaults(Base):
     def test_config_prints_the_defaults_and_path(self):
         r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(r.stdout.startswith("[keys]\n"), r.stdout)
-        keys = r.stdout.split("[colors]")[0]; cols = r.stdout.split("[colors]")[1].split("[avatars]")[0]  # [avatars] (T18) follows the colours
+        keys = r.stdout.split("[colors]")[0]; cols = r.stdout.split("[colors]")[1].split("[layout]")[0]  # [layout] (T25) and [avatars] (T18) follow the colours
         self.assertEqual([l.split(" = ")[0] for l in keys.splitlines()[1:] if l], DEFAULT_KEYS)
         self.assertEqual([l.split(" = ")[0] for l in cols.splitlines() if l], DEFAULT_COLOURS)
         for line in ('down = ["j", "down"]', 'reply = ["i"]', 'flash = ["s"]', 'focus_preview = ["tab"]', 'leave_preview = ["tab"]', 'quit = ["q", "esc"]', 'next_match = ["n"]', 'prev_match = ["N"]', 'working = "#ffb86c"', 'match = "#f2d06b"', 'name = "5"'):

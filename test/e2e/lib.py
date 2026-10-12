@@ -67,7 +67,8 @@ printf '%s\\037' "$@" >> "$d/tmux.log"; printf '\\n' >> "$d/tmux.log"
 perl -MTime::HiRes=time -e 'printf "%.3f\\n", time' >> "$d/tmux.times"
 if [ -e "$d/tmux.fail" ] && [ "$(cat "$d/tmux.fail")" = "$1" ]; then printf 'tmux: boom from fake tmux\\nsecond tmux line\\n' >&2; exit 1; fi
 case "$1" in
-  display-message) if [ -e "$d/tmux.session" ]; then cat "$d/tmux.session"; else echo fl-own; fi; exit 0;;
+  display-message) case " $* " in *" ; "*) echo "0 0 0 default 50"; exit 0;; esac  # T24: the preview's `display-message <cursor format> ; capture-pane`: cursor hidden, then an empty screen
+    if [ -e "$d/tmux.session" ]; then cat "$d/tmux.session"; else echo fl-own; fi; exit 0;;
   list-clients) [ -e "$d/tmux.clients" ] && cat "$d/tmux.clients"; exit 0;;
   load-buffer) cat >> "$d/tmux.stdin"; exit 0;;
   show-environment) if [ -e "$d/tmux.env" ]; then cat "$d/tmux.env"; exit 0; else echo "unknown variable: $4" >&2; exit 1; fi;;
@@ -486,3 +487,36 @@ MIN_COL, GAP, MAX_COLS = 40, 2, 4  # S1.1: column minimum 40; T8: at most 4 colu
 def layout(W):
     n = max(1, min(MAX_COLS, (W + GAP) // (MIN_COL + GAP)))
     return n, (W - 2 * (n - 1)) // n
+
+
+def parse_attr(raw):
+    """Like parse_screen but keeps the attributes parse_screen folds away: rows of cells (char, reversed, underlined, fg). A wide character is followed by a filler cell ('', same attributes)."""
+    rows = []
+    for line in raw.split("\n"):
+        st = dict(rev=False, ul=False, fg=None); cells = []
+        for tok in _TOK.split(line):
+            m = _TOK.fullmatch(tok)
+            if m:
+                p = [int(x) if x else 0 for x in m.group(1)[2:-1].replace(":", ";").split(";")] or [0]
+                i = 0
+                while i < len(p):
+                    v = p[i]
+                    if v == 0: st.update(rev=False, ul=False, fg=None)
+                    elif v == 7: st["rev"] = True
+                    elif v == 27: st["rev"] = False
+                    elif v == 4: st["ul"] = True
+                    elif v == 24: st["ul"] = False
+                    elif v == 39: st["fg"] = None
+                    elif v == 38 and i + 4 < len(p) and p[i + 1] == 2: st["fg"] = ("rgb", p[i + 2], p[i + 3], p[i + 4]); i += 4
+                    elif v == 38 and i + 2 < len(p) and p[i + 1] == 5: st["fg"] = ("idx", p[i + 2]); i += 2
+                    i += 1
+                continue
+            for ch in tok:
+                w = cw(ch)
+                if w == 0:
+                    continue
+                cells.append((ch, st["rev"], st["ul"], st["fg"]))
+                if w == 2:
+                    cells.append(("", st["rev"], st["ul"], st["fg"]))
+        rows.append(cells)
+    return rows
