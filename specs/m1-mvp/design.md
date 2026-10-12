@@ -11,14 +11,14 @@
 ### B. 状态栏透传 `agmux statusline`【M1 验收改版】
 Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 payload 喂给 `statusLine.command`（hooks 里没有这份数据，jsonl 里没有模型窗口大小），所以这是唯一出口。agmux 自己提供包装，不依赖任何第三方状态栏脚本：
 - `agmux statusline [-- <原命令> [args…]]`：读完 stdin，原子写（tmp + rename）到 `$XDG_STATE_HOME/agmux/<session_id>.json`（session_id 取 payload 的 `session_id`，就是 ccmux 的 nativeSessionId），再把同一份 payload 喂给原命令的 stdin，透传它的 stdout 和退出码；没给原命令就什么都不输出、退出 0。写文件失败不影响透传（状态栏不能因为 agmux 挂掉）。
-- `agmux setup`：读 `~/.claude/settings.json` 的 `statusLine.command`，打印改动前后；`--write` 才真改（先备份到 `settings.json.bak`）：`X` → `agmux statusline -- X`；没有 statusLine 就设成 `agmux statusline`；已经是 agmux statusline 则不动。只改这一个键，其它内容原样保留。
+- `agmux setup`：读 `~/.claude/settings.json` 的 `statusLine.command`，打印改动前后；`--write` 才真改（先备份到 `settings.json.bak`）：`X` → `agmux statusline -- X`；没有 statusLine 就设成 `agmux statusline`；已经是 agmux statusline 则不动。只改这一个键，其它内容**语义**原样保留（键序、数字写法、非 ASCII 不转义；整体缩进统一成 2 空格可以接受）。
 - agmux 读文件：`context_window.used_percentage`（`rate_limits` 下也有同名字段，别取错）、`model.display_name`、effort。百分比**截断**取整（29.6 → 29）。effort 的字段名要拿第一份真实 payload 核实，在那之前不读；model.display_name 同样先核实。
 - 细则：
   - 原命令是 Claude Code 的 `statusLine.command`，本身是 shell 字符串。`agmux statusline -- X` 只认 `--` 后**一个**参数（多个就按空格拼起来），用 `sh -c X` 跑；setup 改写时把 X 用单引号包起来（内部 `'` 按 `'\''` 转义），这样管道、`$HOME` 这些都留给 agmux 里的那层 sh。
   - stdin 不是 JSON 或没有 `session_id`：不写文件，照样透传，退出码跟原命令（没原命令则 0）。
-  - 原命令起不来：文件照写，stderr 一行 `agmux statusline: <错误>`，退出 127。
-  - `agmux setup` 输出固定三行：`statusLine.command:` / `  before: <原值，无则 (none)>` / `  after:  <新值>`，然后一行 `dry run: add --write to apply` 或 `written (backup: <路径>)`；已经是 agmux statusline 时输出 `already set: <值>` 退出 0。
-  - `--write`：settings.json 不存在 → 新建只含 statusLine 的文件；JSON 损坏或没写权限 → stderr 报错、退出 1、原文件不动。
+  - sh 起不来：文件照写，stderr 一行 `agmux statusline: <错误>`，退出 127。原命令本身找不到是 sh 报的（`sh: …: No such file or directory`，退出 127），agmux 不再包一层。
+  - `agmux setup` 输出固定三行：`statusLine.command:` / `  before: <原值，无则 (none)>` / `  after:  <新值>`，然后一行 `dry run: add --write to apply` 或 `written (backup: <路径>)`（原来没有文件时是 `written (new file: <路径>)`）；已经是 agmux statusline 时输出 `already set: <值>` 退出 0。
+  - `--write`：settings.json 不存在 → 新建只含 statusLine 的文件；JSON 损坏或没写权限（**包括文件本身只读而目录可写**，写前先以写模式 open 一次探测）→ stderr 报错、退出 1、原文件不动、不留 .bak。
   - settings.json 是软链接（用户真机就是，指向 dotfiles 仓库）：解析到目标文件再写，软链接本身保留，`.bak` 放在目标文件旁边。
   - `session_id` 只接受 `[A-Za-z0-9_-]+`，否则当作没有 session_id（不写文件），绝不写到状态目录之外。
 - 解析失败的文件按不存在处理；background 会话和非 Claude 的 agent 没有状态栏，永远 `--`。文件 M1 不清理。
@@ -57,12 +57,12 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 │ ■■■□□□             ⚇ 2 agents  ⚙ 1 shell │   上下文条 6 格顶在头像下面 · 子 agent 数 · 后台 shell 数
 ╰──────────────────────────────────────────╯
 ```
-- 窄时让位顺序：先截分支，再截名字；状态和时间永远在。
+- 窄时让位顺序：第 1 行状态词和时间永远在，pendingTool 只拿剩下的宽度、先截它（MCP 工具名可能几十个字符），再截名字，名字至少留 12 格；第 2 行先截分支，模型·effort 永远在。
 - 字段颜色和用户的 claude-hud 段一一对应：名洋红、模型青、effort 紫、目录黄、分支橙红。
 - 状态，照 ccmux 1.4.3 的 `getEffectiveStatus` 换算后再显示：原始 idle 且有子 agent 在 working / waiting → `⏵ working · agents`（不算 done，眼睛扫动）；原始 working → `⏵ working`，有 pendingTool 接 pendingTool，不接 agents；`⏸ idle` 蓝灰；`● done` 绿 = 原始 idle、无子 agent 在跑、`attentionState` 非空（"unread" 或 "read" 都算，ccmux 同样）；`⏳ waiting` 红 = status waiting（含 plan_approval，不像 ccmux 那样用青色）。**边框色 = 状态色**（working 橙、done 绿、idle 暗灰 #585b70、需要处理 / waiting 红）。焦点卡片边框换成 **#ff8ebe** 粗线（lipgloss ThickBorder），盖掉状态色——第二轮验收：只换粗线看不出焦点在哪。不单独拎出需要处理的会话。
 - 换算放在 store 里做一次，view 只读结果。
 - 底栏或消息行的错误只取第一行（ccmux 的 stderr 常是多行），总行数永远等于终端高度。
-- 上下文条：■（U+25A0）**6 格**，和头像同宽、顶在头像正下方；**不显示百分比数字**（第三轮验收去掉），颜色就是提醒：空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 6 格全暗，不加 `--`。格数四舍五入到 6 格（29% → 2 格）。
+- 上下文条：■（U+25A0）**6 格**，和头像同宽、顶在头像正下方；**不显示百分比数字**（第三轮验收去掉），颜色就是提醒：空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 6 格全暗，不加 `--`。格数四舍五入到 6 格（29% → 2 格），但非零至少亮 1 格；0% 和未知都是 6 格全暗，不区分（真实会话不会是 0%）。
 - 最近 prompt 那一行 M1 验收改版去掉（初版曾有，用户嫌挤；`lastPrompt` / `backgroundDetail` 的取行代码一并删，M2 的预览窗口另起）。
 - 子 agent / shell 为 0 时该段不显示。
 - PR 号（`branchPRs`）M1 不显示：真机全是 null / []，看到真实元素再接。

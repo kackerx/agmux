@@ -40,7 +40,7 @@ type Session struct {
 ## 测试约定
 - tmux 黑盒测试一律用独立 socket，绝不碰用户的 tmux server；每个角色用自己的 socket 名，互不 kill-server：测试 `-L agmux-test`，审查 `-L agmux-review`，开发 `-L agmux-dev`。scratchpad 目录同理，只动自己建的。
 - `ccmux send` 的正文一律放在 `--` 之后（ccmux 会把 `-` 开头的文本当选项）。
-- `ccmux show --json` 用 fixture（`testdata/show.json`，从真机抓；`lastPrompt` 只保留标签结构，正文换成合成文本，不带真实消息）喂给 store 做单测；真机 e2e 只做 `agmux board` 能起来、能渲染出 ≥1 张卡片、q 退出。
+- `ccmux show --json` 用 fixture（`testdata/show.json`，从真机抓，不带真实消息文本）喂给 store 做单测；真机 e2e 只做 `agmux board` 能起来、能渲染出 ≥1 张卡片、q 退出。
 
 ## 流水线约定
 - 角色：orchestrator（本文档的维护者）、agmux-dev、code-reviewer、agmux-tester。一批工作先审查再测试，测试结论附证据才算通过。
