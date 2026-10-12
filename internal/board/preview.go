@@ -108,7 +108,7 @@ func tail(text string, n int) []string {
 	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
 		lines = lines[:len(lines)-1]
 	}
-	return lines[max(len(lines)-n, 0):]
+	return lines[min(max(len(lines)-n, 0), len(lines)):] // n < 0 on a tiny terminal: nothing
 }
 
 // tmuxKeyNames maps bubbletea's key names to tmux's send-keys names.

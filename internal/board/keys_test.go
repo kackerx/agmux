@@ -993,3 +993,106 @@ func TestForwardedKeysKeepOrder(t *testing.T) {
 		}
 	}
 }
+
+// T11 review: the edges that mutations showed untested.
+func TestPreviewEdges(t *testing.T) {
+	// a tiny terminal must not crash the preview
+	for h := 5; h >= 1; h-- {
+		m, _ := press(t, wide(&fakeRunner{}, 120, 20), "P")
+		m.pv = previewMsg{pane: "%1", text: "a\nb\nc\n"}
+		tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: h})
+		_ = tm.(Model).View()
+	}
+
+	// a capture coming back frees the next frame's capture
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "P")
+	tm, _ := m.Update(previewMsg{pane: "%1", text: "x"})
+	m = tm.(Model)
+	before := len(r.calls)
+	tm, cmd := m.Update(frameMsg{})
+	runAll(cmd)
+	if len(r.calls) != before+1 {
+		t.Error("after a capture returns, the next frame captures again")
+	}
+
+	// widths: at least 60 for the preview, opens at 100, closes below
+	if m := wide(&fakeRunner{}, 100, 40); func() bool { m, _ = press(t, m, "P"); return !m.previewOn() || m.cardsW() != 40 }() {
+		t.Errorf("100 columns: preview on, cards %d (want 40)", m.cardsW())
+	}
+	m, _ = press(t, wide(&fakeRunner{}, 100, 40), "P")
+	tm, _ = m.Update(tea.WindowSizeMsg{Width: 99, Height: 40})
+	if m = tm.(Model); m.previewOn() || m.cardsW() != 99 {
+		t.Errorf("99 columns: preview off, cards %d", m.cardsW())
+	}
+	if m, _ = press(t, m, "P"); m.preview {
+		t.Error("too narrow with the preview still set: P turns it off")
+	}
+
+	// stale content for another pane never shows; a capture error does
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "P")
+	m.pv = previewMsg{pane: "%3", text: "stale-from-b1"}
+	if strings.Contains(ansi.Strip(m.View()), "stale-from-b1") {
+		t.Error("content captured for another pane must not show")
+	}
+	m.pv = previewMsg{pane: "%1", err: errors.New("tmux capture-pane: can't find pane %1")}
+	if !strings.Contains(ansi.Strip(m.View()), "can't find pane %1") {
+		t.Error("a capture error shows in the preview")
+	}
+	// tabs become spaces, the box keeps its width
+	for _, l := range previewLines(sessions[0], true, previewMsg{pane: "%1", text: "a\tb"}, 60, 10, 0, false) {
+		if strings.Contains(l, "\t") || ansi.StringWidth(l) != 60 {
+			t.Errorf("preview line %q (width %d)", l, ansi.StringWidth(l))
+		}
+	}
+}
+
+// hjkl beside the open preview move over the narrowed layout: with 4 groups at 232 columns the
+// cards get 3 columns, so l l l from a1 stops on the third group instead of reaching the fourth.
+func TestPreviewNavUsesCardWidth(t *testing.T) {
+	ss := staticSrc{}
+	for _, g := range []string{"/a", "/b", "/c", "/d"} {
+		ss = append(ss, store.Session{ID: g[1:] + "1", Name: g[1:] + "1", GroupKey: g, TmuxPane: "%1", Status: "idle", ContextPct: -1})
+	}
+	m := New(ss, &fakeRunner{})
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	m, _ = press(t, tm.(Model), "P", "l", "l", "l")
+	if m.focus != "c1" {
+		t.Errorf("focus %s, want c1 (d1 is in the next band beside the preview)", m.focus)
+	}
+}
+
+// Every focus change captures at once: a click, unfolding, and a capture that came back for a
+// pane that is no longer focused.
+func TestPreviewFollowsEveryFocusChange(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "P")
+	m.capturing = false
+	tm, cmd := m.Update(tea.MouseMsg{X: 50, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}) // click b1
+	m = tm.(Model)
+	runAll(cmd)
+	if last := r.calls[len(r.calls)-1]; m.focus != "b1" || last[1] != "capture-pane" || last[5] != "%3" {
+		t.Errorf("a click captures the new card's pane: %q", last)
+	}
+	m.capturing = false
+	m, _ = press(t, m, "h", "f") // fold /a: focus on its title
+	m.capturing = false
+	before := len(r.calls)
+	tm, cmd = m.Update(key("enter")) // unfold: focus lands on a1
+	m = tm.(Model)
+	runAll(cmd)
+	if len(r.calls) == before || r.calls[len(r.calls)-1][5] != "%1" {
+		t.Errorf("unfolding moves the focus to a1 and captures it: %q", r.calls[before:])
+	}
+	// a capture for b1 arrives after the focus moved to a1: capture a1 straight away
+	m.capturing = true
+	tm, cmd = m.Update(previewMsg{pane: "%3", text: "old"})
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("a capture for a pane no longer focused triggers a new one")
+	}
+	if pm := cmd().(previewMsg); pm.pane != "%1" {
+		t.Errorf("recaptured %s, want %%1", pm.pane)
+	}
+}

@@ -115,6 +115,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(nextFrame(), cmd)
 	case previewMsg:
 		m.pv, m.capturing = msg, false
+		// the focus moved while this capture was in flight: get the pane it is on now
+		if _, _, s, ok := m.current(); ok && s.TmuxPane != "" && s.TmuxPane != msg.pane {
+			cmd := m.capture()
+			return m, cmd
+		}
 	case doneMsg:
 		switch {
 		case msg.err != nil:
@@ -127,10 +132,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.retrack {
 			return m, tea.EnableMouseCellMotion
 		}
-	case tea.KeyMsg:
-		return m.key(msg)
-	case tea.MouseMsg:
-		return m.mouse(msg)
+	case tea.KeyMsg, tea.MouseMsg:
+		// whatever moved the focus (hjkl, a click, unfolding), the preview follows right away
+		before := m.focus
+		var tm tea.Model
+		var cmd tea.Cmd
+		if k, ok := msg.(tea.KeyMsg); ok {
+			tm, cmd = m.key(k)
+		} else {
+			tm, cmd = m.mouse(msg.(tea.MouseMsg))
+		}
+		nm, ok := tm.(Model)
+		if !ok || nm.focus == before {
+			return tm, cmd
+		}
+		capture := nm.capture()
+		return nm, tea.Batch(cmd, capture)
 	}
 	return m, nil
 }
@@ -242,8 +259,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if id := nearest(rects, m.focus, d); id != "" {
 			m.focus, m.msg = id, ""
 		}
-		cmd := m.capture() // the preview follows the focus right away
-		return m, cmd
+		return m, nil
 	}
 	switch k.String() {
 	case "tab":
@@ -252,7 +268,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "P":
-		if m.w < previewMinTerm {
+		if m.w < previewMinTerm && !m.preview { // too narrow to open; an open one still closes
 			return m.say(cMuted, "终端不足 100 列，开不了预览"), nil
 		}
 		m.preview, m.msg = !m.preview, ""
