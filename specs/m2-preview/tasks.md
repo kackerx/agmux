@@ -8,9 +8,9 @@
 - 单测用假 tmux 返回构造的 list-clients 输出，覆盖：AGMUX_CLIENT 设定 / 嵌套（排除自身 session）/ 直接 popup（无 TMUX_PANE）/ 没有可用 client 时底栏报错不退出。
 - 验收：单测按键 → tmux 命令行；黑盒假 tmux（PATH 里的脚本记录 argv）+ 真 tmux 两种各跑一次。
 
-### T11 预览窗口（f198655，审查中 / 测试中）
+### T11 预览窗口（f198655 审查退回：高度 ≤5 panic、点击换焦点不抓屏、9 处漏测，待修）
 - `P` 开关、40% 宽、最少 60 列、不足 100 列不开；`capture-pane -p -e` 每 500ms；标题行；卡片区重排；焦点换卡片预览跟着换；无 pane 时提示。
-- 验收：黑盒 232×50 开预览后卡片区变 2 列、预览区出现目标 pane 的内容（假 pane 里 `seq 1 200`，预览显示末尾行且有颜色转义）；关预览恢复 4 列。
+- 验收：黑盒 232×50 开预览后卡片区变 3 列（预览 92 列、卡片区 140 → 3×45；原写 2 列是算错）、预览区出现目标 pane 的内容（假 pane 里 `seq 1 200`，预览显示末尾行且有颜色转义）；关预览恢复 4 列。
 
 ### T12 按键直通 + 本地滚动（1ed55b8 + 乱序修复 d33588c，审查中 / 测试中）
 - `tab` 切焦点；预览获焦边框 #ff8ebe；可打印 / 粘贴 → `send-keys -l --`，特殊键 → tmux 键名；转发后立刻抓屏；滚轮本地滚动，转发按键归零。
@@ -20,6 +20,6 @@
 - `s`：预览没开就开，焦点切进预览（和 `P` + `tab` 等价）；焦点卡无 pane 时底栏提示、不动作。删掉旧的 `s` 输入提示及其测试；底栏 `s 发送` 改成 `s 回复`。`H` 不变。
 - 验收：单测 s → 预览开 + 获焦 + 后续按键转发；预览已开时 s 只切焦点；无 pane 不动作；黑盒 s 后直接打字 pane 收到。
 
-### T15 AGMUX_CLIENT 也从 session 环境读（开发中）
+### T15 AGMUX_CLIENT 也从 session 环境读（ab31d48，审查中 / 测试中）
 - 进程环境没有 `AGMUX_CLIENT` 时，`tmux show-environment -t <own session> AGMUX_CLIENT`（输出 `AGMUX_CLIENT=xxx`；`-AGMUX_CLIENT` 或出错当没有）。README 的浮窗段改成：常驻 fl session 的启动脚本加一行 `tmux set-environment -t "$target" AGMUX_CLIENT "$(tmux display -p '#{client_name}')"`。
 - 验收：单测 假 tmux 返回 `AGMUX_CLIENT=/dev/outer` → 选它并 detach 自己 session 里的其它 client；返回 `-AGMUX_CLIENT` → 走启发式；进程环境优先于 session 环境。

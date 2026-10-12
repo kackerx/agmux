@@ -7,7 +7,7 @@
 - 底栏默认：`j/k h/l move · enter jump · f fold · p preview · tab focus preview · s reply · H handoff · r restart · x kill · d review · a avatar · q quit`。
 
 ## 配置文件
-- 路径 `$XDG_CONFIG_HOME/agmux/config.toml`（默认 `~/.config/agmux/config.toml`），没有就全用默认值。TOML 用 `github.com/BurntSushi/toml`。
+- 路径 `~/.config/agmux/config.toml`【用户定】（设了 `$XDG_CONFIG_HOME` 就是 `$XDG_CONFIG_HOME/agmux/config.toml`，默认值等价），没有就全用默认值。TOML 用 `github.com/BurntSushi/toml`。
 - `agmux config` 打印**生效**的完整配置（默认值合并用户配置后），用户复制出来改即可；`agmux config --path` 打印路径。
 - 配置错误（未知键名、未知动作、键名解析不了、颜色格式错）：启动时 stderr 一行指出文件、键、原因，退出 1。不静默忽略。
 - 键位 `[keys]`：动作 = 一个或多个键名（bubbletea 键名：`j`、`down`、`ctrl+k`、`enter`、`tab`、`esc`、`shift+tab`…）。动作列表与默认：
