@@ -85,10 +85,11 @@ type Session struct {
 - 焦点卡片边框高亮；方向键 / hjkl 移动（j/k 列内，h/l 跨列），鼠标点卡片 = 选中。
 - enter 或双击 / 单击已选中的卡片：`ccmux switch <id>` 然后退出 TUI（popup 关掉才能看到目标 pane）。
 - `H`：`ccmux send <id> /handoff`（agent 正在 working 时会排到下一轮，这是 ccmux 的行为）。
-- `r` = `ccmux restart <id>`，`x` = `ccmux kill <id>`（先 y/n 确认），`d` = `ccmux review <id>`——它是交互式 TUI（内部起 hunk），用 `tea.ExecProcess` 把终端交给它，退出后回看板；`s` = 提示输入一行后 `ccmux send <id> <text>`。
+- `r` = `ccmux restart <id>`，`x` = `ccmux kill <id>`（按 y 执行，其它键取消），`d` = `ccmux review <id>`——它是交互式 TUI（内部起 hunk），用 `tea.ExecProcess` 把终端交给它，退出后回看板；`s` = 提示输入一行后 `ccmux send <id> <text>`。
 - `q` / esc 退出。`ccmux` 子命令的 stderr 显示在底栏一行，不弹窗。
 - `tmuxPane` 为 null（background）的会话：switch / send 置灰，底栏提示。
 
 ## 测试约定
-- tmux 黑盒测试一律用独立 socket：`tmux -L agmux-test …`，绝不碰用户的 tmux server。
+- tmux 黑盒测试一律用独立 socket，绝不碰用户的 tmux server；每个角色用自己的 socket 名，互不 kill-server：测试 `-L agmux-test`，审查 `-L agmux-review`，开发 `-L agmux-dev`。scratchpad 目录同理，只动自己建的。
+- `ccmux send` 的正文一律放在 `--` 之后（ccmux 会把 `-` 开头的文本当选项）。
 - `ccmux show --json` 用 fixture（`testdata/show.json`，从真机抓；`lastPrompt` 只保留标签结构，正文换成合成文本，不带真实消息）喂给 store 做单测；真机 e2e 只做 `agmux board` 能起来、能渲染出 ≥1 张卡片、q 退出。
