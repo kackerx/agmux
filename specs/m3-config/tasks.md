@@ -15,3 +15,11 @@
 - Bindings 键改成会话名（无名用 ID）；`[avatars] default` 与 `[avatars.bind]`；优先级 state > config > default。
 - `a` 浮层列表、j/k、enter 绑定写 avatars.json、esc 取消；当前绑定高亮。
 - 验收：单测 优先级三层；黑盒 a → 列表出现 6 个 sprite，j 两次 enter 后卡片头像变、avatars.json 里是 `{"<name>":"bot-03"}`，重启看板仍是该头像；esc 不写文件。
+
+### T19 `/` 模糊搜索过滤（待做，用户 2026-10-12 新增）
+- 按 design.md「模糊搜索过滤」：顶栏输入框、三字段子序列打分、实时过滤重排、命中字符高亮、enter 保留 / esc 清空、no match。
+- 验收：单测 打分（连续命中 > 分散、词首加分、大小写不敏感）；过滤后布局只含命中卡片、组数变化；黑盒 fixture 输入 `orch` 只剩 orchestrator 卡，esc 恢复 9 张。
+
+### T20 `s` 全局定位 flash + 回复改 `i`（待做）
+- 按 design.md「全局定位」：标签序列、两字母扩展、焦点移动、esc 取消；`reply` 默认键改 `i`，底栏与 README 同步。
+- 验收：单测 9 张卡单字母、30 张卡两字母且前缀过滤；黑盒 按 s 后每张卡左上角有标签，按 `d` 焦点到第 3 张（粉边框），esc 取消。
