@@ -9,8 +9,8 @@ from test_t11 import PreviewBase, pane_text, CAT_CMD
 from test_t3 import ready, last_text_row, border_colours, STATUS_COLOUR, C_FOCUS, find_cards, by_name
 
 DEFAULT_KEYS = ["up", "down", "left", "right", "jump", "fold", "preview", "focus_preview", "leave_preview",
-                "reply", "handoff", "search", "flash", "restart", "kill", "review", "avatar", "quit", "confirm"]
-DEFAULT_COLOURS = ["working", "idle", "done", "attention", "focus", "name", "branch", "model", "effort", "dir",
+                "reply", "handoff", "search", "next_match", "prev_match", "flash", "restart", "kill", "review", "avatar", "quit", "confirm"]
+DEFAULT_COLOURS = ["working", "idle", "done", "attention", "focus", "match", "name", "branch", "model", "effort", "dir",
                    "bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled"]
 
 
@@ -57,7 +57,7 @@ class Defaults(Base):
         keys = r.stdout.split("[colors]")[0]; cols = r.stdout.split("[colors]")[1].split("[avatars]")[0]  # [avatars] (T18) follows the colours
         self.assertEqual([l.split(" = ")[0] for l in keys.splitlines()[1:] if l], DEFAULT_KEYS)
         self.assertEqual([l.split(" = ")[0] for l in cols.splitlines() if l], DEFAULT_COLOURS)
-        for line in ('down = ["j", "down"]', 'reply = ["i"]', 'flash = ["s"]', 'focus_preview = ["tab"]', 'leave_preview = ["tab"]', 'quit = ["q", "esc"]', 'working = "#ffb86c"', 'name = "5"'):
+        for line in ('down = ["j", "down"]', 'reply = ["i"]', 'flash = ["s"]', 'focus_preview = ["tab"]', 'leave_preview = ["tab"]', 'quit = ["q", "esc"]', 'next_match = ["n"]', 'prev_match = ["N"]', 'working = "#ffb86c"', 'match = "#f2d06b"', 'name = "5"'):
             self.assertIn(line, r.stdout)
         p = self.cli("config", "--path"); self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stdout.strip(), str(self.file), "--path: $XDG_CONFIG_HOME/agmux/config.toml")
@@ -315,9 +315,9 @@ class PreviewKeys(PreviewBase):
     def test_s_starts_the_flash_not_the_passthrough_and_i_enters_it(self):  # since T20 s is the global jump; reply (pass-through) is i
         self.press("n", "n", "p"); self.assertTrue(wait(lambda: self.pv() is not None, 4))
         self.press("s"); time.sleep(0.5)
-        self.assertIn("jump: press a label", last_text_row(self.t.snap()), "s starts the flash")
+        self.assertIn("flash: type to narrow", last_text_row(self.t.snap()), "s starts the flash (T23: type a substring first)")
         self.assertFalse(self.focused(), "s does not give the keys to the pane"); self.assertEqual(self.cat(), "", "and s is not typed into the pane")
-        self.t.esc(); time.sleep(0.4); self.assertNotIn("jump:", last_text_row(self.t.snap()))
+        self.t.esc(); time.sleep(0.4); self.assertNotIn("flash:", last_text_row(self.t.snap()))
         self.press("i"); self.assertTrue(wait(self.focused, 3), self.t.text())
 
     def test_only_the_configured_leave_key_is_intercepted(self):

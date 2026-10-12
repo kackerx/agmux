@@ -1,6 +1,6 @@
 """T19 `/` fuzzy filter. Spec: specs/m3-config/design.md「`/` 模糊搜索过滤」, tasks.md T19.
 
-Each card is matched as `name + " " + branch + " " + cwd` (fzf's FuzzyMatchV2); the matched characters are drawn in the focus colour (#ff8ebe).
+Each card is matched as `name + " " + branch + " " + cwd` (fzf's FuzzyMatchV2); the matched characters are drawn dark on a yellow background (T22: colors.match #f2d06b; they used to be pink text).
 Fixture strings: a1 `alpha-main feature/qa-… ~/work/alpha`, a2 `pj-fallback main ~/work/alpha` (no summary: named after its project), b1 `bravo-29 main ~/work/bravo`, e1 `echo-long main /zzz/agmux-e2e/…`.
 """
 import json, unittest
@@ -10,6 +10,7 @@ from test_t3 import ready, last_text_row, border_colours, C_FOCUS, NAMES, by_nam
 from test_t11 import PreviewBase, CAT_CMD, MARK_CMD, PV_X
 
 F = C_FOCUS
+MATCH, MATCH_INK = ("rgb", 242, 208, 107), ("rgb", 44, 42, 46)  # T22: yellow background (#f2d06b), dark text (#2d2a2e rounded by lipgloss)
 ALL = ["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽", "bravo-29", "bravo-bg", "charlie-30", "charlie-59", "delta-60", "echo-long"]  # NOT layout order; use sorted()
 
 
@@ -45,8 +46,8 @@ class Base(unittest.TestCase):
 
     @staticmethod
     def lit_chars(row, c0=0, c1=None):
-        """the characters of a row drawn in the focus colour, borders and the thick-border glyphs excluded"""
-        return "".join(c[0] for c in row.cells[c0:c1] if c[1] == F and c[0].strip() and c[0] not in "┃┏┗┓┛━│╭╮╰╯")
+        """the characters of a row drawn on the match background (yellow)"""
+        return "".join(c[0] for c in row.cells[c0:c1] if c[2] == MATCH and c[0].strip())
 
 
 class Input(Base):
@@ -126,9 +127,9 @@ class Highlight(Base):
     def test_matched_characters_are_in_the_focus_colour_and_the_rest_are_not(self):
         self.search("brav")
         cs = {card_name(c): c for c in find_cards(self.t.snap())}
-        row = cs["bravo-bg"].rows[1]  # the focused card (bravo-29) draws everything in the focus colour; judge the other one
+        row = cs["bravo-bg"].rows[1]  # (the focused card is judged below too: the yellow background is not the border colour)
         self.assertEqual(self.lit_chars(row), "brav")
-        i = row.find("bravo-bg"); self.assertEqual([row.cells[i + k][1] == F for k in range(8)], [True] * 4 + [False] * 4, "b r a v lit, o - b g not")
+        i = row.find("bravo-bg"); self.assertEqual([row.cells[i + k][2] == MATCH for k in range(8)], [True] * 4 + [False] * 4, "b r a v on the yellow background, o - b g not")
         self.assertEqual(self.lit_chars(cs["bravo-bg"].rows[2]), "", "branch / bar rows have no match")
 
     def test_directory_match_highlights_the_group_title(self):
