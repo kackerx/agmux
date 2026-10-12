@@ -54,3 +54,58 @@ func TestFilter(t *testing.T) {
 		t.Errorf("rune offsets past multi-byte runes: %v", m)
 	}
 }
+
+// Equal scores keep the item order even among mixed scores (an all-equal input never tells a
+// stable sort from an unstable one).
+func TestTiesKeepOrderMixed(t *testing.T) {
+	tiers := []string{"ab%03d", "xab%03d", "x-ab%03d", "a-b%03d", "a--b%03d"}
+	var items []string
+	for i := range 100 {
+		items = append(items, fmt.Sprintf(tiers[(i*7+i/3)%len(tiers)], i))
+	}
+	ms := Filter("ab", items)
+	if len(ms) != len(items) {
+		t.Fatalf("%d of %d", len(ms), len(items))
+	}
+	for i := 1; i < len(ms); i++ {
+		a, b := ms[i-1], ms[i]
+		if a.Score < b.Score || a.Score == b.Score && a.Index > b.Index {
+			t.Fatalf("at %d: score %d item %d, then score %d item %d", i, a.Score, a.Index, b.Score, b.Index)
+		}
+	}
+}
+
+// smartcase both ways: a lower-case term ignores case, one capital makes the term exact-case.
+func TestSmartcase(t *testing.T) {
+	items := []string{"Agmux-Dev main ~/x", "agmux-dev main ~/x"}
+	if got := idx(Filter("agmux", items)); !reflect.DeepEqual(got, []int{0, 1}) && !reflect.DeepEqual(got, []int{1, 0}) {
+		t.Errorf("lower-case term finds both: %v", got)
+	}
+	if got := idx(Filter("Agmux", items)); !reflect.DeepEqual(got, []int{0}) {
+		t.Errorf("a capital: case-sensitive: %v", got)
+	}
+}
+
+// Terms the syntax strips down to nothing don't filter; terms add up; positions are listed once;
+// accents fold (é finds e) unless the term has some itself.
+func TestEdgeTerms(t *testing.T) {
+	items := []string{"my project main", "other"}
+	for _, q := range []string{"!", "'", "^", "!'", "  ", "\t"} {
+		if got := idx(Filter(q, items)); !reflect.DeepEqual(got, []int{0, 1}) {
+			t.Errorf("%q keeps every item: %v", q, got)
+		}
+	}
+	a, b, both := Filter("my", items)[0], Filter("pro", items)[0], Filter("my pro", items)[0]
+	if both.Score != a.Score+b.Score {
+		t.Errorf("scores add over terms: %d + %d != %d", a.Score, b.Score, both.Score)
+	}
+	if got := Filter("'my 'my", items)[0].Pos; !reflect.DeepEqual(got, []int{0, 1}) {
+		t.Errorf("a position listed twice by two terms is listed once: %v", got)
+	}
+	if got := idx(Filter("cafe", []string{"café", "cafe"})); len(got) != 2 {
+		t.Errorf("accents fold: %v", got)
+	}
+	if got := idx(Filter("café", []string{"café", "cafe"})); !reflect.DeepEqual(got, []int{0}) {
+		t.Errorf("a term with an accent keeps it: %v", got)
+	}
+}

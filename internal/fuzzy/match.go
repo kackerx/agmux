@@ -29,8 +29,8 @@ type term struct {
 
 // parseTerms reads the common part of fzf's extended syntax: terms split by spaces must all
 // match; 'exact, ^prefix, suffix$ and !exclude.
-// ponytail: no `|` (OR) and no `\ ` for a space inside a term; add them the way fzf's
-// pattern.go does if someone needs them.
+// ponytail: no `|` (OR), no `\ ` for a space inside a term, no 'word' boundary match and no
+// `!'` (negated fuzzy); add them the way fzf's pattern.go does if someone needs them.
 func parseTerms(pattern string) []term {
 	var terms []term
 	for _, s := range strings.Fields(pattern) {
@@ -48,11 +48,8 @@ func parseTerms(pattern string) []term {
 			t.match, s = algo.SuffixMatch, s[:len(s)-1]
 		}
 		switch {
-		case strings.HasPrefix(s, "'"): // flips exactness, as in fzf
+		case strings.HasPrefix(s, "'"):
 			t.match, s = algo.ExactMatchNaive, s[1:]
-			if t.inverse {
-				t.match = algo.FuzzyMatchV2
-			}
 		case strings.HasPrefix(s, "^"):
 			t.match, s = algo.PrefixMatch, s[1:]
 			if suffix {

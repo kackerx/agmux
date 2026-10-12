@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -200,7 +201,7 @@ func firstLine(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }
 func (m Model) items(gs []group) [][]string {
 	out := make([][]string, len(gs))
 	for i, g := range gs {
-		if m.folded[g.key] {
+		if m.foldedNow()[g.key] {
 			out[i] = []string{headerID(g.key)}
 			continue
 		}
@@ -211,7 +212,17 @@ func (m Model) items(gs []group) [][]string {
 	return out
 }
 
-// shown is what the / filter lets through (every session without one) and where each card matched.
+// foldedNow is the folding in effect: none under a filter (a group with a hit shows its cards),
+// what f set otherwise; the filter never changes what f set.
+func (m Model) foldedNow() map[string]bool {
+	if m.query != "" {
+		return nil
+	}
+	return m.folded
+}
+
+// shown is what the / filter lets through (every session without one), best match first, and
+// where each card matched. The card pass-through is locked on stays, matching or not.
 func (m Model) shown() ([]store.Session, map[string]hit) {
 	ss := m.src.Sessions()
 	if m.query == "" {
@@ -241,6 +252,11 @@ func (m Model) shown() ([]store.Session, map[string]hit) {
 		}
 		hits[s.ID] = h
 	}
+	if m.pvFocus && !slices.ContainsFunc(out, func(s store.Session) bool { return s.ID == m.pvID }) {
+		if i := slices.IndexFunc(ss, func(s store.Session) bool { return s.ID == m.pvID }); i >= 0 {
+			out = append(out, ss[i])
+		}
+	}
 	return out, hits
 }
 
@@ -267,7 +283,7 @@ func (m *Model) current() (gs []group, gi int, s store.Session, ok bool) {
 		gi, ci = 0, 0
 		m.focus = items[0][0]
 	}
-	if m.folded[gs[gi].key] {
+	if m.foldedNow()[gs[gi].key] {
 		return gs, gi, s, false
 	}
 	return gs, gi, gs[gi].sessions[ci], true
@@ -301,6 +317,7 @@ func (m Model) passThrough() bool {
 // lock enters pass-through on session s.
 func (m *Model) lock(s store.Session) {
 	m.pvFocus, m.pvID, m.pvPane, m.msg = true, s.ID, s.TmuxPane, ""
+	m.searching = false // a click on the preview while typing a filter: the keys go to the pane now
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -374,6 +391,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if k.String() == "esc" && m.query != "" { // a kept filter goes first (alt+esc, two quick escs, doesn't)
+		m.current() // the focus stays on the card it is on now, not on one the filter had hidden
 		m.query = ""
 		return m, nil
 	}
@@ -384,9 +402,11 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // on the first card it shows; esc / ctrl+c drop it, the focus back where it was.
 func (m Model) searchKey(k tea.KeyMsg) Model {
 	switch k.Type {
-	case tea.KeyEnter:
-		m.searching, m.focus = false, ""
-		m.current() // the first card shown
+	case tea.KeyEnter: // onto the best match; with none, the focus stays
+		m.searching = false
+		if ss, _ := m.shown(); len(ss) > 0 {
+			m.focus = ss[0].ID
+		}
 	case tea.KeyEsc, tea.KeyCtrlC:
 		m.searching, m.query, m.focus = false, "", m.searchFrom
 	case tea.KeyBackspace, tea.KeyCtrlH:
@@ -394,15 +414,28 @@ func (m Model) searchKey(k tea.KeyMsg) Model {
 			m.query = string(r[:len(r)-1])
 		}
 	case tea.KeyRunes, tea.KeySpace:
-		m.query += strings.ReplaceAll(string(k.Runes), "\n", " ")
+		if k.Alt { // alt+e is a key, not the text "e"
+			break
+		}
+		// a paste may carry \r, \t, ESC sequences: they'd tear the top bar
+		m.query += strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return ' '
+			}
+			return r
+		}, string(k.Runes))
 	}
 	return m
 }
 
 // do runs a configured action on the focused card.
 func (m Model) do(action string) (tea.Model, tea.Cmd) {
-	if action == "quit" {
+	switch action {
+	case "quit":
 		return m, tea.Quit
+	case "search": // even when the filter shows nothing: / edits it
+		m.searching, m.searchFrom, m.msg = true, m.focus, ""
+		return m, nil
 	}
 	gs, gi, s, ok := m.current()
 	if len(gs) == 0 {
@@ -414,7 +447,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// ponytail: lays the board out again per key press; fine for tens of sessions.
-		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.folded, nil)
+		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.foldedNow(), nil)
 		if id := nearest(rects, m.focus, d); id != "" {
 			m.focus, m.msg = id, ""
 		}
@@ -426,14 +459,11 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// only what is on screen: a card whose top border is in the window
-		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.folded, nil)
+		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.foldedNow(), nil)
 		bodyH := max(m.h-3, 1)
 		off := scrollOff(rects, m.focus, bodyH)
 		rects = slices.DeleteFunc(rects, func(r rect) bool { return r.y < off || r.y >= off+bodyH })
 		m.mode, m.labels, m.msg = flashing, flashLabels(rects, m.focus, m.cardsW()), ""
-		return m, nil
-	case "search": // with a filter on, / edits it
-		m.searching, m.searchFrom, m.msg = true, m.focus, ""
 		return m, nil
 	case "focus_preview":
 		if m.previewOn() && ok && s.TmuxPane != "" {
@@ -740,7 +770,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 	m.current()
 	// ponytail: re-lays out the board per click to find the card; fine for tens of sessions.
 	ss, _ := m.shown()
-	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, m.folded, m.cardsW(), nil, nil)
+	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, m.foldedNow(), m.cardsW(), nil, nil)
 	y := e.Y - 1 + off // row 0 is the top bar
 	for _, r := range rects {
 		if e.X >= r.x && e.X < r.x+r.w && y >= r.y && y < r.y+r.h {
@@ -785,7 +815,7 @@ func (m Model) View() string {
 		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.passThrough())
 	}
 	ss, hits := m.shown()
-	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right, hits)
+	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits)
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
 		cursor := ""
 		if m.searching {

@@ -2219,3 +2219,190 @@ func TestEscClearsFilterAnyBinding(t *testing.T) {
 		t.Errorf("esc clears: quit %v query %q", quit, m.query)
 	}
 }
+
+func trueColor(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+}
+
+// With nothing matching, / still opens the box (it is how the query is fixed); enter changes nothing.
+func TestSearchAfterNoMatch(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "l", "/") // focus three
+	m = typeKeys(t, m, "zzz")
+	m, _ = press(t, m, "enter")
+	if m.focus != "b1" || m.searching {
+		t.Errorf("enter with no match: focus %s searching %v", m.focus, m.searching)
+	}
+	if m, _ = press(t, m, "/"); !m.searching {
+		t.Fatal("/ is dead after no match")
+	}
+	m, _ = press(t, m, "backspace", "backspace", "backspace")
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "3/3") {
+		t.Errorf("query emptied:\n%s", v)
+	}
+}
+
+// The box takes text only: a paste's control characters turn into spaces, alt+key is not text.
+func TestSearchBoxTextOnly(t *testing.T) {
+	for paste, want := range map[string]string{"a\rb": "a b", "a\tb": "a b", "a\x1b[31mb": "a [31mb", "a\nb": "a b", "a\x00b": "a b"} {
+		m, _ := press(t, wide(&fakeRunner{}, 200, 40), "/")
+		tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(paste), Paste: true})
+		m = tm.(Model)
+		if m.query != want || strings.ContainsAny(ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0]), "\r\t\x1b\x00") {
+			t.Errorf("paste %q: query %q, want %q", paste, m.query, want)
+		}
+	}
+	m, _ := press(t, wide(&fakeRunner{}, 200, 40), "/")
+	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e"), Alt: true})
+	if m = tm.(Model); m.query != "" {
+		t.Errorf("alt+e typed %q", m.query)
+	}
+}
+
+// Clicking the preview while the box is open ends the box: the keys go to the pane, and the top
+// bar stops showing a query being typed.
+func TestSearchBoxClosesOnPassThrough(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "p", "/")
+	m = typeKeys(t, m, "o")
+	tm, _ := m.Update(tea.MouseMsg{X: 150, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m = tm.(Model)
+	if !m.pvFocus || m.searching || strings.Contains(strings.SplitN(ansi.Strip(m.View()), "\n", 2)[0], "▏") {
+		t.Fatalf("pvFocus %v searching %v", m.pvFocus, m.searching)
+	}
+	r.reset()
+	m, _ = press(t, m, "enter")
+	if sent := sentKeys(r); len(sent) != 1 || !strings.HasSuffix(sent[0], "Enter") {
+		t.Errorf("enter goes to the pane, not the box: %q", sent)
+	}
+}
+
+// enter lands on the best match, wherever the layout puts it and wherever the focus is.
+func TestSearchEnterGoesToBestScore(t *testing.T) {
+	ss := staticSrc{
+		{ID: "a1", Name: "x-o-r-c-h", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%1"},    // weak
+		{ID: "b1", Name: "orchestrator", GroupKey: "/b", CWD: "/b", ContextPct: -1, TmuxPane: "%2"}, // best, later in the layout
+		{ID: "a2", Name: "zz-orch", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%3"},
+	}
+	for _, focusOn := range []string{"a1", "a2", "b1"} {
+		m := psized(ss, 232, 50)
+		m.focus = focusOn
+		m, _ = press(t, m, "/")
+		m = typeKeys(t, m, "orch")
+		if m, _ = press(t, m, "enter"); m.focus != "b1" {
+			t.Errorf("focus began on %s: enter went to %s, want the best match b1", focusOn, m.focus)
+		}
+	}
+	// the cards are not reordered by score
+	m := psized(ss, 232, 50)
+	m.query = "orch"
+	gs := groups(func() []store.Session { s, _ := m.shown(); return s }())
+	if gs[0].key != "/a" || gs[0].sessions[0].ID != "a1" {
+		t.Errorf("layout keeps its order: %v", gs)
+	}
+}
+
+// Under a filter every group with a hit shows its cards; clearing it brings the folding back; the
+// count is what is visible.
+func TestSearchUnfoldsAndRestores(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "f") // /a folded: its title only
+	if v := ansi.Strip(m.View()); strings.Contains(v, "one") || !strings.Contains(v, "▸ /a (2)") {
+		t.Fatalf("setup:\n%s", v)
+	}
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "o") // one, two (hit in a), no three?
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "one") || !strings.Contains(v, "▾ /a") || !strings.Contains(strings.SplitN(v, "\n", 2)[0], "2/3") {
+		t.Errorf("the group with hits opens, count n/total:\n%s", v)
+	}
+	m, _ = press(t, m, "esc")
+	if v := ansi.Strip(m.View()); strings.Contains(v, "one") || !strings.Contains(v, "▸ /a (2)") || !m.folded["/a"] {
+		t.Errorf("folded again after esc:\n%s", v)
+	}
+}
+
+// The card pass-through is locked on keeps showing while it no longer matches.
+func TestSearchKeepsLockedCard(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "i") // locked on a1 "one"
+	m.query = "thr"
+	if ss, _ := m.shown(); len(ss) != 2 || ss[1].ID != "a1" {
+		t.Errorf("shown %v", ss)
+	}
+	m.pvFocus = false
+	if ss, _ := m.shown(); len(ss) != 1 {
+		t.Errorf("not locked: only the match: %v", ss)
+	}
+}
+
+// Esc on a kept filter leaves the focus on the card shown, not on one the filter had hidden.
+func TestSearchEscKeepsCurrentCard(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "j", "/") // focus two
+	m = typeKeys(t, m, "thr")
+	m, _ = press(t, m, "enter") // three
+	m.focus = "a2"              // as if a poll had moved the focus to a hidden card
+	if m, _ = press(t, m, "esc"); m.query != "" || m.focus != "b1" {
+		t.Errorf("query %q focus %s, want b1: the card that was showing", m.query, m.focus)
+	}
+}
+
+// The matches reach the screen: the name's letters, the path in the group's title (the union over
+// its cards, folded or not).
+func TestSearchHighlightsOnScreen(t *testing.T) {
+	trueColor(t)
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "/")
+	m = typeKeys(t, m, "'thr")
+	if !strings.Contains(m.View(), fg(cFocus, "t")+fg(cFocus, "h")+fg(cFocus, "r")+fg(cName, "e")) {
+		t.Errorf("name letters not highlighted:\n%s", ansi.Strip(m.View()))
+	}
+	home, _ := os.UserHomeDir()
+	ss := staticSrc{
+		{ID: "a", Name: "agm-card", GroupKey: home + "/proj/agmux", CWD: home + "/proj/agmux", ContextPct: -1},
+		{ID: "b", Name: "zzz", GroupKey: home + "/proj/agmux", CWD: home + "/proj/agmux", ContextPct: -1},
+		{ID: "c", Name: "two", GroupKey: "/zzz/other", CWD: "/zzz/other", ContextPct: -1},
+	}
+	mm := psized(ss, 200, 40)
+	mm.query = "'agmux"
+	title := strings.Split(mm.View(), "\n")[1]
+	if !strings.Contains(title, fg(cFocus, "a")+fg(cFocus, "g")+fg(cFocus, "m")+fg(cFocus, "u")+fg(cFocus, "x")) {
+		t.Errorf("open title: %q", ansi.Strip(title))
+	}
+	if g := (group{key: home + "/proj/agmux", sessions: []store.Session{{ID: "b"}}}); true { // b has no hit but a does: the union
+		h := header(g, 60, false, false, dirHits(group{sessions: ss[:2]}, map[string]hit{"a": {dir: []int{7, 8}}}))
+		if !strings.Contains(h, fg(cFocus, "g")) {
+			t.Errorf("union of the cards' hits: %q", ansi.Strip(h))
+		}
+	}
+	mm.folded[home+"/proj/agmux"] = true
+	mm.query = ""
+	mm.focus = "c"
+	if h := header(group{key: home + "/proj/agmux", sessions: ss[:2]}, 60, true, false, []int{7}); !strings.Contains(h, fg(cFocus, "a")) {
+		t.Errorf("folded title: %q", ansi.Strip(h))
+	}
+}
+
+// Offsets are runes, not bytes, with multi-byte names and branches.
+func TestSearchHitsMultibyte(t *testing.T) {
+	m := New(staticSrc{{ID: "x", Name: "名字名字", Branch: "分支", CWD: "/w/目录", GroupKey: "/w/目录"}}, &fakeRunner{})
+	for q, want := range map[string]hit{"'分支": {branch: []int{0, 1}}, "'名字名字": {name: []int{0, 1, 2, 3}}, "'目录": {dir: []int{3, 4}}} {
+		m.query = q
+		if _, hits := m.shown(); !reflect.DeepEqual(hits["x"], want) {
+			t.Errorf("%q: %+v, want %+v", q, hits["x"], want)
+		}
+	}
+}
+
+// A title too long for its column keeps both ends, and a highlight in the tail survives the cut.
+func TestMidTruncKeepsHighlight(t *testing.T) {
+	trueColor(t)
+	path := "/proj/aaaaaaaaaaaa/bbbbbbbbbbbb/cccccccccccc/target-dir"
+	r := []rune(path)
+	g := group{key: path, sessions: []store.Session{{ID: "x"}}}
+	h := header(g, 30, false, false, []int{len(r) - 3, len(r) - 2})
+	if w := ansi.StringWidth(h); w != 30 || !strings.Contains(h, fg(cFocus, "d")+fg(cFocus, "i")) {
+		t.Errorf("width %d: %q", w, ansi.Strip(h))
+	}
+	if got := midTrunc("abcdef", 2); got != "ab" || ansi.StringWidth(midTrunc("abcdefgh", 5)) != 5 {
+		t.Errorf("fallback: %q %q", got, midTrunc("abcdefgh", 5))
+	}
+}
