@@ -23,7 +23,8 @@
   review = ["d"]           avatar = ["a"]
   quit = ["q", "esc"]      confirm = ["y"]
   ```
-  同一个键绑到两个动作 → 配置错误。`ctrl+c` 不可配置：卡片焦点时永远退出 agmux，预览直通时转发给 pane。预览获焦时只有 `leave_preview` 的键被拦截，其它全部直通（和 M2 一样）。底栏提示按配置渲染（每个动作显示第一个键名）。
+  查重规则：用户显式写的绑定优先——用户把键 K 绑给动作 A，而 K 在默认里属于用户没写的动作 B，则 B 自动失去 K（B 一个键都不剩就报错 `keys.B: no key left after "K" was taken by A; bind one`），升级新增默认键不会让老配置启动失败；用户自己写的两个动作共用一个键才报错。`confirm` 和 `leave_preview` 只在各自模式生效，不参与和看板键的查重。`ctrl+c` 任何动作都不能绑（报错），它固定为：卡片焦点时退出 agmux，预览直通时转发给 pane。键名只接受 bubbletea 会发出的：`ctrl+i` / `ctrl+m` 要写成 `tab` / `enter`，`alt+space` 内部是 `"alt+ "`。
+- 错误消息、kill 确认提示、"session is gone" 都用 `attention` 色，不另设 error 色。`effort` 色目前看不到效果（effort 字段名未核实、从未赋值），接上后生效。预览获焦时只有 `leave_preview` 的键被拦截，其它全部直通（和 M2 一样）。底栏提示按配置渲染（每个动作显示第一个键名）。
 - 颜色 `[colors]`：值是 `#rrggbb` 或 ANSI 0–255 的数字字符串。
   ```toml
   [colors]
