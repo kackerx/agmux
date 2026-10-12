@@ -343,7 +343,7 @@ func TestPollErrorKeepsBackgroundHint(t *testing.T) {
 }
 
 func TestBackgroundHintOnce(t *testing.T) {
-	for _, k := range []string{"enter", "H", "s"} {
+	for _, k := range []string{"enter", "H", "i"} {
 		m, _ := press(t, newModel(&fakeRunner{}), "j", k) // a2 is the background session
 		if n := strings.Count(ansi.Strip(m.View()), noPane); n != 1 {
 			t.Errorf("%s on a background session: hint shown %d times, want 1", k, n)
@@ -1945,65 +1945,6 @@ func TestBranchHilite(t *testing.T) {
 	}
 }
 
-// Labels go nearest-first from the focused card (itself: a); a row away weighs a whole width.
-func TestFlashLabels(t *testing.T) {
-	var rects []rect
-	for _, y := range []int{0, 6, 12} {
-		for _, x := range []int{0, 50, 100} {
-			rects = append(rects, rect{id: fmt.Sprintf("%d,%d", x, y), x: x, y: y})
-		}
-	}
-	got := flashLabels(rects, "50,6", 150)
-	want := map[string]string{"a": "50,6", "s": "0,6", "d": "100,6", "f": "50,0", "g": "50,12", "h": "0,0", "j": "100,0", "k": "0,12", "l": "100,12"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("%v\nwant %v", got, want)
-	}
-	many := make([]rect, 60)
-	for i := range many {
-		many[i] = rect{id: fmt.Sprint(i), x: 0, y: i * 5}
-	}
-	l := flashLabels(many[:30], "0", 100)
-	if l["m"] != "25" || l["A"] != "26" || l["F"] != "29" {
-		t.Errorf("past 26 come upper case: %v", l)
-	}
-	if l := flashLabels(many, "0", 100); len(l) != 52 || l["M"] != "51" {
-		t.Errorf("52 labels at most: %d", len(l))
-	}
-}
-
-// s: labels on every card's top border, the rest dim; a label moves the focus (no jump), esc
-// cancels, other keys are ignored.
-func TestFlash(t *testing.T) {
-	old := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(old)
-	r := &fakeRunner{}
-	m, _ := press(t, wide(r, 232, 50), "s")
-	v := m.View()
-	lines := strings.Split(ansi.Strip(v), "\n")
-	if !strings.HasPrefix(lines[2], "┏a━") || !strings.HasPrefix(lines[7], "╭d─") || !strings.Contains(lines[2], "╭s─") || !strings.Contains(v, flashLabel("s")) {
-		t.Fatalf("labels a / s / d on one, three, two:\n%q", lines[:9])
-	}
-	if last := lines[len(lines)-1]; !strings.Contains(last, "jump: press a label · esc cancel") {
-		t.Errorf("footer %q", last)
-	}
-	if strings.Contains(v, fg(cName, "one")) || !strings.Contains(v, fg(cMuted, ansi.Strip(strings.Split(v, "\n")[3]))) {
-		t.Error("the board dims behind the labels")
-	}
-	m, quit := press(t, m, "1", "z", "q", "d")
-	if quit || m.mode != browsing || m.focus != "a2" || len(r.calls) != 0 {
-		t.Errorf("non-labels ignored, d → two: quit %v mode %v focus %s calls %q", quit, m.mode, m.focus, r.calls)
-	}
-	m, _ = press(t, m, "s", "esc")
-	if m.mode != browsing || m.focus != "a2" {
-		t.Errorf("esc cancels: mode %v focus %s", m.mode, m.focus)
-	}
-	m, _ = press(t, m, "l", "f", "h", "s", "s") // /b folded: its title is a target too
-	if m.focus != headerID("/b") {
-		t.Errorf("folded title: focus %q", m.focus)
-	}
-}
-
 // With a filter kept, esc drops it first; the next esc quits.
 func TestEscClearsKeptFilter(t *testing.T) {
 	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "/")
@@ -2058,147 +1999,12 @@ func psized(src Source, w, h int) Model {
 	return tm.(Model)
 }
 
-func plabel(m Model, id string) string {
-	for l, v := range m.labels {
-		if v == id {
-			return l
-		}
-	}
-	return ""
-}
-
 func column(n, h int) Model {
 	var ss []store.Session
 	for i := range n {
 		ss = append(ss, store.Session{ID: fmt.Sprintf("x%02d", i), Name: fmt.Sprintf("n%02d", i), GroupKey: "/g", TmuxPane: "%1", Status: "idle", ContextPct: -1})
 	}
 	return psized(staticSrc(ss), 60, h)
-}
-
-// A label whose card left in a poll since s is no target: ignored, still flashing, focus kept.
-func TestFlashLabelOfGoneCard(t *testing.T) {
-	src := &mutSrc{ss: slices.Clone([]store.Session(sessions))}
-	m, _ := press(t, psized(src, 232, 50), "j", "s") // focus a2
-	lb := plabel(m, "b1")
-	src.ss = src.ss[:2]
-	if m, _ = press(t, m, lb); m.focus != "a2" || m.mode != flashing {
-		t.Errorf("focus %q mode %v", m.focus, m.mode)
-	}
-	src.ss = []store.Session{sessions[0], sessions[2]} // now a2 is gone, b1 back
-	if m, _ = press(t, m, lb); m.focus != "b1" || m.mode != browsing {
-		t.Errorf("b1 back: focus %q mode %v", m.focus, m.mode)
-	}
-}
-
-// The labels are the ones handed out at s: a poll adding a card above doesn't move them.
-func TestFlashLabelsFrozen(t *testing.T) {
-	src := &mutSrc{ss: slices.Clone([]store.Session(sessions))}
-	m, _ := press(t, psized(src, 232, 50), "s")
-	before := plabel(m, "b1")
-	src.ss = append([]store.Session{{ID: "a0", Name: "000", GroupKey: "/a", TmuxPane: "%0", Status: "idle", ContextPct: -1}}, src.ss...)
-	_ = m.View()
-	if m, _ = press(t, m, before); m.focus != "b1" {
-		t.Errorf("label %q was b1's at s; after a poll it went to %q", before, m.focus)
-	}
-}
-
-// With a filter kept, only the cards shown get labels; esc ends flash, then clears, then quits.
-func TestFlashUnderFilter(t *testing.T) {
-	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "/")
-	m = typeKeys(t, m, "thr")
-	m, _ = press(t, m, "enter", "s")
-	if len(m.labels) != 1 || m.labels["a"] != "b1" {
-		t.Errorf("filter thr: labels %v", m.labels)
-	}
-	m, quit := press(t, m, "esc")
-	if quit || m.query != "thr" || m.mode != browsing {
-		t.Errorf("esc in flash: quit %v query %q mode %v", quit, m.query, m.mode)
-	}
-	if m, quit = press(t, m, "esc"); quit || m.query != "" {
-		t.Errorf("second esc clears: quit %v query %q", quit, m.query)
-	}
-	if _, quit = press(t, m, "esc"); !quit {
-		t.Errorf("third esc quits")
-	}
-}
-
-// Equally far: the upper first. Focus b2: c1 (up-right) and a3 (down-left).
-func TestFlashTieGoesUpFirst(t *testing.T) {
-	mk := func(id, g string) store.Session {
-		return store.Session{ID: id, Name: id, GroupKey: g, TmuxPane: "%1", Status: "idle", ContextPct: -1}
-	}
-	m := psized(staticSrc{mk("a1", "/a"), mk("a2", "/a"), mk("a3", "/a"), mk("b1", "/b"), mk("b2", "/b"), mk("c1", "/c"), mk("c2", "/c"), mk("d1", "/d"), mk("e1", "/e")}, 200, 50)
-	m, _ = press(t, m, "l", "j", "s")
-	idx := func(id string) int { return strings.Index(flashAlphabet, plabel(m, id)) }
-	if m.labels["a"] != "b2" || idx("c1") > idx("a3") {
-		t.Errorf("c1 %q before a3 %q: %v", plabel(m, "c1"), plabel(m, "a3"), m.labels)
-	}
-}
-
-// Only cards on screen (top border in the window) get labels, so none is wasted on what can't be seen.
-func TestFlashOnlyOnScreen(t *testing.T) {
-	m, _ := press(t, column(10, 20), "j", "j", "j", "j", "j", "j", "j", "j", "j", "s") // last of 10, 20 rows
-	v := ansi.Strip(m.View())
-	if len(m.labels) == 0 || len(m.labels) >= 10 {
-		t.Fatalf("labels %v", m.labels)
-	}
-	for lb, id := range m.labels {
-		if !strings.Contains(v, "╭"+lb) && !strings.Contains(v, "┏"+lb) {
-			t.Errorf("%q (%s) is not on screen", lb, id)
-		}
-	}
-	m, _ = press(t, column(10, 20), "s") // the first: the rest run off the bottom
-	if len(m.labels) == 0 || len(m.labels) >= 10 || m.labels["a"] != "x00" {
-		t.Errorf("below the window: %v", m.labels)
-	}
-}
-
-// The labels are frozen at s; a poll may then push labeled cards out of the window, above or below.
-// They are drawn only on the cards' rows, never over the top bar, message line or footer.
-func TestFlashLabelsPushedOffScreen(t *testing.T) {
-	mk := func(id, name string) store.Session {
-		return store.Session{ID: id, Name: name, GroupKey: "/g", TmuxPane: "%1", Status: "idle", ContextPct: -1}
-	}
-	var ss []store.Session
-	for i := range 10 {
-		ss = append(ss, mk(fmt.Sprintf("x%02d", i), fmt.Sprintf("n%02d", i)))
-	}
-	for _, c := range []struct {
-		name  string
-		keys  []string
-		extra string // names sorting right before the focused / labeled cards
-	}{
-		{"pushed below", []string{"s"}, "n00"},
-		{"pushed above", []string{"j", "j", "j", "j", "j", "j", "j", "j", "j", "s"}, "n08"},
-	} {
-		src := &mutSrc{ss: slices.Clone(ss)}
-		m := psized(src, 60, 20)
-		normal := strings.Split(ansi.Strip(m.View()), "\n")
-		m, _ = press(t, m, c.keys...)
-		for i := range 8 {
-			src.ss = append(src.ss, mk(fmt.Sprintf("y%d", i), c.extra+fmt.Sprint(i)))
-		}
-		fl := strings.Split(ansi.Strip(m.View()), "\n")
-		if len(fl) != 20 || fl[0] != " agmux · 18 sessions" || fl[18] != normal[18] || !strings.HasPrefix(fl[19], " jump: press") {
-			t.Errorf("%s: %q / %q / %q", c.name, fl[0], fl[18], fl[19])
-		}
-	}
-}
-
-// However far the board scrolled, flash draws only on the cards' rows: never the top bar, message line or footer.
-func TestFlashScrollSafe(t *testing.T) {
-	for h := 12; h <= 30; h++ {
-		m := column(10, h)
-		for range 10 {
-			normal := strings.Split(ansi.Strip(m.View()), "\n")
-			f, _ := press(t, m, "s")
-			fl := strings.Split(ansi.Strip(f.View()), "\n")
-			if len(fl) != h || fl[0] != normal[0] || fl[h-2] != normal[h-2] {
-				t.Errorf("h=%d focus %s: top %q msg %q", h, m.focus, fl[0], fl[h-2])
-			}
-			m, _ = press(t, m, "j")
-		}
-	}
 }
 
 // The label: focus color behind bold text, dark on a light focus color, light on a dark one.
@@ -2440,84 +2246,6 @@ func TestFlashSwallowsMouse(t *testing.T) {
 	}
 }
 
-// every label handed out is drawn, and every card top on screen has a label (exact window), for every height and focus
-func TestFlashWindowExact(t *testing.T) {
-	for h := 8; h <= 34; h++ {
-		m := column(10, h)
-		for i := 0; i < 10; i++ {
-			f, _ := press(t, m, "s")
-			lines := strings.Split(ansi.Strip(f.View()), "\n")
-			tops := 0
-			for _, l := range lines[1 : len(lines)-2] {
-				if strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "┏") {
-					tops++
-				}
-			}
-			drawn := 0
-			for lb := range f.labels {
-				for _, l := range lines[1 : len(lines)-2] {
-					if strings.HasPrefix(l, "╭"+lb) || strings.HasPrefix(l, "┏"+lb) {
-						drawn++
-					}
-				}
-			}
-			if drawn != len(f.labels) || tops != len(f.labels) {
-				t.Errorf("h=%d focus %s: %d labels, %d drawn, %d card tops on screen", h, m.focus, len(f.labels), drawn, tops)
-			}
-			m, _ = press(t, m, "j")
-		}
-	}
-}
-
-// after s, a poll inserts / removes cards (before the labeled ones, between them and the focus, after): the frozen labels
-// must never be drawn over the top bar, the message line or the footer, for every height and focus
-func TestFlashPushSweep(t *testing.T) {
-	mk := func(id, name string) store.Session {
-		return store.Session{ID: id, Name: name, GroupKey: "/g", TmuxPane: "%1", Status: "idle", ContextPct: -1}
-	}
-	for h := 8; h <= 34; h++ {
-		for fi := 0; fi < 10; fi++ {
-			for _, c := range []struct {
-				name  string
-				apply func(ss []store.Session) []store.Session
-			}{
-				{"insert 1 first", func(ss []store.Session) []store.Session { return append([]store.Session{mk("y0", "000")}, ss...) }},
-				{"insert 2 first", func(ss []store.Session) []store.Session {
-					return append([]store.Session{mk("y0", "000"), mk("y1", "001")}, ss...)
-				}},
-				{"insert 3 just before the focus", func(ss []store.Session) []store.Session {
-					out := slices.Clone(ss)
-					for i := 0; i < 3; i++ {
-						out = append(out, mk(fmt.Sprintf("y%d", i), fmt.Sprintf("n%02d-%d", max(fi-1, 0), i)))
-					}
-					return out
-				}},
-				{"remove card 0", func(ss []store.Session) []store.Session { return ss[1:] }},
-				{"remove card 0..2", func(ss []store.Session) []store.Session { return ss[3:] }},
-			} {
-				var ss []store.Session
-				for i := 0; i < 10; i++ {
-					ss = append(ss, mk(fmt.Sprintf("x%02d", i), fmt.Sprintf("n%02d", i)))
-				}
-				src := &mutSrc{ss: slices.Clone(ss)}
-				m := psized(src, 60, h)
-				for k := 0; k < fi; k++ {
-					m, _ = press(t, m, "j")
-				}
-				m, _ = press(t, m, "s")
-				src.ss = c.apply(slices.Clone(ss))
-				lines := strings.Split(ansi.Strip(m.View()), "\n")
-				if len(lines) != h {
-					t.Fatalf("h=%d %s focus %d: %d lines", h, c.name, fi, len(lines))
-				}
-				if !strings.HasPrefix(lines[0], " agmux") || strings.TrimSpace(lines[h-2]) != "" || !strings.HasPrefix(lines[h-1], " jump: press") {
-					t.Errorf("h=%d %s focus %d: top %q msg %q foot %q", h, c.name, fi, lines[0], lines[h-2], lines[h-1])
-				}
-			}
-		}
-	}
-}
-
 // Equal scores: enter goes to the first of them in the layout, not in the poll's order.
 func TestSearchEnterTieLayoutOrder(t *testing.T) {
 	ss := staticSrc{
@@ -2613,8 +2341,8 @@ func TestSearchOpensFoldedForEverything(t *testing.T) {
 	if !clicked {
 		t.Error("click on a2 did not focus it")
 	}
-	if m, _ = press(t, setup(), "s"); plabel(m, "a2") == "" {
-		t.Errorf("s: labels %v", m.labels)
+	if m, _ = press(t, setup(), "s", "t", "w"); len(m.flash.ms) != 1 || m.flash.ms[0].id != "a2" { // two, in the group f had folded
+		t.Errorf("s: hits %v", m.flash.ms)
 	}
 }
 
@@ -2743,5 +2471,434 @@ func TestNextPrevMatchEdges(t *testing.T) {
 	m, _ = press(t, m, "n")
 	if !slices.ContainsFunc(r.calls, func(c []string) bool { return c[len(c)-1] == "n" && c[1] == "send-keys" }) {
 		t.Errorf("n goes to the pane: %q", r.calls)
+	}
+}
+
+// ---- s: flash.nvim style: type what to find, press the label after the hit ----
+
+// flashSrc: the names for flash tests. Groups /g (alpha, alps), /h (Bravo), /i (a CJK name).
+var flashSrc = staticSrc{
+	{ID: "a1", Name: "alpha", Branch: "main", GroupKey: "/g", CWD: "/g", ContextPct: -1, TmuxPane: "%1"},
+	{ID: "a2", Name: "alps", GroupKey: "/g", CWD: "/g", ContextPct: -1, TmuxPane: "%2"},
+	{ID: "b1", Name: "Bravo", Branch: "feature/x", GroupKey: "/h", CWD: "/h", ContextPct: -1, TmuxPane: "%3"},
+	{ID: "c1", Name: "告警会话", Branch: "main", GroupKey: "/i", CWD: "/i", ContextPct: -1, TmuxPane: "%4"},
+}
+
+func hitOf(m Model, id string) (flashMatch, bool) {
+	for _, h := range m.flash.ms {
+		if h.id == id {
+			return h, true
+		}
+	}
+	return flashMatch{}, false
+}
+
+func labelsOf(m Model) string {
+	var out []string
+	for _, h := range m.flash.ms {
+		out = append(out, h.id+"="+h.label)
+	}
+	return strings.Join(out, " ")
+}
+
+// typed presses the keys one by one in flash mode.
+func typed(t *testing.T, m Model, text string) Model {
+	t.Helper()
+	for _, r := range text {
+		m, _ = press(t, m, string(r))
+	}
+	return m
+}
+
+// onScreen checks every hit against the board as it is drawn outside flash: the cells it names
+// hold its text (case aside), so the columns agree with how the cards are laid out.
+func onScreen(t *testing.T, m Model) {
+	t.Helper()
+	plain := m
+	plain.mode = browsing
+	lines := strings.Split(ansi.Strip(plain.View()), "\n")
+	for _, h := range m.flash.ms {
+		if got := ansi.Cut(lines[1+h.y], h.x, h.x+h.w); !strings.EqualFold(got, h.text) {
+			t.Errorf("hit %+v: the screen has %q at line %d column %d", h, got, 1+h.y, h.x)
+		}
+	}
+}
+
+// s alone labels nothing; each typed character narrows to the cards whose name, branch or
+// group path hold it (case does not matter), and the pattern and footer say what is going on.
+func TestFlashTypeToNarrow(t *testing.T) {
+	m, _ := press(t, psized(flashSrc, 232, 50), "s")
+	if m.mode != flashing || len(m.flash.ms) != 0 {
+		t.Fatalf("s: mode %v hits %v", m.mode, m.flash.ms)
+	}
+	v := strings.Split(ansi.Strip(m.View()), "\n")
+	if f := v[len(v)-1]; f != " flash: type to narrow · label to jump · esc" || v[len(v)-2] != " s ▏" {
+		t.Errorf("footer %q msg %q", f, v[len(v)-2])
+	}
+	m = typed(t, m, "bR")
+	if h, ok := hitOf(m, "b1"); !ok || h.text != "Br" {
+		t.Errorf("bR (any case) finds Bravo, shown as it is: %v", labelsOf(m))
+	}
+	if v := strings.Split(ansi.Strip(m.View()), "\n"); v[len(v)-2] != " s bR▏" {
+		t.Errorf("the pattern as typed: %q", v[len(v)-2])
+	}
+	if m = typed(t, m, "zz"); len(m.flash.ms) != 0 || m.mode != flashing {
+		t.Errorf("no hit: no labels, still flashing: %v", labelsOf(m))
+	}
+	m, _ = press(t, m, "backspace", "backspace", "backspace")
+	if h, ok := hitOf(m, "b1"); !ok || h.text != "B" || m.flash.pat != "b" {
+		t.Errorf("back to b: %q %v", m.flash.pat, labelsOf(m))
+	}
+	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlH})
+	if m = tm.(Model); m.flash.pat != "" || len(m.flash.ms) != 0 {
+		t.Errorf("ctrl+h is a backspace: %q", m.flash.pat)
+	}
+	if m, _ = press(t, m, "backspace"); m.flash.pat != "" || m.mode != flashing {
+		t.Error("backspace on nothing")
+	}
+	// a burst, as tmux send-keys or a fast typist makes it
+	tm, _ = psized(flashSrc, 232, 50).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("slp")})
+	if m = tm.(Model); m.mode != flashing || m.flash.pat != "lp" || len(m.flash.ms) != 2 {
+		t.Errorf("burst slp: mode %v pattern %q hits %v", m.mode, m.flash.pat, labelsOf(m))
+	}
+}
+
+// Where it finds: a card's name, its branch (past the icon), a group's path; the first hit per
+// card; wide characters in cells. Every hit is checked against the cells it names.
+func TestFlashWhereItFinds(t *testing.T) {
+	for _, c := range []struct {
+		typed, id, text string
+		w               int
+	}{
+		{"lph", "a1", "lph", 3},   // a name
+		{"feat", "b1", "feat", 4}, // a branch
+		{"警会", "c1", "警会", 4},     // two wide characters: four cells
+		{"/h", "b1", "/h", 2},     // a group's path; an open group goes to its first card
+		{"MAIN", "a1", "main", 4}, // a branch, case aside
+	} {
+		m := typed(t, psized(flashSrc, 232, 50), "s"+c.typed)
+		h, ok := hitOf(m, c.id)
+		if !ok || h.text != c.text || h.w != c.w {
+			t.Errorf("%q: %+v ok %v", c.typed, h, ok)
+		}
+		onScreen(t, m)
+	}
+	m := typed(t, psized(flashSrc, 232, 50), "sa") // alpha holds a in its name and its branch: one hit
+	n := 0
+	for _, h := range m.flash.ms {
+		if h.id == "a1" {
+			n++
+		}
+	}
+	if n != 1 || len(m.flash.ms) != 4 { // a1, a2, b1 (Bravo), c1 (its branch "main")
+		t.Errorf("a: %d hits on a1, all %v", n, labelsOf(m))
+	}
+}
+
+func namesSrc(names ...string) staticSrc {
+	var ss staticSrc
+	for i, n := range names {
+		ss = append(ss, store.Session{ID: fmt.Sprintf("n%02d", i), Name: n, GroupKey: "/g", CWD: "/g", ContextPct: -1, TmuxPane: "%1"})
+	}
+	return ss
+}
+
+// A label is never the character after a hit (any hit, any case): typing on would collide with it.
+// Names "xa" "xs" "xd" "xF": a, s, d, f are all taken as followers, so the labels start at g.
+func TestFlashLabelsAvoidFollowers(t *testing.T) {
+	m := typed(t, psized(namesSrc("xa", "xs", "xd", "xF"), 232, 50), "sx")
+	got := ""
+	for _, h := range m.flash.ms {
+		got += h.label
+	}
+	if got != "ghjk" {
+		t.Errorf("labels %q, want ghjk (a s d f are the next characters)", got)
+	}
+	// the spec's case: "alpha" and "alps", typing "al": the next character is p in both
+	m = typed(t, psized(namesSrc("alpha", "alps", "alpine"), 232, 50), "sal")
+	for _, h := range m.flash.ms {
+		if h.label == "p" || h.label == "P" {
+			t.Errorf("label %q is the character after the hit", h.label)
+		}
+	}
+	// every letter follows some hit: no letters left, no labels, nothing to press
+	var names []string
+	for _, r := range "abcdefghijklmnopqrstuvwxyz" {
+		names = append(names, "q"+string(r))
+	}
+	if m = typed(t, psized(namesSrc(names...), 232, 140), "sq"); len(m.flash.ms) != 26 || labelsOf(m) == "" {
+		t.Fatalf("hits %d", len(m.flash.ms))
+	}
+	for _, h := range m.flash.ms {
+		if h.label != "" {
+			t.Errorf("a label %q although every letter follows a hit", h.label)
+		}
+	}
+	// only the hits that exist count: followers of hits not drawn (scrolled away) don't use letters up — and the
+	// tail of a hit that ends its text has no follower at all
+	m = typed(t, psized(namesSrc("ab", "b"), 232, 50), "sb")
+	if h, _ := hitOf(m, "n01"); h.label == "" {
+		t.Errorf("a hit at the end of its text: %v", labelsOf(m))
+	}
+}
+
+// Nearest the focused card first: its own hit gets "a" when it has no follower claim; the rest by
+// distance, rows weighing a whole width, ties up before down.
+func TestFlashLabelOrder(t *testing.T) {
+	m, _ := press(t, psized(namesSrc("n1", "n2", "n3", "n4"), 232, 50), "j", "j") // the third card
+	if m.focus != "n02" {
+		t.Fatalf("focus %s", m.focus)
+	}
+	m = typed(t, m, "sn")
+	var order []string
+	for _, h := range m.flash.ms {
+		order = append(order, h.id)
+	}
+	if want := []string{"n02", "n01", "n03", "n00"}; !reflect.DeepEqual(order, want) { // itself, then one above (tie → up), one below, two above
+		t.Errorf("by distance from n02: %v, want %v", order, want)
+	}
+}
+
+// A label moves the focus to its card and ends flash (no jump, no tmux); another character is the
+// pattern; non-text keys are ignored.
+func TestFlashLabelJumps(t *testing.T) {
+	r := &fakeRunner{}
+	m := New(flashSrc, r)
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	m = typed(t, tm.(Model), "sa") // alpha, alps, Bravo, 告警会话 (its branch main)
+	m, _ = press(t, m, "enter", "tab", "down", "ctrl+]", "backspace", "backspace")
+	if m.mode != flashing || m.flash.pat != "" {
+		t.Fatalf("non-text keys ignored (backspaces emptied the pattern): mode %v pattern %q", m.mode, m.flash.pat)
+	}
+	m = typed(t, m, "br")
+	h, _ := hitOf(m, "b1")
+	if h.label == "" {
+		t.Fatalf("no label: %v", labelsOf(m))
+	}
+	m, quit := press(t, m, h.label)
+	if quit || m.mode != browsing || m.focus != "b1" || len(r.calls) != 0 {
+		t.Errorf("mode %v focus %s calls %q", m.mode, m.focus, r.calls)
+	}
+	if m, _ = press(t, m, "h"); m.focus == "b1" { // browsing again: keys are the board's
+		t.Error("h moves again")
+	}
+}
+
+// esc ends flash with the focus where it was.
+func TestFlashEsc(t *testing.T) {
+	m, _ := press(t, psized(flashSrc, 232, 50), "l")
+	was := m.focus
+	m = typed(t, m, "sal")
+	if m, _ = press(t, m, "esc"); m.mode != browsing || m.focus != was {
+		t.Errorf("mode %v focus %s, was %s", m.mode, m.focus, was)
+	}
+}
+
+// The labels are the ones drawn at the last key; cards gone since are no target (ignored, still
+// flashing), and a poll adding cards does not move a label to another card.
+func TestFlashFrozenAndGone(t *testing.T) {
+	src := &mutSrc{ss: slices.Clone([]store.Session(flashSrc))}
+	m := typed(t, psized(src, 232, 50), "sb")
+	h, _ := hitOf(m, "b1")
+	label := h.label
+	src.ss = append([]store.Session{{ID: "a0", Name: "bbb", GroupKey: "/f", CWD: "/f", ContextPct: -1}}, src.ss...)
+	_ = m.View()
+	if m, _ = press(t, m, label); m.focus != "b1" || m.mode != browsing {
+		t.Errorf("label %q was Bravo's when drawn: focus %s", label, m.focus)
+	}
+	m = typed(t, psized(src, 232, 50), "sb")
+	h, _ = hitOf(m, "b1")
+	src.ss = slices.DeleteFunc(slices.Clone(src.ss), func(s store.Session) bool { return s.ID == "b1" })
+	before := m.focus
+	if m, _ = press(t, m, h.label); m.mode != flashing || m.focus != before {
+		t.Errorf("Bravo left: ignored, still flashing; mode %v focus %s", m.mode, m.focus)
+	}
+}
+
+// Under a kept filter only the cards shown take part; the group the filter opened is searched too.
+func TestFlashUnderFilter(t *testing.T) {
+	m, _ := press(t, psized(flashSrc, 232, 50), "f", "/") // /g folded
+	m = typeKeys(t, m, "a")                               // alpha, alps, Bravo (a), 告警会话 (main)
+	m, _ = press(t, m, "enter")
+	m = typed(t, m, "sbr")
+	if len(m.flash.ms) != 1 || m.flash.ms[0].id != "b1" {
+		t.Errorf("hits %v", labelsOf(m))
+	}
+	m, _ = press(t, m, "backspace", "backspace")
+	m = typed(t, m, "lp")
+	if _, ok := hitOf(m, "a1"); !ok {
+		t.Errorf("alpha, in the group the filter opened: %v", labelsOf(m))
+	}
+	m, _ = press(t, psized(flashSrc, 232, 50), "f") // no filter: /g folded, its title is a target
+	m = typed(t, m, "s/g")
+	h, ok := hitOf(m, headerID("/g"))
+	if !ok {
+		t.Fatalf("a folded title is a target: %v", labelsOf(m))
+	}
+	if m, _ = press(t, m, h.label); m.focus != headerID("/g") {
+		t.Errorf("focus %q", m.focus)
+	}
+}
+
+// Only what is in the window: a card whose top border is on screen.
+func TestFlashOnlyOnScreen(t *testing.T) {
+	m := typed(t, column(10, 20), "s")
+	m = typed(t, m, "n")
+	if len(m.flash.ms) == 0 || len(m.flash.ms) >= 10 {
+		t.Fatalf("hits %v", labelsOf(m))
+	}
+	onScreen(t, m)
+	end := typed(t, mustPress(t, column(10, 20), "j", "j", "j", "j", "j", "j", "j", "j", "j"), "sn")
+	if _, ok := hitOf(end, "x00"); ok {
+		t.Errorf("scrolled away: %v", labelsOf(end))
+	}
+	if _, ok := hitOf(end, "x09"); !ok {
+		t.Errorf("the focused one: %v", labelsOf(end))
+	}
+	onScreen(t, end)
+}
+
+func mustPress(t *testing.T, m Model, keys ...string) Model {
+	m, _ = press(t, m, keys...)
+	return m
+}
+
+// Hits are drawn on the cards' rows only: after a poll moves the cards, the drawn hits (frozen) never
+// land on the top bar, the message line or the footer, at any height.
+func TestFlashDrawSafe(t *testing.T) {
+	mk := func(id, name string) store.Session {
+		return store.Session{ID: id, Name: name, GroupKey: "/g", TmuxPane: "%1", Status: "idle", ContextPct: -1}
+	}
+	for h := 8; h <= 34; h += 3 {
+		for fi := 0; fi < 10; fi += 3 {
+			for _, apply := range []func([]store.Session) []store.Session{
+				func(ss []store.Session) []store.Session { return append([]store.Session{mk("y0", "000")}, ss...) },
+				func(ss []store.Session) []store.Session { return ss[3:] },
+				func(ss []store.Session) []store.Session {
+					return append(slices.Clone(ss), mk("y1", "n10"), mk("y2", "n11"))
+				},
+			} {
+				var ss []store.Session
+				for i := range 10 {
+					ss = append(ss, mk(fmt.Sprintf("x%02d", i), fmt.Sprintf("n%02d", i)))
+				}
+				src := &mutSrc{ss: slices.Clone(ss)}
+				m := psized(src, 60, h)
+				for range fi {
+					m, _ = press(t, m, "j")
+				}
+				m = typed(t, m, "sn")
+				src.ss = apply(slices.Clone(ss))
+				lines := strings.Split(ansi.Strip(m.View()), "\n")
+				if len(lines) != h || !strings.HasPrefix(lines[0], " agmux") || lines[h-2] != " s n▏" || !strings.HasPrefix(lines[h-1], " flash:") {
+					t.Errorf("h=%d focus %d: %d lines, top %q msg %q foot %q", h, fi, len(lines), lines[0], lines[h-2], lines[h-1])
+				}
+			}
+		}
+	}
+}
+
+// Rows weigh a whole width: a hit one row down is farther than one in the next column.
+func TestFlashDistanceWeighsRows(t *testing.T) {
+	ss := staticSrc{
+		{ID: "n1", Name: "n1", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%1"},
+		{ID: "n2", Name: "n2", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%2"},
+		{ID: "n3", Name: "n3", GroupKey: "/b", CWD: "/b", ContextPct: -1, TmuxPane: "%3"},
+	}
+	m := typed(t, psized(ss, 232, 50), "sn")
+	var order []string
+	for _, h := range m.flash.ms {
+		order = append(order, h.id)
+	}
+	if want := []string{"n1", "n3", "n2"}; !reflect.DeepEqual(order, want) { // n3: next column, same row; n2: one card down
+		t.Errorf("order %v, want %v", order, want)
+	}
+}
+
+// A group's path too long for its column is searched as it is drawn, with its ellipsis.
+func TestFlashFindsInTruncatedTitle(t *testing.T) {
+	long := "/very/long/path/" + strings.Repeat("a", 60) + "/zzzend"
+	ss := staticSrc{{ID: "x", Name: "x", GroupKey: long, CWD: long, ContextPct: -1, TmuxPane: "%1"}}
+	m := typed(t, psized(ss, 60, 20), "szzz")
+	if h, ok := hitOf(m, "x"); !ok || h.text != "zzz" {
+		t.Fatalf("hits %v", labelsOf(m))
+	}
+	onScreen(t, m)
+	// 30 a's are in the path, no more than 19 in a row on screen: the cut-out middle isn't found
+	m, _ = press(t, psized(ss, 60, 20), "f") // folded: the title as a card-less line
+	if m = typed(t, m, "szzz"); len(m.flash.ms) != 1 || m.flash.ms[0].id != headerID(long) {
+		t.Fatalf("folded: %v", labelsOf(m))
+	}
+	onScreen(t, m)
+	m, _ = press(t, psized(ss, 60, 20), "s")
+	m.flash.pat = strings.Repeat("a", 25)
+	if m.flashScan(); len(m.flash.ms) != 0 {
+		t.Errorf("what the middle truncation hid isn't there to find: %v", labelsOf(m))
+	}
+}
+
+// Only plain characters go onto the pattern: not alt+key, not a paste, not a control character.
+func TestFlashOnlyPlainText(t *testing.T) {
+	m, _ := press(t, psized(flashSrc, 232, 50), "s")
+	for _, k := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("a"), Alt: true},
+		{Type: tea.KeyRunes, Runes: []rune("alp"), Paste: true},
+		{Type: tea.KeyRunes, Runes: []rune("a"), Paste: true},
+		{Type: tea.KeyRunes, Runes: []rune{'\x01'}},
+		{Type: tea.KeyRunes, Runes: []rune{'‮'}},
+	} {
+		tm, _ := m.Update(k)
+		if m = tm.(Model); m.flash.pat != "" || m.mode != flashing {
+			t.Errorf("%v: pattern %q mode %v", k, m.flash.pat, m.mode)
+		}
+	}
+	if m, _ = press(t, m, " "); m.flash.pat != " " { // a space is text: names have them
+		t.Errorf("space: %q", m.flash.pat)
+	}
+}
+
+// Each s starts clean; esc leaves nothing behind.
+func TestFlashStartsClean(t *testing.T) {
+	m := typed(t, psized(flashSrc, 232, 50), "sal")
+	m, _ = press(t, m, "esc", "s")
+	if m.flash.pat != "" || len(m.flash.ms) != 0 {
+		t.Errorf("pattern %q hits %v", m.flash.pat, labelsOf(m))
+	}
+}
+
+// What is drawn: the hit in the match color on dimmed text, its label (focus color, dark) on the
+// next cell; the rest of the board muted.
+func TestFlashDraws(t *testing.T) {
+	trueColor(t)
+	m := typed(t, psized(flashSrc, 232, 50), "sbr")
+	h, _ := hitOf(m, "b1")
+	v := m.View()
+	if !strings.Contains(v, matched("Br")) || !strings.Contains(v, flashLabel(h.label)) {
+		t.Errorf("hit and label are drawn:\n%q", strings.Split(v, "\n")[3])
+	}
+	line := strings.Split(ansi.Strip(v), "\n")[1+h.y]
+	if got := ansi.Cut(line, h.x+h.w, h.x+h.w+1); got != h.label {
+		t.Errorf("the label sits on the cell after the hit: %q, want %q", got, h.label)
+	}
+	if strings.Contains(v, fg(cName, "alpha")) {
+		t.Error("the rest is dimmed")
+	}
+}
+
+// Resizing while flashing reads the hits again, so they are on the new window, not outside it.
+func TestFlashResize(t *testing.T) {
+	m := typed(t, column(10, 34), "sn")
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 10})
+	m = tm.(Model)
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if len(lines) != 10 || lines[8] != " s n▏" {
+		t.Fatalf("%d lines, msg %q", len(lines), lines[8])
+	}
+	onScreen(t, m)
+	for _, h := range m.flash.ms {
+		if h.y < 0 || h.y >= 7 {
+			t.Errorf("hit %+v outside the window", h)
+		}
 	}
 }

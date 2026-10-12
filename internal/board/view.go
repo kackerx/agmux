@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -528,18 +529,124 @@ func scrollOff(rects []rect, focus string, bodyH int) int {
 // flashAlphabet: home row first, as flash.tmux and sqlmux; then the same in upper case.
 const flashAlphabet = "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM"
 
-// flashLabels gives the cards (and folded titles) labels, nearest to the focused one first:
-// rows weigh a whole width w (|dy|*w + |dx|), ties go by screen order. Past 52, no label.
-func flashLabels(rects []rect, focus string, w int) map[string]string {
-	var f rect
-	for _, r := range rects {
-		if r.id == focus {
-			f = r
+// flashMatch is a place the flash pattern is on screen: the text of a card's name or branch, or
+// of a group's path, from column x of body line y, w cells wide. id is where the focus goes when
+// its label is pressed; label is "" when there are no letters left for it.
+type flashMatch struct {
+	id      string
+	y, x, w int
+	text    string // the hit as drawn
+	label   string
+}
+
+// cluster is a grapheme as drawn: its text, the column it starts at in its string, its width.
+type cluster struct {
+	s    string
+	x, w int
+}
+
+func clustersOf(text string) []cluster {
+	var cs []cluster
+	x := 0
+	g := uniseg.NewGraphemes(text)
+	for g.Next() {
+		cs = append(cs, cluster{g.Str(), x, g.Width()})
+		x += g.Width()
+	}
+	return cs
+}
+
+// findAll is where pat (lower case) starts in cs, ignoring case: every start, overlapping ones too.
+func findAll(cs []cluster, pat []rune) []int {
+	var at []int
+	for i := 0; i+len(pat) <= len(cs); i++ {
+		ok := true
+		for j, p := range pat {
+			r := []rune(cs[i+j].s)
+			if len(r) != 1 || unicode.ToLower(r[0]) != p { // a multi-rune grapheme is never a typed character
+				ok = false
+				break
+			}
+		}
+		if ok {
+			at = append(at, i)
 		}
 	}
-	dist := func(r rect) int { return abs(r.y-f.y)*w + abs(r.x-f.x) }
-	rs := slices.Clone(rects)
-	slices.SortStableFunc(rs, func(a, b rect) int {
+	return at
+}
+
+// flashScan reads the pattern off the board as drawn, as flash.nvim does: in each visible card's
+// name or branch, and in each visible group's path, the first hit; labels go to the hits nearest
+// the focused card first. A label is never the character after any hit (not only the ones taken),
+// or typing on would be taken for pressing it. off and bodyH are the window onto the body;
+// rects are the cards and folded titles as laid out for width cardsW.
+func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW int, now time.Time) []flashMatch {
+	p := []rune(pat)
+	for i, r := range p {
+		p[i] = unicode.ToLower(r)
+	}
+	if len(p) == 0 {
+		return nil
+	}
+	at := map[string]rect{}
+	for _, r := range rects {
+		at[r.id] = r
+	}
+	var ms []flashMatch
+	skip := map[rune]bool{}
+	found := false
+	scan := func(text string, x0, y int, id string) {
+		if y < 0 || y >= bodyH {
+			return
+		}
+		cs := clustersOf(text)
+		for _, i := range findAll(cs, p) {
+			if j := i + len(p); j < len(cs) {
+				if r := []rune(cs[j].s); len(r) == 1 {
+					skip[unicode.ToLower(r[0])] = true
+				}
+			}
+			if found {
+				continue
+			}
+			found = true
+			last := cs[i+len(p)-1]
+			ms = append(ms, flashMatch{id: id, y: y, x: x0 + cs[i].x, w: last.x + last.w - cs[i].x, text: joinClusters(cs[i : i+len(p)])})
+		}
+	}
+	icon := ansi.StringWidth("\ue725 ")
+	for _, g := range gs {
+		count := fmt.Sprintf(" (%d)", len(g.sessions))
+		if hr, ok := at[headerID(g.key)]; ok { // folded: the title is the target
+			found = false
+			scan(midTrunc(tildePath(g.key), hr.w-2-len(count)), hr.x+2, hr.y-off, hr.id)
+			continue
+		}
+		for i, s := range g.sessions {
+			r, ok := at[s.ID]
+			if !ok {
+				continue
+			}
+			if i == 0 { // an open group's title: the first card is where it goes
+				found = false
+				scan(midTrunc(tildePath(g.key), r.w-2-len(count)), r.x+2, r.y-1-off, s.ID)
+			}
+			tw := r.w - 4 - avatar.Width - 2
+			x0, y := r.x+2+avatar.Width+2, r.y-off
+			found = false
+			rw := 0
+			if t := relTime(s.LastActivity, now); t != "" {
+				rw = ansi.StringWidth(t) + 1
+			}
+			scan(ansi.Truncate(s.Name, max(tw-rw, 0), "…"), x0, y+1, s.ID)
+			if s.Branch != "" {
+				scan(strings.TrimPrefix(ansi.Truncate("\ue725 "+s.Branch, tw, "…"), "\ue725 "), x0+icon, y+2, s.ID)
+			}
+		}
+	}
+	cur := at[focus]
+	dist := func(m flashMatch) int { return abs(m.y-(cur.y-off))*cardsW + abs(m.x-cur.x) }
+	slices.SortStableFunc(ms, func(a, b flashMatch) int {
 		if d := dist(a) - dist(b); d != 0 {
 			return d
 		}
@@ -548,11 +655,26 @@ func flashLabels(rects []rect, focus string, w int) map[string]string {
 		}
 		return a.x - b.x
 	})
-	labels := map[string]string{}
-	for i, r := range rs[:min(len(rs), len(flashAlphabet))] {
-		labels[flashAlphabet[i:i+1]] = r.id
+	var labels []string
+	for _, r := range flashAlphabet {
+		if !skip[unicode.ToLower(r)] {
+			labels = append(labels, string(r))
+		}
 	}
-	return labels
+	for i := range ms {
+		if i < len(labels) {
+			ms[i].label = labels[i]
+		}
+	}
+	return ms
+}
+
+func joinClusters(cs []cluster) string {
+	var b strings.Builder
+	for _, c := range cs {
+		b.WriteString(c.s)
+	}
+	return b.String()
 }
 
 func abs(n int) int { return max(n, -n) }

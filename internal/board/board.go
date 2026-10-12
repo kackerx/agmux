@@ -69,7 +69,7 @@ const (
 	browsing mode = iota
 	confirmKill
 	pickAvatar // the avatar list is open; it has the keys
-	flashing   // s: every card wears a label; pressing one moves the focus there
+	flashing   // s: type to find text on the board, press a hit's label to put the focus there
 )
 
 type Model struct {
@@ -90,7 +90,10 @@ type Model struct {
 	searching  bool   // the filter's input box has the keys
 	searchFrom string // the focus when / was pressed: esc puts it back
 
-	labels map[string]string // flash label → card (or folded title) ID, fixed when s was pressed
+	flash struct {
+		pat string       // what was typed
+		ms  []flashMatch // its hits as the last key left them: a poll may move the cards, the labels stay
+	}
 
 	preview   bool       // p: show the focused pane on the right
 	pv        previewMsg // the latest capture
@@ -145,6 +148,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pvFocus && !m.previewOn() { // not "session is gone": it isn't
 			m.pvFocus = false
 			m = m.say(cMuted, "preview closed: terminal too narrow")
+		}
+		if m.mode == flashing { // the hits were read off the old size
+			m.flashScan()
 		}
 	case frameMsg:
 		m.frame++
@@ -328,7 +334,7 @@ func (m *Model) lock(s store.Session) {
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// the preview has the keys: everything but leave_preview's keys (tab) goes to the locked
-	// pane, tab and ctrl+c included (Claude Code completes and interrupts with them)
+	// pane, ctrl+c and shift+tab included (Claude Code interrupts and cycles modes with them)
 	if m.pvFocus {
 		if m.cfg.Is("leave_preview", k.String()) || !m.passThrough() && k.Type == tea.KeyEsc {
 			m.pvFocus = false
@@ -365,14 +371,28 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.kill(m.target)
-	case flashing: // a label moves the focus and ends it, esc just ends it; other keys do nothing
-		id, ok := m.labels[k.String()]
-		gs, _, _, _ := m.current()
-		// a card gone since s (a poll) is no target: the key is ignored like any non-label
-		if ok && slices.ContainsFunc(m.items(gs), func(ids []string) bool { return slices.Contains(ids, id) }) {
-			m.mode, m.focus, m.msg = browsing, id, ""
-		} else if k.Type == tea.KeyEsc {
+	case flashing: // text narrows the hits, a hit's label moves the focus there and ends it
+		switch {
+		case k.Type == tea.KeyEsc:
 			m.mode = browsing
+		case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
+			if r := []rune(m.flash.pat); len(r) > 0 {
+				m.flash.pat = string(r[:len(r)-1])
+				m.flashScan()
+			}
+		case (k.Type == tea.KeyRunes || k.Type == tea.KeySpace) && !k.Alt && !k.Paste && len(k.Runes) == 1 && unicode.IsPrint(k.Runes[0]):
+			i := slices.IndexFunc(m.flash.ms, func(x flashMatch) bool { return x.label == string(k.Runes) })
+			if i < 0 {
+				m.flash.pat += string(k.Runes)
+				m.flashScan()
+				break
+			}
+			id := m.flash.ms[i].id
+			gs, _, _, _ := m.current()
+			// a card gone since the label was drawn (a poll) is no target: ignored, still flashing
+			if slices.ContainsFunc(m.items(gs), func(ids []string) bool { return slices.Contains(ids, id) }) {
+				m.mode, m.focus, m.msg = browsing, id, ""
+			}
 		}
 		return m, nil
 	case pickAvatar: // other keys do nothing while the list is open
@@ -405,6 +425,14 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.do(m.keymap[k.String()])
+}
+
+// flashScan reads the flash pattern off the board as it is now (see flashScan in view.go).
+func (m *Model) flashScan() {
+	gs, _, _, _ := m.current()
+	_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.foldedNow(), nil)
+	bodyH := max(m.h-3, 1)
+	m.flash.ms = flashScan(gs, rects, m.focus, m.flash.pat, scrollOff(rects, m.focus, bodyH), bodyH, m.cardsW(), m.now())
 }
 
 // visibleFocus is the focus once the filter is gone: a card that f had folded away is not there to
@@ -507,12 +535,8 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		if m.w == 0 {
 			return m, nil
 		}
-		// only what is on screen: a card whose top border is in the window
-		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.foldedNow(), nil)
-		bodyH := max(m.h-3, 1)
-		off := scrollOff(rects, m.focus, bodyH)
-		rects = slices.DeleteFunc(rects, func(r rect) bool { return r.y < off || r.y >= off+bodyH })
-		m.mode, m.labels, m.msg = flashing, flashLabels(rects, m.focus, m.cardsW()), ""
+		m.mode, m.msg = flashing, ""
+		m.flash.pat, m.flash.ms = "", nil // nothing is labelled until a character is typed
 		return m, nil
 	case "preview":
 		if m.w < previewMinTerm && !m.preview { // too narrow to open; an open one still closes
@@ -862,7 +886,7 @@ func (m Model) View() string {
 		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.passThrough())
 	}
 	ss, hits := m.shown()
-	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits)
+	out, _, _ := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits)
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
 		cursor := ""
 		if m.searching {
@@ -875,18 +899,18 @@ func (m Model) View() string {
 		}
 		out = strings.Join(lines, "\n")
 	}
-	if m.mode == flashing { // the board dims, every card shows its label on its top border
+	if m.mode == flashing && m.h >= 4 { // the board dims; each hit is a match, its label on the cell after it
 		lines := strings.Split(out, "\n")
 		for i := 1; i < len(lines)-2; i++ {
 			lines[i] = fg(cMuted, ansi.Strip(lines[i]))
 		}
-		for label, id := range m.labels {
-			for _, r := range rects {
-				if y := 1 + r.y - off; r.id == id && y >= 1 && y < len(lines)-2 {
-					lines[y] = put(lines[y], r.x+1, flashLabel(label))
-				}
+		for _, h := range m.flash.ms { // read off the window as it is: always between the bars
+			lines[1+h.y] = put(lines[1+h.y], h.x, matched(h.text))
+			if h.label != "" {
+				lines[1+h.y] = put(lines[1+h.y], h.x+h.w, flashLabel(h.label))
 			}
 		}
+		lines[len(lines)-2] = fg(cFocus, " s ") + m.flash.pat + "▏" // what has been typed
 		out = strings.Join(lines, "\n")
 	}
 	if m.query != "" { // a kept filter: what moves around it (the states below replace the whole line)
@@ -899,7 +923,7 @@ func (m Model) View() string {
 	}
 	switch { // the footer is always the last line
 	case m.mode == flashing:
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " jump: press a label · esc cancel")
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " flash: type to narrow · label to jump · esc")
 	case m.searching:
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " enter keep the filter · esc clear it")
 	case m.mode == pickAvatar:
