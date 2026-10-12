@@ -105,6 +105,14 @@ class Keys(Base):
         t = self.board(); t.keys("q"); time.sleep(0.5); self.assertTrue(t.alive(), "q is no longer quit")
         t.keys("z"); self.assertEqual(t.exit_status(), 0)
 
+    def test_ctrl_c_on_the_cards_always_quits_even_if_quit_is_rebound(self):  # orchestrator: not configurable; in the pass-through it goes to the pane (PreviewKeys)
+        for cfg in ("", '[keys]\nquit = ["z"]\n'):
+            with self.subTest(config=cfg):
+                self.write(cfg)
+                t = self.board(); t.keys("C-c")
+                self.assertEqual(t.exit_status(), 0); self.assertEqual(self.env.actions(), [])
+                t.close()
+
     def test_modifier_key_binding(self):  # ctrl+<letter> is a valid key name
         self.write('[keys]\ndown = ["ctrl+n"]\n')
         t = self.board(); t.keys("C-n"); time.sleep(0.3)
