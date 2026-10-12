@@ -397,7 +397,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if k.String() == "esc" && m.query != "" { // a kept filter goes first (alt+esc, two quick escs, doesn't)
-		m.current() // the focus stays on the card it is on now, not on one the filter had hidden
+		if ss, _ := m.shown(); len(ss) > 0 {
+			m.current() // the focus stays on the card it is on now, not on one the filter had hidden
+		} // with no match there is no such card: the focus is where it was
 		m.query = ""
 		m.focus = m.visibleFocus()
 		return m, nil
@@ -420,9 +422,9 @@ func (m Model) visibleFocus() string {
 // on the first card it shows; esc / ctrl+c drop it, the focus back where it was.
 func (m Model) searchKey(k tea.KeyMsg) Model {
 	switch k.Type {
-	case tea.KeyEnter: // onto the best match; with none, the focus stays
+	case tea.KeyEnter: // onto the best match; with no query or no match, the focus stays
 		m.searching = false
-		if ss, _ := m.shown(); len(ss) > 0 {
+		if ss, _ := m.shown(); m.query != "" && len(ss) > 0 {
 			m.focus = ss[0].ID
 		}
 	case tea.KeyEsc, tea.KeyCtrlC:

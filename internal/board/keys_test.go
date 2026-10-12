@@ -2605,3 +2605,31 @@ func TestSearchOpensFoldedForEverything(t *testing.T) {
 		t.Errorf("s: labels %v", m.labels)
 	}
 }
+
+var tieSrc = staticSrc{
+	{ID: "b1", Name: "x1", GroupKey: "/b", CWD: "/b", ContextPct: -1, TmuxPane: "%1"},
+	{ID: "a1", Name: "x2", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%2"},
+	{ID: "a2", Name: "x3", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%3"},
+}
+
+// enter with no query (never typed, or backspaced to nothing) only closes the box.
+func TestSearchEmptyEnterKeepsFocus(t *testing.T) {
+	m, _ := press(t, psized(tieSrc, 232, 50), "j") // a2
+	if m, _ = press(t, m, "/", "enter"); m.focus != "a2" || m.searching {
+		t.Errorf("/ enter: focus %q searching %v", m.focus, m.searching)
+	}
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "x")
+	if m, _ = press(t, m, "backspace", "enter"); m.focus != "a2" {
+		t.Errorf("backspaced to empty, enter: focus %q", m.focus)
+	}
+}
+
+// A kept filter that matches nothing, then esc: the focus is where it was before.
+func TestSearchNoMatchEscKeepsFocus(t *testing.T) {
+	m, _ := press(t, psized(tieSrc, 232, 50), "j", "/") // a2
+	m = typeKeys(t, m, "qqq")
+	if m, _ = press(t, m, "enter", "esc"); m.focus != "a2" || m.query != "" {
+		t.Errorf("focus %q query %q", m.focus, m.query)
+	}
+}
