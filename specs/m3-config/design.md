@@ -28,9 +28,11 @@
   [colors]
   working = "#ffb86c"   idle = "#585b70"   done = "#50fa7b"   attention = "#ff6188"
   focus = "#ff8ebe"     name = "5"         branch = "12"      model = "14"   effort = "13"   dir = "11"
-  bar_low = "#a6e3a1"   bar_mid = "#f9e2af"   bar_high = "#ff6188"   bar_empty = "#585b70"   muted = "#45475a"
+  bar_low = "#a6e3a1"   bar_mid = "#f9e2af"   bar_high = "#ff6188"   bar_empty = "#585b70"
+  muted = "#6272a4"     # 次要文字：相对时间、idle 状态词、底栏、(n)、分隔符
+  disabled = "#45475a"  # background 会话上置灰的底栏键
   ```
-  边框、状态词、眼睛闪红、上下文条、焦点都从这里取；`attention` 同时用于 waiting。
+  边框、状态词、眼睛闪红、上下文条、焦点都从这里取；`attention` 同时用于 waiting；`idle` 同时是预览框边框色。默认值 = 现在的样子，不改观感。
 - 头像 `[avatars]`：
   ```toml
   [avatars]
