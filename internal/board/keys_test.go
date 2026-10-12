@@ -454,8 +454,14 @@ func TestSwitchTo(t *testing.T) {
 				{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients,
 				{"tmux", "switch-client", "-c", "/dev/outer", "-t", pane},
 			}, ""},
-		{"no usable client: error, nothing switched", map[string]string{"TMUX_PANE": "%2"},
-			"9\t/dev/nested\tfl-1\n",
+		{"ordinary pane: only own-session clients → most recent of them, no detach", map[string]string{"TMUX_PANE": "%2"},
+			"4\t/dev/old\tfl-1\n9\t/dev/mine\tfl-1\n",
+			[][]string{
+				{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients,
+				{"tmux", "switch-client", "-c", "/dev/mine", "-t", pane},
+			}, ""},
+		{"no client at all: error, nothing switched", map[string]string{"TMUX_PANE": "%2"},
+			"",
 			[][]string{{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients}, "AGMUX_CLIENT"},
 	} {
 		r := &fakeRunner{tmuxOut: map[string]string{"list-clients": c.clients, "display-message": "fl-1\n"}}
@@ -468,7 +474,7 @@ func TestSwitchTo(t *testing.T) {
 
 // No client to switch: the reason shows on the board and agmux keeps running.
 func TestSwitchNoClientStays(t *testing.T) {
-	r := &fakeRunner{tmuxOut: map[string]string{"list-clients": "9\t/dev/nested\tfl-1\n", "display-message": "fl-1\n"}}
+	r := &fakeRunner{tmuxOut: map[string]string{"list-clients": "", "display-message": "fl-1\n"}}
 	m := newModel(r)
 	m.getenv = func(k string) string { return map[string]string{"TMUX_PANE": "%2"}[k] }
 	m, quit := press(t, m, "enter")

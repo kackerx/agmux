@@ -388,8 +388,9 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 // switchTo points the user's tmux client at pane. Inside a popup tmux has no current client
 // (a bare switch-client moves whichever was active last, and in a nested fl-* float that is the
 // float's own client), so the client is chosen explicitly: $AGMUX_CLIENT, else the most recently
-// active client not attached to agmux's own session. When agmux sits in a session that other
-// clients show (the nested float), that session is detached afterwards so the float closes.
+// active client not attached to agmux's own session (or, when that leaves none, agmux runs in an
+// ordinary pane: the most recent client of its own session). When agmux sits in a session that
+// other clients show (the nested float), that session is detached afterwards so the float closes.
 const clientsFormat = "#{client_activity}\t#{client_name}\t#{client_session}"
 
 func switchTo(r Runner, getenv func(string) string, pane string) error {
@@ -417,12 +418,20 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 			clients = append(clients, cl{n, f[1], f[2]})
 		}
 	}
-	client := getenv("AGMUX_CLIENT")
+	client, fallback := getenv("AGMUX_CLIENT"), false
 	if client == "" {
 		best := -1
 		for _, c := range clients {
 			if c.session != own && c.activity > best {
 				client, best = c.name, c.activity
+			}
+		}
+	}
+	if client == "" { // agmux in an ordinary pane: the user's own client is the one showing it
+		best := -1
+		for _, c := range clients {
+			if c.activity > best {
+				client, best, fallback = c.name, c.activity, true
 			}
 		}
 	}
@@ -433,7 +442,7 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 		return err
 	}
 	for _, c := range clients {
-		if own != "" && c.session == own && c.name != client {
+		if !fallback && own != "" && c.session == own && c.name != client {
 			_, err := r.Tmux("detach-client", "-s", own)
 			return err
 		}
