@@ -39,8 +39,8 @@ class FakeTmux(unittest.TestCase):
         self.t.keys("Enter")
         c = self.tcalls(4)
         self.assertEqual(c, [["display-message", "-p", "-t", "%9", "#{session_name}"], ["list-clients", "-F", CLIENTS_FMT],
-                             ["show-environment", "-t", "fl-own", "AGMUX_CLIENT"], ["switch-client", "-c", "outer-2", "-t", A1_PANE]],
-                         "own session via TMUX_PANE; no $AGMUX_CLIENT -> ask the session environment (unset here); most recent client NOT attached to the own session; switch")
+                             ["show-environment", "-h", "-t", "fl-own", "AGMUX_CLIENT"], ["switch-client", "-c", "outer-2", "-t", A1_PANE]],
+                         "own session via TMUX_PANE; no $AGMUX_CLIENT -> ask the HIDDEN session environment (-h; unset here); most recent client NOT attached to the own session; switch")
         self.assertEqual(self.t.exit_status(), 0); time.sleep(0.3)
         self.assertEqual(len(self.env.tmux_calls()), 4, "without $AGMUX_CLIENT nothing is detached (the heuristic cannot tell a float from a real terminal)")
         self.assertEqual(self.env.calls(), [], "no ccmux switch any more")
@@ -55,10 +55,26 @@ class FakeTmux(unittest.TestCase):
                          "$AGMUX_CLIENT is used as is; then each OTHER client of agmux's own session is detached by name (never `-s`)")
         self.assertEqual(self.t.exit_status(), 0)
 
-    def test_agmux_client_that_lives_in_the_own_session_is_not_detached(self):
+    def test_agmux_client_inside_the_own_session_is_rejected_and_the_heuristic_takes_over(self):
+        """T15 review: a named client attached to agmux's own session is the float's inner client (or a reused tty name): treat it as unset"""
         self.start(session="fl-own", clients=[(100, "outer-1", "main"), (500, "float", "fl-own")], extra="AGMUX_CLIENT=float")
         self.t.keys("Enter"); c = self.tcalls(3); time.sleep(0.4)
-        self.assertEqual([x[0] for x in self.env.tmux_calls()], ["display-message", "list-clients", "switch-client"], "the chosen client is the only one of its session")
+        self.assertEqual(self.env.tmux_calls()[2], ["switch-client", "-c", "outer-1", "-t", A1_PANE], "not the float itself: the heuristic picks the outside client")
+        self.assertEqual([x[0] for x in self.env.tmux_calls()], ["display-message", "list-clients", "switch-client"], "and nothing is detached")
+
+    def test_agmux_client_that_no_longer_exists_falls_back_without_detaching(self):
+        self.start(session="fl-own", clients=[(100, "outer-1", "main"), (300, "outer-2", "work"), (500, "float", "fl-own")], extra="AGMUX_CLIENT=/dev/gone")
+        self.t.keys("Enter"); self.tcalls(3); time.sleep(0.4)
+        self.assertEqual([x[0] for x in self.env.tmux_calls()], ["display-message", "list-clients", "switch-client"], "process value is not asked again from the session, and not detached")
+        self.assertEqual(self.env.tmux_calls()[2], ["switch-client", "-c", "outer-2", "-t", A1_PANE])
+
+    def test_session_environment_value_is_validated_too(self):
+        for label, val in (("not attached", "AGMUX_CLIENT=/dev/gone"), ("inside the own session", "AGMUX_CLIENT=float")):
+            with self.subTest(label):
+                self.start(session="fl-own", session_env=val, clients=[(100, "outer-1", "main"), (300, "outer-2", "work"), (500, "float", "fl-own")])
+                self.t.keys("Enter"); self.tcalls(4); time.sleep(0.4)
+                self.assertEqual([x[0] for x in self.env.tmux_calls()], ["display-message", "list-clients", "show-environment", "switch-client"])
+                self.assertEqual(self.env.tmux_calls()[3], ["switch-client", "-c", "outer-2", "-t", A1_PANE], "heuristic, no detach"); self.t.close()
 
     # ---- T15: AGMUX_CLIENT from the session environment -------------------------------------------------------------------------------------
     def test_session_environment_names_the_client(self):
@@ -66,7 +82,7 @@ class FakeTmux(unittest.TestCase):
                    clients=[(100, "/dev/other", "work"), (200, "/dev/outer", "main"), (500, "float", "fl-own"), (400, "float-2", "fl-own")])
         self.t.keys("Enter"); c = self.tcalls(6)
         self.assertEqual(c, [["display-message", "-p", "-t", "%9", "#{session_name}"], ["list-clients", "-F", CLIENTS_FMT],
-                             ["show-environment", "-t", "fl-own", "AGMUX_CLIENT"], ["switch-client", "-c", "/dev/outer", "-t", A1_PANE],
+                             ["show-environment", "-h", "-t", "fl-own", "AGMUX_CLIENT"], ["switch-client", "-c", "/dev/outer", "-t", A1_PANE],
                              ["detach-client", "-t", "float"], ["detach-client", "-t", "float-2"]],
                          "the session's AGMUX_CLIENT is an exact choice: switch it, then detach the other clients of agmux's own session by name")
         self.assertEqual(self.t.exit_status(), 0)
@@ -93,7 +109,7 @@ class FakeTmux(unittest.TestCase):
             with self.subTest(own=repr(own)):
                 self.start(session=own, session_env="AGMUX_CLIENT=outer", clients=[(100, "outer", "main"), (500, "float", own)])
                 self.t.keys("Enter"); self.tcalls(5); time.sleep(0.4)
-                self.assertIn(["show-environment", "-t", own, "AGMUX_CLIENT"], self.env.tmux_calls()); self.t.close()
+                self.assertIn(["show-environment", "-h", "-t", own, "AGMUX_CLIENT"], self.env.tmux_calls()); self.t.close()
 
     def test_no_show_environment_without_an_own_session(self):  # no TMUX_PANE, or a stale one
         self.start(tmux_pane=None, session_env="AGMUX_CLIENT=outer", clients=[(100, "outer", "main")])
@@ -218,7 +234,7 @@ class FakeTmux(unittest.TestCase):
         self.assertEqual(self.preview_open_and_focused(), (True, False))
         self.t.keys("s"); time.sleep(0.5)
         self.assertEqual(self.preview_open_and_focused(), (True, True), "still open (s is not a toggle), now focused")
-        self.t.keys("Tab"); time.sleep(0.4)
+        self.t.keys("C-]"); time.sleep(0.4)
         self.assertEqual(self.preview_open_and_focused(), (True, False))
 
     def test_s_on_a_card_without_a_pane_does_nothing(self):
@@ -238,6 +254,22 @@ class FakeTmux(unittest.TestCase):
         t.keys("s"); time.sleep(0.5)
         self.assertIn("at least 100 columns", "\n".join(r.text for r in t.snap()[-3:]))
         t.lit("zzz"); time.sleep(0.3); self.assertEqual(self.sent_text(), "")
+
+    def test_paste_goes_through_load_buffer_and_paste_buffer(self):
+        self.start()
+        self.t.keys("s"); time.sleep(0.6)
+        self.t.lit("\x1b[200~first line\nsecond; line\x1b[201~"); time.sleep(0.8)
+        c = [x for x in self.env.tmux_calls() if x[0] in ("load-buffer", "paste-buffer", "send-keys")]
+        self.assertEqual(c, [["load-buffer", "-b", "agmux", "-"], ["paste-buffer", "-p", "-d", "-b", "agmux", "-t", A1_PANE]],
+                         "a paste keeps bracketed paste: the text goes in through stdin, then paste-buffer -p -d; no send-keys")
+        self.assertEqual(self.env.tmux_stdin(), "first line\nsecond; line", "the buffer holds exactly what was pasted")
+
+    def test_forwarding_failure_is_shown_on_the_message_line(self):
+        self.start()
+        self.t.keys("s"); time.sleep(0.6)
+        (self.env.fake / "tmux.fail").write_text("send-keys")
+        self.t.lit("x"); time.sleep(0.8)
+        self.assertIn("boom from fake tmux", foot(self.t)); self.assertNotIn("second tmux line", self.t.text()); self.assertTrue(self.t.alive())
 
     def test_footer_says_reply(self):
         self.start()
@@ -372,7 +404,12 @@ class RealTmux(unittest.TestCase):
                     x["tmuxPane"] = pane
             self.env.write_show(S); self.pane = pane
         if via_session_env:  # the launcher's way (T15): the board is already running in the resident session; its process environment cannot be reached
-            tm("set-environment", "-t", "fl-x", "AGMUX_CLIENT", outer.name)
+            tm("set-environment", "-h", "-t", "fl-x", "AGMUX_CLIENT", outer.name)  # -h: hidden, so panes opened later do NOT inherit it as a process variable
+            probe = tm("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "fl-x", "sh -c 'env | grep -c ^AGMUX_CLIENT= > /tmp/agmux-e2e-probe.$$; sleep 1'").stdout.strip()
+            time.sleep(0.5)
+            leaked = subprocess.run("cat /tmp/agmux-e2e-probe.* 2>/dev/null; rm -f /tmp/agmux-e2e-probe.*", shell=True, capture_output=True, text=True).stdout.split()
+            self.assertEqual(leaked, ["0"], "a pane opened after `set-environment -h` must not have AGMUX_CLIENT in its process environment")
+            tm("kill-window", "-t", probe)
         pop = subprocess.Popen(["tmux", "-L", SOCK, "display-popup", "-c", outer.name, "-B", "-x", "0", "-y", "0", "-w", "190", "-h", "48", "-E",
                                 f"env -u TMUX tmux -L {SOCK} attach -t fl-x"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanup(lambda: pop.poll() is None and pop.kill())
@@ -431,7 +468,7 @@ class RealTmux(unittest.TestCase):
         self.assertTrue(wait(lambda: self.pane_text().count("你好 world") >= 2, 5), f"cat did not echo it:\n{self.pane_text()}")
         tm("send-keys", "-t", "fl-x", "-l", "--", "--help -x"); time.sleep(0.3); d("Enter")
         self.assertTrue(wait(lambda: self.pane_text().count("--help -x") >= 2, 5), self.pane_text())
-        d("Tab"); time.sleep(0.4); d("H")  # tab back to the cards, then the hand-over
+        d("C-]"); time.sleep(0.4); d("H")  # ctrl+] back to the cards, then the hand-over
         self.assertTrue(wait(lambda: self.pane_text().count("/handoff") >= 2, 5), self.pane_text())
         lines = [l for l in self.pane_text().splitlines() if l.strip()]
         self.assertEqual(lines[:6], ["你好 world", "你好 world", "--help -x", "--help -x", "/handoff", "/handoff"],

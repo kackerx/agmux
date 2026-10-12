@@ -69,6 +69,7 @@ if [ -e "$d/tmux.fail" ] && [ "$(cat "$d/tmux.fail")" = "$1" ]; then printf 'tmu
 case "$1" in
   display-message) if [ -e "$d/tmux.session" ]; then cat "$d/tmux.session"; else echo fl-own; fi; exit 0;;
   list-clients) [ -e "$d/tmux.clients" ] && cat "$d/tmux.clients"; exit 0;;
+  load-buffer) cat >> "$d/tmux.stdin"; exit 0;;
   show-environment) if [ -e "$d/tmux.env" ]; then cat "$d/tmux.env"; exit 0; else echo "unknown variable: $4" >&2; exit 1; fi;;
 esac
 exit 0
@@ -126,6 +127,10 @@ exit 0
         if not p.exists():
             return []
         return [[a for a in line.split("\x1f") if a != ""] for line in p.read_text().split("\n") if line]
+
+    def tmux_stdin(self):
+        p = self.fake / "tmux.stdin"
+        return p.read_text() if p.exists() else ""
 
     def tmux_times(self):
         p = self.fake / "tmux.times"

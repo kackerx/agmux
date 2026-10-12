@@ -20,13 +20,14 @@ def pane_text(pane, n=60):
 
 class PreviewBase(unittest.TestCase):
     W, H = 232, 50
+    PANES = (("a1", SEQ_CMD), ("a2", MARK_CMD), ("a3", CAT_CMD))  # session -> command of its real pane
 
     def setUp(self):
         tm("kill-server"); self.addCleanup(lambda: tm("kill-server"))
         self.env = Env(); self.addCleanup(self.env.cleanup); build_fixture(self.env)
         tm("start-server", ";", "set", "-g", "remain-on-exit", "off")
         self.panes = {}
-        for sid, cmd in (("a1", SEQ_CMD), ("a2", MARK_CMD), ("a3", CAT_CMD)):
+        for sid, cmd in self.PANES:
             tm("new-session", "-d", "-s", f"pane-{sid}", "-x", "100", "-y", "30", cmd)
             self.panes[sid] = tm("display", "-p", "-t", f"pane-{sid}", "#{pane_id}").stdout.strip()
         S = json.loads((self.env.fake / "show.json").read_text())
@@ -34,7 +35,8 @@ class PreviewBase(unittest.TestCase):
             if s["id"] in self.panes:
                 s["tmuxPane"] = self.panes[s["id"]]
         self.env.write_show(S)
-        self.assertTrue(wait(lambda: "line 200" in pane_text(self.panes["a1"]), 5), "seq pane not ready")
+        if self.PANES[0][1] == SEQ_CMD:
+            self.assertTrue(wait(lambda: "line 200" in pane_text(self.panes["a1"]), 5), "seq pane not ready")
         self.t = self.board(self.W, self.H)
 
     def board(self, w, h):
@@ -176,6 +178,16 @@ class Preview(PreviewBase):
         self.assertTrue(self.t.alive())
         self.assertTrue(wait(lambda: any("line 200" in x for x in self.pv_text()), 4), "back to normal after the resize\n" + self.t.text())
         self.t.keys("q"); self.assertEqual(self.t.exit_status(4), 0, "and it still quits cleanly")
+
+    def test_scrolled_back_and_then_a_tiny_terminal_does_not_crash(self):
+        """review: scrolled far back (offset > visible lines), then shrunk to <= 5 rows"""
+        self.open_preview()
+        self.t.wheel(PV_X + 20, 15, up=True, n=15); time.sleep(0.8)
+        for h in (8, 5, 4, 3, 2):
+            self.t.resize(232, h); time.sleep(0.5)
+            self.assertTrue(self.t.alive(), f"board died at height {h} after scrolling back:\n{self.t.text()}")
+        self.t.resize(232, 50); time.sleep(0.8)
+        self.assertTrue(self.t.alive()); self.t.keys("q"); self.assertEqual(self.t.exit_status(4), 0)
 
     def test_click_on_another_card_updates_the_preview_at_once(self):
         """review: a click moved the focus but the preview only changed at the next 500ms tick (so check several times at different tick phases)"""
