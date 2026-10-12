@@ -18,7 +18,7 @@ S1 只做 `agmux board`：全屏看板，在 tmux popup（fl-* 浮窗，约 180�
 Claude Code 每次刷新状态栏把 payload JSON 喂给 ~/.config/bin/claude-hud；在那脚本里加一行 `printf '%s' "$payload" > …/<session_id>.json` 落盘（这改动在 ~/.config 仓库，要用户批准）。
 agmux 按 `nativeSessionId` 找文件，取 JSON 路径 `context_window.used_percentage`（`rate_limits` 下也有同名字段，别取错）、模型、effort。百分比**截断**取整（29.6 → 29），和 claude-hud 一致。background 会话没有状态栏、没有 HUD 文件，永远显示 `--`，这是预期。HUD 文件 S1 不清理（每个几 KB）。
 写入方用 `printf > tmp && mv` 原子落盘，但 agmux 读到解析失败的文件仍按不存在处理，不报错。
-除 used_percentage / session_name 外，其余字段名未核实：拿到第一份真实 payload 再定，dev 先按文件不存在处理。
+除 used_percentage 外，模型 / effort 的字段名未核实：拿到第一份真实 payload 再定，在那之前不读。
 ### C. jsonl 兜底（只取模型）
 文件可达 16MB，不能整读：从末尾读最后 64KB，倒序找最后一条 `"type":"assistant"`，取 `message.model`。
 找不到（真机约 8%：末尾是大 attachment 或超长 assistant 行）就沿用该会话上一次轮询到的模型，store 里按会话 ID 缓存；首次就找不到显示空。
@@ -41,7 +41,8 @@ type Session struct {
 ## 头像【定 6×6】
 - `internal/avatar`：一组手绘 sprite，6 像素宽 × 6 像素高（半块字符渲染成 6 列 × 3 行，接近正方形），每个有 `ID`（如 `bot-01`）和 `Name`。S1 先画 6 个，像素风，参考 Claude Code 吉祥物。底边一条色带按 agentType 区分（claude 橙、codex 绿、其它灰）。
 - 分配：`Bindings` 接口 `Get(sessionID) (id string, ok bool)` / `Set(sessionID, id)`，S1 实现存 `$XDG_STATE_HOME/agmux/avatars.json`；没绑定时按会话 ID 的 hash 取模默认分配。S1 不做选头像 UI。
-- 眼睛表达状态：working 时每帧左右扫动；需要处理（`attentionType` 非空）时闪红；idle 时变暗。
+- 眼睛表达状态，优先级从高到低：需要处理（`attentionType` 非空或 status waiting）闪红 → working 扫动 → done 正常 → idle 变暗。
+- `avatars.json` 损坏：绑定按全无处理，错误文案（带路径和修复提示）显示在底栏，不退出。
 
 ## 布局与卡片【定】
 ```
