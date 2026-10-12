@@ -189,7 +189,7 @@ func TestErrorsGoToMessageLine(t *testing.T) {
 func TestMouse(t *testing.T) {
 	r := &fakeRunner{}
 	m := newModel(r)
-	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, nil)
+	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, nil, m.w, nil)
 	var b1 rect
 	for _, rc := range rects {
 		if rc.id == "b1" {
@@ -318,7 +318,7 @@ func TestBackgroundHintOnce(t *testing.T) {
 func TestFold(t *testing.T) {
 	r := &fakeRunner{}
 	m := newModel(r)
-	_, before, _ := view(sessions, m.w, m.h, "", 0, now, "", false, nil)
+	_, before, _ := view(sessions, m.w, m.h, "", 0, now, "", false, nil, m.w, nil)
 
 	m, _ = press(t, m, "f") // fold /a (focus was on a1)
 	v := ansi.Strip(m.View())
@@ -328,7 +328,7 @@ func TestFold(t *testing.T) {
 	if m.focus != headerID("/a") {
 		t.Fatalf("focus %q, want the folded title", m.focus)
 	}
-	_, after, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, m.folded)
+	_, after, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, m.folded, m.w, nil)
 	for _, b := range before {
 		for _, a := range after {
 			if a.id == "b1" && b.id == "b1" && a != b {
@@ -550,5 +550,157 @@ func TestMoveBeforeSize(t *testing.T) {
 	for _, k := range []string{"j", "k", "h", "l"} {
 		tm, _ := m.Update(key(k))
 		m = tm.(Model)
+	}
+}
+
+func wide(r *fakeRunner, w, h int) Model {
+	m := New(sessions, r)
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	return tm.(Model)
+}
+
+func TestPreviewToggle(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 99, 40), "P")
+	if m.preview || !strings.Contains(ansi.Strip(m.View()), "不足 100 列") {
+		t.Fatal("under 100 columns P refuses and says why")
+	}
+
+	m = wide(r, 232, 50)
+	tm, cmd := m.Update(key("P"))
+	m = tm.(Model)
+	if !m.previewOn() || m.cardsW() != 232-92 {
+		t.Fatalf("preview on: cards %d wide, want 140", m.cardsW())
+	}
+	if n, _ := columns(m.cardsW()); n != 3 { // 140 columns at the 40-column minimum
+		t.Errorf("cards beside the preview: %d columns", n)
+	}
+	if cmd == nil {
+		t.Fatal("opening the preview captures right away")
+	}
+	msg := cmd()
+	want := []string{"tmux", "capture-pane", "-p", "-e", "-t", "%1", "-S", "-44"} // 50 rows - top/msg/footer - title/box
+	if got := r.calls[len(r.calls)-1]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("capture: %q, want %q", got, want)
+	}
+	if tm, cmd = m.Update(frameMsg{}); cmd != nil { // a capture is in flight: the frame tick must not stack another
+		m = tm.(Model)
+		before := len(r.calls)
+		runAll(cmd)
+		if len(r.calls) != before {
+			t.Errorf("a second capture started while one was in flight: %q", r.calls[before:])
+		}
+	}
+
+	var text strings.Builder
+	for i := 1; i <= 200; i++ {
+		fmt.Fprintf(&text, "\x1b[32mline %d\x1b[0m\n", i)
+	}
+	text.WriteString("\n\n   \n") // blank rows under the cursor
+	pm := msg.(previewMsg)
+	pm.text = text.String()
+	tm, _ = m.Update(pm)
+	m = tm.(Model)
+	v := m.View()
+	lines := strings.Split(v, "\n")
+	if len(lines) != 50 {
+		t.Fatalf("%d lines, want 50", len(lines))
+	}
+	for i, l := range lines {
+		if ansi.StringWidth(l) > 232 {
+			t.Errorf("line %d is %d wide", i, ansi.StringWidth(l))
+		}
+	}
+	plain := ansi.Strip(v)
+	if !strings.Contains(plain, "one · %1 · ⏸ idle") || !strings.Contains(plain, "line 200") || !strings.Contains(plain, "line 157") ||
+		strings.Contains(plain, "line 156") || !strings.Contains(v, "\x1b[32mline 200") {
+		t.Errorf("preview should show the title and the last 44 lines with their colors")
+	}
+	if !strings.Contains(lines[46], "line 200") { // 0 top bar, 1 title, 2 box top, 3..46 content, 47 box bottom
+		t.Errorf("the last line sits at the bottom of the box (blank rows trimmed): %q", ansi.Strip(lines[46]))
+	}
+	for _, l := range lines[3:47] { // every content row closes its colors before the border
+		if !strings.Contains(l, "\x1b[0m "+fg(cDim, "│")) {
+			t.Fatalf("pane colors may bleed into the border: %q", l)
+		}
+	}
+
+	m, _ = press(t, m, "P")
+	if m.previewOn() || m.cardsW() != 232 || strings.Contains(ansi.Strip(m.View()), "line 200") {
+		t.Error("P again closes it and the cards get the full width back")
+	}
+}
+
+// runAll runs cmd once, and each command of a batch once (ticks just sleep and return).
+func runAll(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if b, ok := cmd().(tea.BatchMsg); ok {
+		for _, c := range b {
+			runAll(c)
+		}
+	}
+}
+
+func TestPreviewFollowsFocus(t *testing.T) {
+	r := &fakeRunner{}
+	m := wide(r, 232, 50)
+	m, _ = press(t, m, "P") // capture %1 (result not fed back, so not "in flight" for the next tests)
+	m.capturing = false
+	tm, cmd := m.Update(key("l"))
+	m = tm.(Model)
+	if cmd == nil || !reflect.DeepEqual(cmd().(previewMsg).pane, "%3") {
+		t.Fatal("moving the focus captures the new card's pane")
+	}
+	m.capturing = false
+	tm, cmd = m.Update(key("h"))
+	m = tm.(Model)
+	m.capturing = false
+	tm, cmd = m.Update(key("j")) // a2: background, no pane
+	m = tm.(Model)
+	if cmd != nil {
+		if pm, ok := cmd().(previewMsg); ok {
+			t.Fatalf("no capture without a pane, got %q", pm.pane)
+		}
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "没有 pane") {
+		t.Error("a background session's preview says it has no pane")
+	}
+	m, _ = press(t, m, "f") // focus on the folded /a title
+	if !strings.Contains(ansi.Strip(m.View()), "没有 pane") {
+		t.Error("a folded title's preview says no pane")
+	}
+	// clicks hit the cards as laid out beside the preview (3 columns of 45 at 232), not full width
+	m2, _ := press(t, wide(&fakeRunner{}, 232, 50), "P")
+	tm, _ = m2.Update(tea.MouseMsg{X: 50, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if tm.(Model).focus != "b1" {
+		t.Errorf("click at x=50 beside the preview: focus %q, want b1", tm.(Model).focus)
+	}
+	// a click inside the preview is not a card
+	tm, _ = m.Update(tea.MouseMsg{X: 200, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if tm.(Model).focus != m.focus {
+		t.Error("clicking the preview moved the focus")
+	}
+}
+
+// The preview refreshes on the 500ms frame tick (the cards keep their 2s poll).
+func TestPreviewRefreshesOnFrame(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "P")
+	m.capturing = false // the opening capture came back
+	before := len(r.calls)
+	tm, cmd := m.Update(frameMsg{})
+	runAll(cmd)
+	if len(r.calls) != before+1 || r.calls[before][1] != "capture-pane" || !tm.(Model).capturing {
+		t.Errorf("a frame tick with the preview open captures again: %q", r.calls[before:])
+	}
+	m.preview = false
+	before = len(r.calls)
+	_, cmd = m.Update(frameMsg{})
+	runAll(cmd)
+	if len(r.calls) != before {
+		t.Errorf("no captures with the preview closed: %q", r.calls[before:])
 	}
 }

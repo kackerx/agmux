@@ -374,7 +374,7 @@ var footerKeys = []struct {
 	text     string
 	needPane bool
 }{
-	{"j/k 卡片", false}, {"h/l 跨列", false}, {"enter 跳转", true}, {"f 折叠", false}, {"H 交接", true}, {"s 发送", true},
+	{"j/k 卡片", false}, {"h/l 跨列", false}, {"enter 跳转", true}, {"f 折叠", false}, {"P 预览", false}, {"H 交接", true}, {"s 发送", true},
 	{"r 重启", false}, {"x 杀", false}, {"d review", false}, {"q 退出", false},
 }
 
@@ -392,9 +392,10 @@ func footer(noPane bool, w int) string {
 }
 
 // view assembles top bar, body (scrolled so the focused card is visible), message line and footer.
-func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool) (string, []rect, int) {
+// The cards get the first cw columns; right (the preview, one line per body row) fills the rest.
+func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool, cw int, right []string) (string, []rect, int) {
 	top := " " + lipgloss.NewStyle().Bold(true).Render("agmux") + fg(cMuted, fmt.Sprintf(" · %d sessions", len(ss)))
-	body, rects := layout(groups(ss), w, focus, frame, now, folded)
+	body, rects := layout(groups(ss), cw, focus, frame, now, folded)
 	bodyH := max(h-3, 1) // top bar, message line, footer
 	off := 0
 	for _, r := range rects {
@@ -406,6 +407,11 @@ func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, 
 	vis = vis[:min(bodyH, len(vis))]
 	for len(vis) < bodyH {
 		vis = append(vis, "")
+	}
+	for i := range vis {
+		if i < len(right) {
+			vis[i] = pad(vis[i], cw) + right[i]
+		}
 	}
 	out := append([]string{top}, vis...)
 	// ccmux stderr is often multi-line; one line keeps the screen exactly h tall

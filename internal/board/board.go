@@ -72,6 +72,10 @@ type Model struct {
 	target store.Session   // what the open x / s prompt acts on, fixed when it opened
 	input  []rune          // the `s` line being typed
 	folded map[string]bool // group keys folded with f; this run only
+
+	preview   bool       // P: show the focused pane on the right
+	pv        previewMsg // the latest capture
+	capturing bool       // a capture is in flight; don't stack them
 }
 
 func New(src Source, run Runner) Model {
@@ -107,7 +111,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.w, m.h = msg.Width, msg.Height
 	case frameMsg:
 		m.frame++
-		return m, nextFrame()
+		cmd := m.capture() // the preview refreshes on the 500ms frame; called first: it marks m.capturing
+		return m, tea.Batch(nextFrame(), cmd)
+	case previewMsg:
+		m.pv, m.capturing = msg, false
 	case doneMsg:
 		switch {
 		case msg.err != nil:
@@ -243,13 +250,21 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// ponytail: lays the board out again per key press; fine for tens of sessions.
-		_, rects := layout(gs, m.w, m.focus, m.frame, m.now(), m.folded)
+		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.folded)
 		if id := nearest(rects, m.focus, d); id != "" {
 			m.focus, m.msg = id, ""
 		}
-		return m, nil
+		cmd := m.capture() // the preview follows the focus right away
+		return m, cmd
 	}
 	switch k.String() {
+	case "P":
+		if m.w < previewMinTerm {
+			return m.say(cMuted, "终端不足 100 列，开不了预览"), nil
+		}
+		m.preview, m.msg = !m.preview, ""
+		cmd := m.capture()
+		return m, cmd
 	case "f": // fold / unfold the focused group; the focus stays on it
 		m.folded[key] = !m.folded[key]
 		m.focus, m.msg = m.items(gs)[gi][0], ""
@@ -479,7 +494,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	m.current()
 	// ponytail: re-lays out the board per click to find the card; fine for tens of sessions.
-	_, rects, off := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), "", false, m.folded)
+	_, rects, off := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), "", false, m.folded, m.cardsW(), nil)
 	y := e.Y - 1 + off // row 0 is the top bar
 	for _, r := range rects {
 		if e.X >= r.x && e.X < r.x+r.w && y >= r.y && y < r.y+r.h {
@@ -524,6 +539,10 @@ func (m Model) View() string {
 		return ""
 	}
 	_, _, focused, ok := m.current()
-	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded)
+	var right []string
+	if m.previewOn() {
+		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1))
+	}
+	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right)
 	return out
 }
