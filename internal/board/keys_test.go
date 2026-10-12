@@ -163,21 +163,13 @@ func TestKeys(t *testing.T) {
 		{"d reviews interactively", []string{"d"}, [][]string{{"(interactive)", "review", "a1"}}, false},
 		{"x y kills", []string{"x", "y"}, [][]string{{"kill", "a1"}}, false},
 		{"x other cancels", []string{"x", "n", "x", "q"}, nil, false},
-		{"s types and sends", []string{"s", "hi", " ", "你好", "enter"}, sent("%1", "hi 你好"), false},
-		{"s esc cancels", []string{"s", "hi", "esc"}, nil, false},
-		{"s empty cancels", []string{"s", " ", "enter"}, nil, false},
-		{"q in s mode is text", []string{"s", "q", "enter"}, sent("%1", "q"), false},
 		{"background: enter / H / s refused", []string{"j", "enter", "H", "s", "x", "y"}, [][]string{{"kill", "a2"}}, false},
 		{"q quits", []string{"q"}, nil, true},
 		{"arrow keys move", []string{"down", "r", "up", "right", "r"}, [][]string{{"restart", "a2"}, {"restart", "b1"}}, false},
 		{"up comes back", []string{"down", "up", "r"}, [][]string{{"restart", "a1"}}, false},
-		{"text starting with - stays text", []string{"s", "--help", "enter"}, sent("%1", "--help"), false},
 		{"burst of keys = one by one", []string{"lr"}, [][]string{{"restart", "b1"}}, false},
 		{"unfolding focuses the group's first card", []string{"l", "f", "f", "r"}, [][]string{{"restart", "b1"}}, false},
 		{"burst keeps typed order", []string{"Hr"}, append(sent("%1", "/handoff"), []string{"restart", "a1"}), false},
-		{"ctrl+c quits from the prompt", []string{"s", "hi", "ctrl+c"}, nil, true},
-		{"pasted newlines become spaces", []string{"s", "a\nb", "enter"}, sent("%1", "a b"), false},
-		{"burst into the prompt", []string{"shi", "enter"}, sent("%1", "hi"), false},
 	}
 	for _, c := range cases {
 		r := &fakeRunner{}
@@ -239,7 +231,7 @@ func (s *mutSrc) Err() error                { return nil }
 
 // The x / s prompts act on the session they named, never on whatever focus falls back to.
 func TestPromptTargetIsPinned(t *testing.T) {
-	for _, keys := range [][]string{{"x", "y"}, {"s", "hi", "enter"}} {
+	for _, keys := range [][]string{{"x", "y"}} {
 		src := &mutSrc{ss: sessions}
 		r := &fakeRunner{}
 		m, _ := press(t, newModel(r), "l") // focus b1
@@ -515,7 +507,7 @@ func TestTmuxFailuresStopTheChain(t *testing.T) {
 	}
 
 	r = &fakeRunner{tmuxFail: map[string]error{"send-keys": errors.New("tmux send-keys: can't find pane")}}
-	m, _ = press(t, newModel(r), "s", "hi", "enter")
+	m, _ = press(t, newModel(r), "H")
 	if len(r.calls) != 1 || !strings.Contains(ansi.Strip(m.View()), "can't find pane") {
 		t.Errorf("failed text must not be followed by Enter: %q", r.calls)
 	}
@@ -881,6 +873,47 @@ func TestPreviewWheelAndClicks(t *testing.T) {
 	tm, _ = m.Update(tea.MouseMsg{X: 50, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	if m = tm.(Model); m.pvFocus || m.focus != "b1" {
 		t.Errorf("a click on a card takes the keys back: pvFocus=%v focus=%s", m.pvFocus, m.focus)
+	}
+}
+
+// s = reply: open the preview if needed and hand it the keys; what is typed next goes to the pane.
+func TestSReplies(t *testing.T) {
+	r := &fakeRunner{}
+	m := wide(r, 232, 50)
+	tm, cmd := m.Update(key("s"))
+	m = tm.(Model)
+	if !m.previewOn() || !m.pvFocus || cmd == nil {
+		t.Fatalf("s: preview %v, keys %v", m.previewOn(), m.pvFocus)
+	}
+	cmd() // the opening capture
+	m.capturing = false
+	r.calls = nil
+	m, quit := press(t, m, "hi", "q", "enter")
+	want := [][]string{{"tmux", "send-keys", "-t", "%1", "-l", "--", "hi"}, {"tmux", "send-keys", "-t", "%1", "-l", "--", "q"}, {"tmux", "send-keys", "-t", "%1", "Enter"}}
+	var sends [][]string
+	for _, c := range r.calls {
+		if c[1] == "send-keys" {
+			sends = append(sends, c)
+		}
+	}
+	if quit || !reflect.DeepEqual(sends, want) {
+		t.Errorf("after s, keys go to the pane: quit=%v %q", quit, sends)
+	}
+
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "P", "s") // already open: s only takes the keys
+	if !m.previewOn() || !m.pvFocus {
+		t.Error("s with the preview open focuses it")
+	}
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "j", "s") // a2: no pane
+	if m.preview || m.pvFocus {
+		t.Error("s on a session without a pane does nothing")
+	}
+	m, _ = press(t, wide(&fakeRunner{}, 99, 40), "s")
+	if m.preview || !strings.Contains(ansi.Strip(m.View()), "不足 100 列") {
+		t.Error("s on a narrow terminal says why it can't open the preview")
+	}
+	if !strings.Contains(ansi.Strip(wide(&fakeRunner{}, 232, 50).View()), "tab 进入预览 · s 回复 · H 交接") {
+		t.Error("footer order: … tab 进入预览 · s 回复 · H 交接 …")
 	}
 }
 

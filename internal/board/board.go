@@ -15,7 +15,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/execx"
@@ -56,7 +55,6 @@ type mode int
 const (
 	browsing mode = iota
 	confirmKill
-	typing
 )
 
 type Model struct {
@@ -69,8 +67,7 @@ type Model struct {
 	focus  string // session ID; follows the session across polls
 	msg    string // one line above the footer: ccmux stderr, hints
 	mode   mode
-	target store.Session   // what the open x / s prompt acts on, fixed when it opened
-	input  []rune          // the `s` line being typed
+	target store.Session   // what the open x prompt acts on, fixed when it opened
 	folded map[string]bool // group keys folded with f; this run only
 
 	preview   bool       // P: show the focused pane on the right
@@ -211,7 +208,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	// bubbletea v1 hands keys read in one burst ("ljd") over as one message; outside the
 	// text prompt each rune is its own key, and their commands run in typed order.
-	if m.mode != typing && k.Type == tea.KeyRunes && len(k.Runes) > 1 && !k.Paste {
+	if k.Type == tea.KeyRunes && len(k.Runes) > 1 && !k.Paste {
 		var tm tea.Model = m
 		cmds := make([]tea.Cmd, len(k.Runes))
 		for i, r := range k.Runes {
@@ -226,31 +223,6 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.kill(m.target)
-	case typing:
-		switch k.Type {
-		case tea.KeyEnter:
-			m.mode = browsing
-			text := strings.TrimSpace(string(m.input))
-			m.input = nil
-			if text == "" {
-				return m, nil
-			}
-			return m.send(m.target, text, "已发送 → "+m.target.Name)
-		case tea.KeyEsc:
-			m.mode, m.input = browsing, nil
-		case tea.KeyBackspace:
-			if len(m.input) > 0 {
-				m.input = m.input[:len(m.input)-1]
-			}
-		case tea.KeyRunes, tea.KeySpace:
-			for _, r := range k.Runes { // a pasted newline would submit a half-written prompt
-				if r == '\n' || r == '\r' || r == '\t' {
-					r = ' '
-				}
-				m.input = append(m.input, r)
-			}
-		}
-		return m, nil
 	}
 
 	if k.String() == "q" || k.Type == tea.KeyEsc {
@@ -304,12 +276,16 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "H":
 		return m.send(s, "/handoff", "已发送 /handoff → "+s.Name)
-	case "s":
+	case "s": // reply: open the preview if needed and give it the keys (P + tab)
 		if s.TmuxPane == "" {
 			return m, nil // msgLine already shows noPane
 		}
-		m.mode, m.target, m.msg = typing, s, ""
-		return m, nil
+		if m.w < previewMinTerm {
+			return m.say(cMuted, "终端不足 100 列，开不了预览"), nil
+		}
+		m.preview, m.pvFocus, m.msg = true, true, ""
+		cmd := m.capture()
+		return m, cmd
 	case "x":
 		m.mode, m.target, m.msg = confirmKill, s, ""
 		return m, nil
@@ -565,12 +541,6 @@ func (m Model) msgLine(focused store.Session) string {
 	switch m.mode {
 	case confirmKill:
 		return fg(cRed, " 杀掉 "+m.target.Name+"？y 确认，其它键取消")
-	case typing:
-		p := " 发送到 " + m.target.Name + ": " + string(m.input) + "▏"
-		if w := ansi.StringWidth(p); w > m.w { // keep the end (and the cursor) in view
-			p = "…" + ansi.TruncateLeft(p, w-m.w+1, "")
-		}
-		return p
 	}
 	var parts []string
 	if m.msg != "" {
