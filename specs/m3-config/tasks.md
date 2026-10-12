@@ -43,6 +43,10 @@
 - 没测到：真机 enter 跳转（用户验收）、真实 ccmux 字段变化、终端 <96 或 >232 列 / <20 或 >60 行、>52 张卡、flash 和浮层的鼠标、16 项颜色里只断言了 working / focus / muted、fzf 具体分值。
 - T19 第二轮修复（0316993）到了再补三条并重跑 test_t19 / test_t7 / test_t20。
 
+## 第二 + 三批整批回归（tester 2026-10-12，1b5873f，套件 ecae36f）
+- go vet / go test -race 全绿；e2e 426 条全过（863s），0 skip / 0 expectedFailure。
+- 没覆盖：nvim 插入态与 Claude Code 输入框里的真实光标（用 DECSCUSR 序列代测）、flash 超过 52 张卡、真 ccmux。
+
 ## 第二批（用户 2026-10-12 验收意见；2026-10-12 晚开工，顺序 T21→T22→T23→T24）
 
 ### T21 预览进出都用 `tab`（通过 @2bb3fb4 / 套件 08a86ab）
@@ -58,7 +62,7 @@
 - 审查退回（reviewer @60c2217，探针 cr-t22-60c2217/probes/）：1. n/N 改走 m.current()，删「隐藏卡」分支（TestProbeNFromDisplayedFocus）；2. 补测布局序 ≠ 得分序时 n 按布局序（收 TestProbeNLayoutOrder）；3. 底栏 n/N 提示有哪个键显示哪个；README 配置示例 `down = ["n", "down"]` 换成不撞默认键的键。
 - 验收：黑盒 `/ a` enter 后抓屏带色，命中字符格子是黄底；n 三次焦点按布局序循环；N 反向；esc 后 n 无效。
 
-### T23 `s` flash 改成 flash.nvim 式：先打子串再按标签（修复 1b5873f 复审 / 复测中：分字母跳过上一帧画过的所有字母；90b65f8 起：重扫时记「刚空出的字母」freed，按它忽略、不分给新命中，打字 / 退格 / 重进清空；消息行显示配置的 flash 键名）
+### T23 `s` flash 改成 flash.nvim 式：先打子串再按标签（通过 @1b5873f / test_t20 35 条；标签跟随布局：卡→标签沿用，消失字母 freed 不分给新命中、按它忽略，分配跳过上一帧画过的字母）
 - 用户 2026-10-12 验收：现在「一个字母跳一张卡」不对，要和 flash.nvim 一致——按 `s` 后输入字符，卡片的 name/branch/dir 里**子串命中**（大小写不敏感，不用 fzf 模糊）的位置黄底高亮（同 T22 的 match 色），每张命中卡在命中子串后一格盖一个标签字母（focus 底深字）；标签字母**避开**所有命中后紧跟的下一个字符（这样继续打字和按标签不会撞）；按标签跳过去并退出；继续打字缩小范围；退格；esc 取消；无命中时标签全无、继续打字或 esc。按 sqlmux 的 internal/app/jump.go 做（字母表 asdfghjklqwertyuiopzxcvbnm → 大写、按离焦点距离分配、跳过匹配后紧跟字符）；design.md「全局定位」一节按此重写（T20 的「直接标签」作废：用户实测后拍板）。
 - 折叠标题也参与（标题文字里命中）。dev 定稿（照准）：dir 只在组标题里找（卡片上看不到 cwd）；组标题命中的标签放在标题行，展开的组按标签跳到它的第一张卡、折叠的落到标题；消息行显示已打的内容；再次按 s 清空重来；改窗口大小重扫。打一个字符就出标签（flash.nvim 默认）。底栏 `flash: type to narrow · label to jump · esc`。
 - 审查退回（reviewer @b4b5351，探针 cr-t23-b4b5351/probes/）：1. 轮询后命中和标签仍画在旧坐标、压到别的卡上——改为轮询后按新布局重扫，「卡 → 标签」保留（design.md 已写）；探针 TestProbeFlashStaleAfterPoll。2. 收 probe_t23b_test.go 三条：TestProbeFlashNameCutByTime（名字宽度扣右侧时间）、TestProbeFlashOpenTitleAfterHit（前卡命中后下一组标题仍搜）、TestProbeFlashTitleJustAbove（标题在窗口上一行不画到顶栏）。3. spec 定稿：每张卡名字 + 分支合起来一处命中一个标签（按现有代码），组标题单独一处。
