@@ -28,8 +28,8 @@ AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 |---|---|
 | `test_t1.py` | `agmux show`：HUD 百分比截断、没有 HOME 报错、ccmux 挂住超时、ccmux 留下占着 stdout 的子进程 |
 | `test_t2.py` | `agmux avatars` 输出格式（6 块，每块 `<id>  <name>` + 2 行 × 6 格）/ 管道无 ANSI / tty 真彩；看板里默认分配、绑定、坏文件、眼睛三态 |
-| `test_t3.py` | 列数与列宽（最小列宽 40：81 / 82 / 124 / 200 / 208 / 232 列等）、resize、卡片三行字段与让位顺序、agent 图标、边框色 = 状态色 / 焦点 #ff8ebe 粗线、6 格上下文条与阈值、模型缓存、`agmux statusline` 抓到的 model / 百分比显示到卡片、多行 stderr |
-| `test_t4.py` | 每个键的命令行（send 正文在 `--` 之后）、x 确认、s 输入（含中文、`-` 开头）、粘贴、d 的 ExecProcess（回来后鼠标仍可用、失败时底栏显示 stderr 最后一行）、后台会话置灰（提示只出现一次，和错误行同时可见）、连按、鼠标、2s 轮询、会话消失的竞态、popup 里的真鼠标 |
+| `test_t3.py` | 列数与列宽（最小列宽 40：81 / 82 / 124 / 200 / 208 / 232 列等）、resize、卡片三行字段与让位顺序、名字 + 时间 / 分支 / 条·状态·计数·模型 三行（无 agent 图标）、边框色 = 状态色 / 焦点 #ff8ebe 粗线、6 格上下文条与阈值、模型缓存、`agmux statusline` 抓到的 model / 百分比显示到卡片、多行 stderr |
+| `test_t4.py` | 每个键的命令行（send 正文在 `--` 之后）、x 确认、粘贴不当命令、d 的 ExecProcess（回来后鼠标仍可用、失败时底栏显示 stderr 最后一行）、后台会话置灰（提示只出现一次，和错误行同时可见）、连按、鼠标、2s 轮询、会话消失的竞态、popup 里的真鼠标 |
 | `test_t6.py` | `agmux statusline`（逐字节透传、退出码、sh -c、写失败不影响透传、session_id 白名单、原子写）和 `agmux setup`（文案、`--write` 保留其它键、`.bak`、损坏 / 无权限、软链接、端到端）；只用临时 HOME，收尾校验真 `~/.claude/settings.json` 哈希没变 |
 | `test_t9.py` | 空间导航：120 列（2 列 3 带）下 j 走遍整列（跨带）再停住、k 原路回来、j/k 不退让；h/l 取纵向重叠最多的卡，没有重叠时退到最近一列里纵向最近的卡；方向键等价；折叠标题作为一行高的卡参与；焦点从屏幕上读（#ff8ebe 粗线边框），不用按 enter |
 | `test_t10.py` | enter / H / s 直接走 tmux：假 `tmux`（PATH 里记录 argv 的脚本）下的 client 选择（`$AGMUX_CLIENT` / session 环境 / 启发式 / 普通 pane 单终端 / 没有 client）、`detach-client -t` 只在 AGMUX_CLIENT 时做、会话名含空格、display-message 失败退让、`send-keys -l --` 后 ≥150ms 再 Enter、`s` 开预览并进入直通；真 tmux（`-L agmux-test`）嵌套浮窗：外层 client 切到目标、浮窗按规则关闭、目标在浮窗自己 session 里时外层仍 attached、真 pane 收到文本 |

@@ -1,4 +1,4 @@
-"""T4 interaction + store polling. Spec: specs/m1-mvp/design.md「交互」, specs/m1-mvp/tasks.md T4 (x: y runs / any other key cancels; s: enter sends, esc or empty cancels).
+"""T4 interaction + store polling. Spec: specs/m1-mvp/design.md「交互」, specs/m1-mvp/tasks.md T4 (x: y runs / any other key cancels; the old `s` prompt is gone since T14, see test_t10).
 
 The fake `ccmux` on PATH records argv of every non-`show` call, so each key is checked end-to-end as the exact command line.
 Focus order since T9 is spatial (see test_t9); at 200 columns: band 1 = G1 a1,a2,a3 | G2 b1,b2(background, no pane) | G3 c1,c2 | G4 d1, band 2 = G5 e1.
@@ -84,7 +84,7 @@ class Keys(Base):
 
     def test_x_confirm(self):
         self.t.keys("x"); self.assertEqual(self.calls(), [], "x alone must not kill")
-        self.assertTrue(wait(lambda: re.search(r"y.*(确认|/n)", "\n".join(r.text for r in self.t.snap()[-3:-1])), 3),
+        self.assertTrue(wait(lambda: re.search(r"y to confirm", "\n".join(r.text for r in self.t.snap()[-3:-1])), 3),
                         "x should ask for confirmation on the line above the key hints:\n" + self.t.text())
         self.t.keys("y"); self.assertEqual(self.calls(1), [["kill", "a1"]])
         self.assertTrue(self.t.alive())
@@ -123,7 +123,7 @@ class Keys(Base):
         self.assertTrue(wait(lambda: "agmux · 9 sessions" in self.t.text(), 6), "board must come back after review exits")
         self.assertEqual(self.env.actions(), [["review", "a1"]])
         self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 9)
-        self.assertRegex("\n".join(r.text for r in self.t.snap()[-3:]), "review 结束", "footer reports the finished review")
+        self.assertRegex("\n".join(r.text for r in self.t.snap()[-3:]), "review finished", "footer reports the finished review")
         self.t.keys("j"); time.sleep(0.2); self.t.keys("Enter")
         self.assertEqual(self.calls(2)[1:], [["switch", "a2"]], "board keeps working after review")
 
@@ -135,7 +135,7 @@ class Keys(Base):
 
     def test_background_session_greyed(self):
         self.t.keys("l"); time.sleep(0.2); self.t.keys("j"); time.sleep(0.2)  # b2
-        hint = "后台会话没有 tmux pane"
+        hint = "background session, no tmux pane"
         self.assertTrue(wait(lambda: hint in "\n".join(r.text for r in self.t.snap()[-3:]), 3), "footer hint when a background card is focused:\n" + self.t.text())
         for k in ("Enter", "H"):
             self.t.keys(k); time.sleep(0.4)
@@ -185,7 +185,7 @@ class BackgroundWithError(Base):
         self.env.flag("fail"); self.t.keys("r")  # restart is not greyed; fake ccmux prints 3 stderr lines and exits 1
         self.assertTrue(wait(lambda: "boom from fake ccmux" in "\n".join(r.text for r in self.t.snap()[-3:]), 4), self.t.text())
         tail = "\n".join(r.text for r in self.t.snap()[-3:])
-        self.assertIn("后台会话没有 tmux pane", tail, "hint must not be pushed out by the error line")
+        self.assertIn("background session, no tmux pane", tail, "hint must not be pushed out by the error line")
         self.assertNotIn("second stderr line", self.t.text())
         rows = self.t.text().split("\n")
         while rows and rows[-1] == "" and len(rows) > 50: rows.pop()
@@ -196,7 +196,7 @@ class BackgroundWithError(Base):
         self.env.flag("showfail")
         self.assertTrue(wait(lambda: "show exploded" in self.t.text(), 8), self.t.text())
         tail = "\n".join(r.text for r in self.t.snap()[-3:])
-        self.assertIn("后台会话没有 tmux pane", tail)
+        self.assertIn("background session, no tmux pane", tail)
         self.assertNotIn("second poll-error line", self.t.text())
 
 

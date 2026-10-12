@@ -73,7 +73,7 @@ class PreviewBase(unittest.TestCase):
             self.t.keys(k); time.sleep(0.25)
 
     def open_preview(self):
-        self.press("P")
+        self.press("p")
         self.assertTrue(wait(lambda: any("line 200" in x for x in self.pv_text()), 4), "preview did not show the pane:\n" + self.t.text())
 
 
@@ -105,15 +105,15 @@ class Preview(PreviewBase):
             self.assertEqual(cells[-1][1], C_DIM, f"row {i}: right border colour: the pane's colour leaked past the line end")
 
     def test_p_again_restores_four_columns(self):
-        self.open_preview(); self.press("P")
+        self.open_preview(); self.press("p")
         self.assertTrue(wait(lambda: self.pv() is None, 4), "preview must go away")
         cs = [c for c in find_cards(self.t.snap()) if c.ok]
         self.assertEqual((len(cs), {c.w for c in cs}), (9, {56}))
 
     def test_below_100_columns_the_preview_is_refused_with_a_hint(self):
         t = self.board(99, 50)
-        t.keys("P"); time.sleep(0.5)
-        self.assertIn("终端不足 100 列", "\n".join(r.text for r in t.snap()[-3:]))
+        t.keys("p"); time.sleep(0.5)
+        self.assertIn("at least 100 columns", "\n".join(r.text for r in t.snap()[-3:]))
         self.assertTrue(all("╭" not in r.text or True for r in t.snap()))
         cs = [c for c in find_cards(t.snap()) if c.ok]
         self.assertTrue(cs and {c.w for c in cs} == {layout(99)[1]}, "cards keep the full width")
@@ -122,7 +122,7 @@ class Preview(PreviewBase):
 
     def test_exactly_100_columns_opens_a_60_wide_preview(self):
         t = self.board(100, 50)
-        t.keys("P"); time.sleep(0.8)
+        t.keys("p"); time.sleep(0.8)
         snap = t.snap(); box = [i for i, c in enumerate(snap[2].cells) if c[0] == "╭" and i >= 40]
         self.assertTrue(box, "preview box at column >= 40:\n" + t.text())
         self.assertEqual(snap[1].width_text(40, 100).strip().split(" · ")[0], "alpha-main")
@@ -142,10 +142,10 @@ class Preview(PreviewBase):
     def test_no_pane_message_for_background_and_folded_title(self):
         self.open_preview()
         self.press("l", "j")  # b2: background, no tmux pane
-        self.assertTrue(wait(lambda: "没有 pane" in "\n".join(self.pv_text()), 3), "\n".join(self.pv_text()))
+        self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3), "\n".join(self.pv_text()))
         self.assertNotIn("line 200", "\n".join(self.pv_text()))
         self.press("k", "f")  # fold G2 (b1 focused): the folded title has no pane either
-        self.assertTrue(wait(lambda: "没有 pane" in "\n".join(self.pv_text()), 3), "\n".join(self.pv_text()))
+        self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3), "\n".join(self.pv_text()))
 
     def test_preview_follows_the_pane_live(self):
         self.open_preview()
@@ -192,13 +192,13 @@ class Preview(PreviewBase):
         self.assertEqual(late, [], "the preview must follow a click without waiting for the 500ms tick (checked 200ms after each click)")
 
     def test_unfolding_a_group_moves_the_preview_to_its_first_card(self):
-        """review: after f / enter on a folded title the focus went to the first card but the preview kept saying `没有 pane`"""
+        """review: after f / enter on a folded title the focus went to the first card but the preview kept saying `no pane`"""
         self.open_preview()
         self.press("f")  # fold G1 (a1 focused)
-        self.assertTrue(wait(lambda: "没有 pane" in "\n".join(self.pv_text()), 3), "folded title: no pane")
+        self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3), "folded title: no pane")
         self.press("f")  # unfold
         self.assertTrue(wait(lambda: any("line 200" in x for x in self.pv_text()), 3), "after f the preview shows the first card's pane\n" + "\n".join(self.pv_text()))
-        self.press("f"); self.assertTrue(wait(lambda: "没有 pane" in "\n".join(self.pv_text()), 3))
+        self.press("f"); self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3))
         self.press("Enter")  # enter unfolds too
         self.assertTrue(wait(lambda: any("line 200" in x for x in self.pv_text()), 3), "after enter as well")
         self.assertEqual(self.env.actions(), [], "enter on a folded title never switches")
@@ -208,10 +208,10 @@ class Preview(PreviewBase):
         self.open_preview()
         self.t.resize(90, 50); time.sleep(0.8)
         self.assertIsNone(self.pv(), "too narrow: hidden")
-        self.t.keys("P"); time.sleep(0.5)
+        self.t.keys("p"); time.sleep(0.5)
         self.t.resize(232, 50); time.sleep(0.9)
         self.assertIsNone(self.pv(), "P switched the preview off even though it could not be shown: it does not come back when the terminal grows")
-        self.press("P"); self.assertTrue(wait(lambda: self.pv() is not None, 3), "and P opens it again")
+        self.press("p"); self.assertTrue(wait(lambda: self.pv() is not None, 3), "and P opens it again")
 
     def test_hjkl_never_move_the_focus_into_the_preview(self):
         self.open_preview()
@@ -225,7 +225,7 @@ class Preview(PreviewBase):
 
     def test_cards_and_preview_scrolled_board_keeps_footer(self):
         self.open_preview()
-        self.assertIn("P 预览", last_text_row(self.t.snap())); self.assertIn("tab 进入预览", last_text_row(self.t.snap()))
+        self.assertIn("p preview", last_text_row(self.t.snap())); self.assertIn("tab focus preview", last_text_row(self.t.snap()))
         rows = self.t.text().split("\n")
         while rows and rows[-1] == "" and len(rows) > 50: rows.pop()
         self.assertEqual(len(rows), 50, "total rows == terminal height with the preview open")

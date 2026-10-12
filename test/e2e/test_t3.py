@@ -26,7 +26,7 @@ def group_cards(snap, cards):
     return out
 
 
-BAR_KEYS = ("j/k", "h/l", "enter", "H 交接", "s 回复", "r 重启", "x 杀", "d review", "q 退出")
+BAR_KEYS = ("j/k h/l move", "enter jump", "H handoff", "s reply", "r restart", "x kill", "d review", "q quit")
 
 
 def last_text_row(snap):
@@ -72,7 +72,7 @@ class Layout(unittest.TestCase):
                         self.assertGreater(tr, max(c.r for h in range(g // n * n - n, g // n * n) for c in gs[h][2]) + 4)
                 self.assertIn("agmux · 9 sessions", snap[0].text, "top bar")
                 bar = last_text_row(snap)
-                for k in (BAR_KEYS if W >= 100 else BAR_KEYS[:1]):
+                for k in (BAR_KEYS if W >= 140 else BAR_KEYS[:1]):  # the English key line is ~133 columns wide; narrower terminals truncate it with …
                     self.assertIn(k, bar, "bottom bar hints")
 
     def test_resize(self):
@@ -294,7 +294,7 @@ class StderrFooter(unittest.TestCase):
         while rows and rows[-1] == "" and len(rows) > 50: rows.pop()
         self.assertEqual(len(rows), 50, "pane rows")
         self.assertIn("agmux · 9 sessions", rows[0], "top bar must stay on the first row")
-        self.assertIn("q 退出", rows[49], "key hints on the last row")
+        self.assertIn("q quit", rows[49], "key hints on the last row")
         self.assertIn("boom from fake ccmux", "\n".join(rows[-3:]))
         self.assertNotIn("second stderr line", t.text()); self.assertNotIn("third stderr line", t.text())
 
@@ -306,7 +306,7 @@ class StderrFooter(unittest.TestCase):
         rows = t.text().split("\n")
         while rows and rows[-1] == "" and len(rows) > 50: rows.pop()
         self.assertEqual(len(rows), 50, "pane rows")
-        self.assertIn("agmux · 9 sessions", rows[0]); self.assertIn("q 退出", rows[49])
+        self.assertIn("agmux · 9 sessions", rows[0]); self.assertIn("q quit", rows[49])
         self.assertNotIn("second poll-error line", t.text())
 
 

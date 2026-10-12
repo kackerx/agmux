@@ -1,4 +1,4 @@
-"""T12 preview key pass-through + local scroll. Spec: specs/m2-preview/design.md「按键直通」, tasks.md T12.
+"""T12 preview key pass-through + local scroll. Spec: specs/m2-preview/design.md「keys go to the pane」, tasks.md T12.
 
 a3's pane runs a raw-mode `cat -v` look-alike (fixtures/catv.py; BSD cat -v garbles UTF-8 that arrives split), so every byte the preview forwards comes back as visible text (^M enter, ^[ escape, ^C, ^[[A up ...).
 """
@@ -10,7 +10,7 @@ from test_t11 import PreviewBase, PV_X, pane_text
 
 class Passthrough(PreviewBase):
     def to_cat_pane(self):  # focus a3 and open the preview there
-        self.press("j", "j", "P")
+        self.press("j", "j", "p")
         self.assertTrue(wait(lambda: self.pv() is not None, 4), self.t.text())
 
     def cat_text(self):
@@ -27,16 +27,16 @@ class Passthrough(PreviewBase):
     def test_tab_moves_the_keys_to_the_preview(self):
         self.open_preview()
         self.assertFalse(self.preview_focused())
-        self.assertIn("tab 进入预览", self.footer())
+        self.assertIn("tab focus preview", self.footer())
         self.press("Tab")
         self.assertTrue(wait(self.preview_focused, 3), "preview border turns #ff8ebe:\n" + self.t.text())
-        self.assertIn("按键直通 pane · tab 回到卡片", self.footer())
+        self.assertIn("keys go to the pane", self.footer())
         self.press("Tab")
-        self.assertTrue(wait(lambda: not self.preview_focused(), 3)); self.assertIn("tab 进入预览", self.footer())
+        self.assertTrue(wait(lambda: not self.preview_focused(), 3)); self.assertIn("tab focus preview", self.footer())
 
     def test_tab_does_nothing_when_the_preview_is_closed(self):
         self.t.keys("Tab"); time.sleep(0.5)
-        self.assertIsNone(self.pv()); self.assertNotIn("按键直通", self.footer())
+        self.assertIsNone(self.pv()); self.assertNotIn("keys go to the pane", self.footer())
         cs = [c for c in find_cards(self.t.snap()) if c.ok and c.rows[0].cells[0][1] == C_FOCUS]
         self.assertEqual(len(cs), 1, "focus still on a card")
         self.t.keys("q"); self.assertEqual(self.t.exit_status(), 0, "q still quits: nothing swallowed")
@@ -45,15 +45,15 @@ class Passthrough(PreviewBase):
         self.open_preview()
         on_pane = self.hint_colour()
         self.press("l", "j")  # b2: background
-        self.assertTrue(wait(lambda: "没有 pane" in "\n".join(self.pv_text()), 3))
+        self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3))
         self.press("Tab")
-        self.assertFalse(self.preview_focused()); self.assertNotIn("按键直通", self.footer())
+        self.assertFalse(self.preview_focused()); self.assertNotIn("keys go to the pane", self.footer())
         off_pane = self.hint_colour()
-        self.assertNotEqual(on_pane, off_pane, f"`tab 进入预览` must be greyed for a card without a pane ({on_pane} vs {off_pane})")
+        self.assertNotEqual(on_pane, off_pane, f"`tab focus preview` must be greyed for a card without a pane ({on_pane} vs {off_pane})")
 
     def hint_colour(self):
         row = self.t.snap()[-2] if not self.t.snap()[-1].text.strip() else self.t.snap()[-1]
-        i = row.find("tab 进入预览"); self.assertGreaterEqual(i, 0, row.text)
+        i = row.find("tab focus preview"); self.assertGreaterEqual(i, 0, row.text)
         return row.cells[i][1]
 
     # ---- keys -----------------------------------------------------------------------------------------------------------------------------

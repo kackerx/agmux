@@ -93,7 +93,7 @@ class Fold(unittest.TestCase):
         time.sleep(0.8); return self.env.actions()
 
     def test_footer_lists_f(self):
-        self.assertIn("f 折叠", last_text_row(self.t.snap()))
+        self.assertIn("f fold", last_text_row(self.t.snap()))
 
     def test_fold_and_restore(self):
         before = structure(self.t)
@@ -120,9 +120,9 @@ class Fold(unittest.TestCase):
         for k in ("H", "r", "d"):
             self.t.keys(k); time.sleep(0.4)
         self.t.keys("s"); time.sleep(0.3)
-        self.assertNotIn("按键直通", foot(self.t, 4), "`s` on a folded title opens nothing and focuses nothing")
+        self.assertNotIn("keys go to the pane", foot(self.t, 4), "`s` on a folded title opens nothing and focuses nothing")
         self.t.keys("x"); time.sleep(0.3)
-        self.assertNotRegex(foot(self.t, 4), "杀掉|y 确认", "no kill confirm on a folded title")
+        self.assertNotRegex(foot(self.t, 4), "kill .*\\?|y to confirm", "no kill confirm on a folded title")
         self.t.keys("y")
         self.assertEqual(self.calls(), [], "a folded title has no session: H / r / d / s / x must do nothing (never act on a hidden card)")
         self.assertTrue(self.t.alive()); self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 7)

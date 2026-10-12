@@ -166,7 +166,7 @@ class FakeTmux(unittest.TestCase):
     def test_no_clients_shows_the_hint_and_stays(self):
         self.start(session="fl-own", clients=[])
         self.t.keys("Enter")
-        self.assertTrue(wait(lambda: "没有可切换的 tmux client" in foot(self.t), 3), self.t.text())
+        self.assertTrue(wait(lambda: "no tmux client to switch" in foot(self.t), 3), self.t.text())
         self.assertIn("AGMUX_CLIENT", foot(self.t)); self.assertTrue(self.t.alive(), "the board must not exit")
         self.assertEqual([c[0] for c in self.env.tmux_calls()], ["display-message", "list-clients", "show-environment"], "no switch attempted")
         self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 9)
@@ -194,7 +194,7 @@ class FakeTmux(unittest.TestCase):
         self.start()
         self.t.keys("s"); time.sleep(0.6)
         self.assertEqual(self.preview_open_and_focused(), (True, True), "s = P + tab: preview open, border #ff8ebe\n" + self.t.text())
-        self.assertIn("按键直通 pane · tab 回到卡片", foot(self.t))
+        self.assertIn("keys go to the pane", foot(self.t))
         self.t.lit("hello world"); time.sleep(0.5)
         self.assertEqual(self.sent_text(), "hello world")
         self.t.keys("Enter"); time.sleep(0.4)
@@ -214,7 +214,7 @@ class FakeTmux(unittest.TestCase):
 
     def test_s_with_the_preview_already_open_only_moves_the_focus(self):
         self.start()
-        self.t.keys("P"); time.sleep(0.6)
+        self.t.keys("p"); time.sleep(0.6)
         self.assertEqual(self.preview_open_and_focused(), (True, False))
         self.t.keys("s"); time.sleep(0.5)
         self.assertEqual(self.preview_open_and_focused(), (True, True), "still open (s is not a toggle), now focused")
@@ -227,7 +227,7 @@ class FakeTmux(unittest.TestCase):
         n = len(self.env.tmux_calls())
         self.t.keys("s"); time.sleep(0.5)
         self.assertEqual(self.preview_open_and_focused(), (False, False), "no preview")
-        self.assertIn("后台会话没有 tmux pane", foot(self.t)); self.assertEqual(foot(self.t).count("后台会话没有 tmux pane"), 1)
+        self.assertIn("background session, no tmux pane", foot(self.t)); self.assertEqual(foot(self.t).count("background session, no tmux pane"), 1)
         self.t.lit("zzz"); time.sleep(0.3)
         self.assertEqual(self.sent_text(), "", "keys are not forwarded anywhere"); self.assertEqual(self.env.calls(), [])
 
@@ -236,13 +236,13 @@ class FakeTmux(unittest.TestCase):
         t = Term(self.env, w=99, h=50, extra_env="TMUX_PANE=%9"); self.addCleanup(t.close)
         self.assertTrue(ready(t) or wait(lambda: len([c for c in find_cards(t.snap()) if c.ok]) >= 1, 5))
         t.keys("s"); time.sleep(0.5)
-        self.assertIn("终端不足 100 列", "\n".join(r.text for r in t.snap()[-3:]))
+        self.assertIn("at least 100 columns", "\n".join(r.text for r in t.snap()[-3:]))
         t.lit("zzz"); time.sleep(0.3); self.assertEqual(self.sent_text(), "")
 
     def test_footer_says_reply(self):
         self.start()
         bar = last_text_row(self.t.snap())
-        self.assertIn("s 回复", bar); self.assertNotIn("s 发送", bar)
+        self.assertIn("s reply", bar); self.assertNotIn("s send", bar)
 
     def test_blank_and_cancel_prompts_are_gone(self):  # the old prompt is deleted: `s` then Esc is just Esc going to the pane
         self.start()
