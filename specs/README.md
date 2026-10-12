@@ -38,7 +38,7 @@ type Session struct {
 - 多 agent 类型：头像色带和名字前图标已按 agentType 区分，新类型加一行映射。
 
 ## 测试约定
-- tmux 黑盒测试一律用独立 socket，绝不碰用户的 tmux server；每个角色用自己的 socket 名，互不 kill-server：测试 `-L agmux-test`，审查 `-L agmux-review`，开发 `-L agmux-dev`。scratchpad 目录同理，只动自己建的。
+- tmux 黑盒测试一律用独立 socket，绝不碰用户的 tmux server；每个角色用自己的 socket 名，互不 kill-server：测试 `-L agmux-test`，开发 `-L agmux-dev`，审查每个任务一个 `-L agmux-review-<任务>`（同时跑的几个审查互相杀过 server）。e2e 的 lib.py 退出时会对所在 socket `kill-server`，所以跑它的 socket 不能有别人的会话。scratchpad 目录同理，只动自己建的。
 - `ccmux send` 的正文一律放在 `--` 之后（ccmux 会把 `-` 开头的文本当选项）。
 - `ccmux show --json` 用 fixture（`testdata/show.json`，从真机抓，不带真实消息文本）喂给 store 做单测；真机 e2e 只做 `agmux board` 能起来、能渲染出 ≥1 张卡片、q 退出。
 
