@@ -1,5 +1,5 @@
-"""T3 cards + layout, black-box in tmux -L agmux-test. Spec: specs/design.md「布局与卡片」, specs/tasks.md T3."""
-import os, re, unittest
+"""T3 cards + layout (S1.1 / T5 card redesign), black-box in tmux -L agmux-test. Spec: specs/m1-mvp/design.md「布局与卡片」, specs/m1-mvp/tasks.md T3."""
+import json, os, re, subprocess, unittest
 from lib import *
 
 NAMES = {"a1": "alpha-main", "a2": "pj-fallback", "a3": "告警会话", "b1": "bravo-29", "b2": "bravo-bg",
@@ -16,6 +16,19 @@ def by_name(cards, needle):
     return m[0]
 
 
+def group_cards(snap, cards):
+    """Group the cards by their column title (`▾ ...`): [(title_row, x, [cards top->bottom])] in reading order. Works when names are truncated."""
+    titles = sorted((r, c) for r, row in enumerate(snap) for c, cell in enumerate(row.cells) if isin(cell[0], "▾▸"))
+    out = []
+    for tr, tx in titles:
+        mine = [c for c in cards if c.c == tx and c.r > tr and not any(r2 > tr and r2 < c.r and x2 == tx for r2, x2 in titles)]
+        out.append((tr, tx, sorted(mine, key=lambda c: c.r)))
+    return out
+
+
+BAR_KEYS = ("j/k", "h/l", "enter", "H 交接", "s 发送", "r 重启", "x 杀", "d review", "q 退出")
+
+
 def last_text_row(snap):
     for r in reversed(snap):
         if r.text.strip():
@@ -24,10 +37,10 @@ def last_text_row(snap):
 
 
 class Layout(unittest.TestCase):
-    """Column count / width algorithm: n=floor((W+2)/58), colW=floor((W-2(n-1))/n), remainder left empty on the right."""
+    """Column count / width algorithm: n=floor((W+2)/42), colW=floor((W-2(n-1))/n), remainder left empty on the right."""
 
     def test_widths(self):
-        for W in (113, 114, 120, 171, 172, 200, 229, 230):
+        for W in (40, 81, 82, 123, 124, 165, 166, 200, 207, 208, 232, 249, 250):
             with self.subTest(W=W):
                 env = Env(); self.addCleanup(env.cleanup)
                 fx = build_fixture(env)
@@ -40,55 +53,60 @@ class Layout(unittest.TestCase):
                 self.assertEqual({c.w for c in cards}, {colW}, f"card widths (want colW={colW})")
                 self.assertTrue(all(c.c + c.w <= W for c in cards), "card overflows terminal width")
                 first_row = min(c.r for c in cards)
-                self.assertEqual(len([c for c in cards if c.r == first_row]), n, f"columns in first band (want {n})")
-                grp_ids = [["a1", "a2", "a3"], ["b1", "b2"], ["c1", "c2"], ["d1"], ["e1"]]
-                for g, ids in enumerate(grp_ids):
+                self.assertEqual(len([c for c in cards if c.r == first_row]), min(n, 5), f"columns in first band (want {min(n, 5)}; fixture has 5 groups)")
+                gs = group_cards(snap, cards)
+                self.assertEqual([len(g[2]) for g in gs], fx["sizes"], "cards per group, in group order")
+                for g, (tr, tx, gc) in enumerate(gs):
                     want_x = (g % n) * (colW + 2)
-                    gc = sorted((by_name(cards, NAMES[i]) for i in ids), key=lambda c: c.r)
-                    self.assertEqual({c.c for c in gc}, {want_x}, f"group {g} x (want {want_x})")
+                    self.assertEqual(tx, want_x, f"group {g} title column")
+                    self.assertEqual({c.c for c in gc}, {want_x}, f"group {g} cards x")
                     for a, b in zip(gc, gc[1:]):
                         self.assertEqual(b.r - a.r, 5, f"group {g} cards not stacked contiguously")
-                    title = snap[gc[0].r - 1].text
-                    self.assertIn("▾", title, f"group {g} title row: {title!r}")
-                    pos = snap[gc[0].r - 1].find("▾", want_x)
-                    self.assertEqual(pos, want_x, f"group {g} title column")
+                    self.assertEqual(gc[0].r, tr + 1, "cards start right under the title")
+                    seg = snap[tr].width_text(want_x, want_x + colW)
                     if g < 4:
-                        self.assertIn(f"{fx['groups'][g]} ({len(ids)})", title)
+                        self.assertIn(f"{fx['groups'][g]} ({len(gc)})", seg)
                     else:
-                        seg = snap[gc[0].r - 1].width_text(want_x, want_x + colW)
                         self.assertTrue("…" in seg and "final-dir (1)" in seg and seg.startswith("▾ "), f"middle-truncated title: {seg!r}")
-                # band order: row-major in fixture order
-                rows_of_group = [by_name(cards, NAMES[ids[0]]).r for ids in grp_ids]
-                for g in range(len(grp_ids)):
-                    for h in range(g + 1, len(grp_ids)):
-                        if g // n == h // n:
-                            self.assertEqual(rows_of_group[g], rows_of_group[h], "same band, different top row")
-                        else:
-                            self.assertLess(rows_of_group[g], rows_of_group[h])
+                    if g // n:  # a later band starts below the tallest column of the previous one
+                        self.assertGreater(tr, max(c.r for h in range(g // n * n - n, g // n * n) for c in gs[h][2]) + 4)
                 self.assertIn("agmux · 9 sessions", snap[0].text, "top bar")
                 bar = last_text_row(snap)
-                for k in ("j/k", "h/l", "enter", "H 交接", "s 发送", "r 重启", "x 杀", "d review", "q 退出"):
+                for k in (BAR_KEYS if W >= 100 else BAR_KEYS[:1]):
                     self.assertIn(k, bar, "bottom bar hints")
 
     def test_resize(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
         t = Term(env, w=200, h=100); self.addCleanup(t.close)
         self.assertTrue(ready(t))
-        for W in (114, 113, 200, 57, 230):
+        for W in (82, 81, 200, 232, 41, 250):
             t.resize(W, 100)
             n, colW = layout(W)
             ok = wait(lambda: (lambda cs: cs and len(cs) == 9 and all(c.ok and c.w == colW for c in cs) and
-                               len([c for c in cs if c.r == min(x.r for x in cs)]) == n)(find_cards(t.snap())), 6)
+                               len([c for c in cs if c.r == min(x.r for x in cs)]) == min(n, 5))(find_cards(t.snap())), 6)
             self.assertTrue(ok, f"after resize to {W} (want n={n}, colW={colW}):\n{t.text()}")
 
 
+BAND = {"claude": (255, 184, 108), "codex": (80, 250, 123), "other": (98, 114, 164)}  # #ffb86c #50fa7b #6272a4
+ICON = {"claude": "\uec82", "codex": "\uec81", "other": "\uec20"}
+STATUS_COLOUR = {"working": ("rgb", 255, 184, 108), "done": ("rgb", 80, 250, 123), "idle": C_DIM, "alert": C_RED}  # border = status colour
+C_FOCUS = ("rgb", 255, 142, 190)  # #ff8ebe: the focused card's thick border, overriding the status colour
+PROMPT_TEXT = ("先修折行", "构建完成", "修 折行", "<leader>", "后台任务", "← orch", "← peer", "cross-session", "task-notification")
+
+
+def border_colours(card):
+    return {x[1] for x in card.border_cells()}
+
+
 class Content(unittest.TestCase):
-    """200x50 (the T3 acceptance geometry): card content, colours, focus."""
+    """200x50: 4 columns of 48. Card = 5 rows: border / avatar+icon+name·status·time / avatar+branch·model / bar·agents·shell / border."""
+
+    W = 200
 
     @classmethod
     def setUpClass(cls):
         cls.env = Env(); cls.fx = build_fixture(cls.env)
-        cls.t = Term(cls.env, w=200, h=50)
+        cls.t = Term(cls.env, w=cls.W, h=50)
         cls.cards = ready(cls.t)
         assert cls.cards, "cards never appeared:\n" + cls.t.text()
         cls.snap = cls.t.snap()
@@ -100,10 +118,12 @@ class Content(unittest.TestCase):
     def card(self, sid):
         return by_name(self.cards, NAMES[sid])
 
-    def test_fits_50_rows_and_geometry(self):
+    def test_geometry(self):
+        n, colW = layout(self.W)
         self.assertTrue(all(c.ok for c in self.cards), [c.why for c in self.cards if not c.ok])
-        self.assertEqual({c.w for c in self.cards}, {layout(200)[1]})  # 3 columns, colW 64
-        self.assertEqual(len([c for c in self.cards if c.r == min(x.r for x in self.cards)]), 3)
+        self.assertEqual({c.w for c in self.cards}, {colW})
+        self.assertEqual(len([c for c in self.cards if c.r == min(x.r for x in self.cards)]), min(n, 5))
+        self.assertTrue(all(len(c.rows) == 5 for c in self.cards), "5 rows: border + 3 body + border (no prompt row)")
 
     def test_names_and_fallback(self):
         scr = self.t.text()
@@ -111,119 +131,148 @@ class Content(unittest.TestCase):
             self.assertIn(n, scr)
         for bad in ("None", "null", "<nil>"):
             self.assertNotIn(bad, scr)
-        c = self.card("a3")
-        self.assertIn("…", c.line(1), "long CJK name should be truncated with …")
+        self.assertIn("…", self.card("a3").line(1), "long CJK name truncated with …")
+        self.assertTrue(self.card("a3").ok, "CJK truncation must keep the border aligned")
 
-    def test_name_colour_magenta(self):
-        c = self.card("a1")
-        i = c.rows[1].find("alpha-main")
-        self.assertGreaterEqual(i, 0)
-        self.assertTrue(is_magenta(c.rows[1].cells[i][1]), c.rows[1].cells[i])
+    def test_no_prompt_row(self):
+        scr = self.t.text()
+        for gone in PROMPT_TEXT + ("\U000f0b7b",):
+            self.assertNotIn(gone, scr, "S1.1 dropped the lastPrompt / backgroundDetail row")
+
+    def test_line1_icon_name_status_time(self):
+        for sid, agent in (("a1", "claude"), ("b1", "codex"), ("c1", "other"), ("a2", "claude")):
+            c = self.card(sid); row = c.rows[1]
+            i = row.find(ICON[agent]); self.assertGreaterEqual(i, 0, f"{sid}: agent icon {ICON[agent]!r} in {c.line(1)!r}")
+            got = rgb(row.cells[i][1])  # +-1: lipgloss/termenv truncates floats, so #6272a4 arrives as (97,113,163)
+            self.assertTrue(got and all(abs(g - w) <= 1 for g, w in zip(got, BAND[agent])), f"{sid}: icon has the band colour {BAND[agent]}, got {got}")
+            self.assertTrue(row.text.index(ICON[agent]) < row.text.index(NAMES[sid][:4]), "icon before the name")
+            j = row.find(NAMES[sid]); self.assertTrue(is_magenta(row.cells[j][1]), f"{sid}: name magenta")
+            self.assertRegex(c.line(1), r"\b1m [│┃]$", f"{sid}: relative time is the last thing before the border")
+        self.assertIn("⏵ working · Bash", self.card("a1").line(1))
+        self.assertIn("⏸ idle", self.card("a2").line(1))
+        self.assertIn("⏵ working · agents", self.card("b1").line(1), "raw idle + working subagent")
+        self.assertIn("● done", self.card("c2").line(1)); self.assertIn("● done", self.card("e1").line(1), "attentionState read also counts")
+        self.assertIn("⏳ waiting", self.card("d1").line(1))
+        self.assertIn("working", self.card("a3").line(1))
+        i = self.card("a1").rows[1].find("working"); self.assertTrue(is_orange(self.card("a1").rows[1].cells[i][1]))
+        i = self.card("d1").rows[1].find("waiting"); self.assertTrue(is_red(self.card("d1").rows[1].cells[i][1]))
+        i = self.card("c2").rows[1].find("done"); self.assertTrue(is_green(self.card("c2").rows[1].cells[i][1]))
+        i = self.card("a2").rows[1].find("idle"); r = rgb(self.card("a2").rows[1].cells[i][1]); self.assertTrue(r and r[2] >= r[0], "idle blue-grey")
+        self.assertNotIn("agents", self.card("a1").line(1).replace("⚇ 2 agents", ""), "raw working: pendingTool, never `agents`")
+
+    def test_line2_branch_model(self):
+        a1, a2 = self.card("a1"), self.card("a2")
+        self.assertIn("⑂ feature/qa", a1.line(2)); self.assertIn("…", a1.line(2), "long branch truncated")
+        self.assertIn("⑂ main", a2.line(2))
+        self.assertRegex(a1.line(2), r"Opus 5\.5 [│┃]$", "model sits at the right edge (jsonl fallback: claude-opus-5-5)")
+        self.assertNotRegex(a2.line(2), r"Opus|Sonnet|Fable", "no model known -> nothing on the right")
+
+    def test_line3_bar_and_counts(self):
+        a1, b1 = self.card("a1"), self.card("b1")
+        self.assertEqual(a1.rows[3].find("■"), 2, "the bar starts under the avatar, at the left edge of the body")
+        self.assertEqual(a1.rows[3].find(" 41%"), 8, "6 cells: exactly as wide as the avatar above it")
+        self.assertIn("⚇ 2 agents", a1.line(3)); self.assertRegex(a1.line(3), r"agents [│┃]$")
+        self.assertIn("⚇ 1 agent", b1.line(3)); self.assertNotIn("1 agents", b1.line(3))
+        for sid in NAMES:
+            if sid not in ("a1", "b1"):
+                self.assertNotIn("agent", self.card(sid).line(3), f"{sid}: 0 subagents -> segment hidden")
+            self.assertNotIn("shell", self.card(sid).line(3), "S1 shells fixed 0 -> hidden")
 
     def test_context_bar(self):
         exp = {"alpha-main": C_YELLOW, "bravo-29": C_GREEN, "charlie-30": C_YELLOW, "charlie-59": C_YELLOW, "delta-60": C_RED}
         for name, col in exp.items():
             with self.subTest(name):
-                c = by_name(self.cards, name); p = self.fx["pct"][name]
-                row = c.rows[2]
+                c = by_name(self.cards, name); p = self.fx["pct"][name]; row = c.rows[3]
                 sq = [x for x in row.cells if x[0] == "■"]
-                self.assertEqual(len(sq), 10, row.text)
+                self.assertEqual(len(sq), 6, row.text)
                 filled = [x for x in sq if x[1] != C_DIM]
-                self.assertIn(len(filled), {p // 10, round(p / 10)}, f"{p}% filled cells")  # rounding rule unspecified
+                self.assertEqual(len(filled), (p * 6 + 50) // 100, f"{p}%: filled cells of 6 (rounded)")
                 self.assertTrue(all(x[1] == col for x in filled), f"{p}% colour {[x[1] for x in filled]} want {col}")
-                self.assertTrue(all(x[1] == C_DIM for x in sq[len(filled):]) and all(x[1] == C_DIM for x in sq if x not in filled))
-                self.assertIn(f"{p}%", row.text)
-        c = self.card("a2")  # no HUD file
-        sq = [x for x in c.rows[2].cells if x[0] == "■"]
-        self.assertEqual((len(sq), {x[1] for x in sq}), (10, {C_DIM}))
-        self.assertIn("--", c.line(2))
+                self.assertTrue(all(x[1] == C_DIM for x in sq[len(filled):]))
+                self.assertIn(f"{p}%", row.text, "the number is the truncated percentage")
+        c = self.card("a2")
+        sq = [x for x in c.rows[3].cells if x[0] == "■"]
+        self.assertEqual((len(sq), {x[1] for x in sq}), (6, {C_DIM})); self.assertIn("--", c.line(3))
 
-    def test_border_colours(self):
-        for sid in ("a3", "d1"):  # attentionType set / status waiting
-            self.assertTrue(all(is_red(x[1]) for x in self.card(sid).border_cells()), f"{sid}: whole border red")
-        for sid in ("a2", "b1", "c1", "c2", "e1"):
-            self.assertFalse(any(is_red(x[1]) for x in self.card(sid).border_cells()), f"{sid} border must not be red")
+    def test_border_colour_is_status_colour(self):
+        self.assertEqual(border_colours(self.card("a1")), {C_FOCUS}, "a1 is focused: #ff8ebe overrides its (working) status colour")
+        want = {"a2": "idle", "a3": "alert", "b1": "working", "b2": "idle", "c1": "idle", "c2": "done", "d1": "alert", "e1": "done"}
+        for sid, st in want.items():
+            self.assertEqual(border_colours(self.card(sid)), {STATUS_COLOUR[st]}, f"{sid} ({st}): every border cell has the status colour")
 
-    def test_status_and_segments(self):
-        a1, a2 = self.card("a1"), self.card("a2")
-        self.assertIn("⏵ working", a1.line(2)); self.assertIn("Bash", a1.line(2))
-        self.assertIn("⏸ idle", a2.line(2))  # (a2 is raw idle, no attentionState)
-        self.assertIn("2 agents", a1.line(2))
-        for sid in NAMES:
-            if sid not in ("a1", "b1"):
-                self.assertNotIn("agent", self.card(sid).line(2), f"{sid}: 0 subagents -> segment hidden")
-            self.assertNotIn("shell", self.card(sid).line(2), "S1 shells fixed 0 -> hidden")
-        b1 = self.card("b1").line(2)
-        self.assertIn("⏵ working · agents", b1, "raw idle + a working subagent -> `⏵ working · agents` (ccmux getEffectiveStatus)")
-        self.assertNotIn("idle", b1); self.assertNotIn("done", b1); self.assertNotIn("Bash", b1)
-        self.assertNotIn("agents", self.card("a1").line(2).replace("⚇ 2 agents", ""), "raw working: pendingTool, never `agents`")
-        self.assertIn("● done", self.card("e1").line(2), "attentionState 'read' also counts as done")
-        d1, c2 = self.card("d1"), self.card("c2")
-        self.assertIn("⏳ waiting", d1.line(2))
-        i = d1.rows[2].find("waiting"); self.assertTrue(is_red(d1.rows[2].cells[i][1]), "waiting is red")
-        self.assertIn("● done", c2.line(2))
-        j = c2.rows[2].find("done"); self.assertTrue(is_green(c2.rows[2].cells[j][1]), "done is green")
-        i = a1.rows[2].find("working"); self.assertTrue(is_orange(a1.rows[2].cells[i][1]), "working is orange")
-        j = a2.rows[2].find("idle"); r = rgb(a2.rows[2].cells[j][1]); self.assertTrue(r and r[2] >= r[0], "idle is blue-grey")
-
-    def test_line1_branch_time(self):
-        a1 = self.card("a1")
-        self.assertIn("⑂ feature/qa", a1.line(1)); self.assertIn("…", a1.line(1))
-        self.assertRegex(a1.line(1), r"\b1m\b")
-        self.assertIn("⑂ main", self.card("a2").line(1))
-
-    def test_line3_prompt_model(self):
-        a1, b2 = self.card("a1"), self.card("b2")
-        self.assertIn("← orch: 先修折行", a1.line(3), "cross-session message -> ← <from-name>: <first body line>")
-        for bad in ("cross-session", "第二行不该出现", "<", "from-mode"):
-            self.assertNotIn(bad, a1.line(3))
-        self.assertIn("构建完成 (exit 0)", self.card("c2").line(3), "task-notification -> its <summary>")
-        for bad in ("task-id", "<", "x1"):
-            self.assertNotIn(bad, self.card("c2").line(3))
-        self.assertIn("修 折行 问题", self.card("d1").line(3), "other -> first non-empty line, paired tags stripped")
-        self.assertNotIn("第二行不该出现", self.card("d1").line(3))
-        e1 = self.card("e1").line(3)
-        for keep in ("<leader>w", "Vec<T>", "a < b"):
-            self.assertIn(keep, e1, "only paired lowercase tags are stripped; this stays verbatim")
-        a2 = self.card("a2").line(3)
-        self.assertIn("← peer:", a2, "empty cross-session body -> `← <from-name>:`"); self.assertNotIn("This came from", a2)
-        self.assertIn("opus", a1.line(3).lower(), "model from jsonl fallback (claude-opus-5-5)")
-        self.assertIn("后台任务：交接文档已写好", b2.line(3))
-        self.assertNotIn("should-not-show", b2.line(3))
+    def test_focus_is_a_thick_pink_border(self):
+        a1, a2 = self.card("a1"), self.card("a2")  # a1 is focused at start
+        self.assertEqual((a1.rows[0].cells[0][0], a1.rows[1].cells[0][0], a1.rows[4].cells[0][0]), ("┏", "┃", "┗"), "focused: thick line")
+        self.assertEqual(border_colours(a1), {C_FOCUS}, "focus: #ff8ebe, not the status colour")
+        self.assertNotIn(C_FOCUS, set().union(*(border_colours(c) for c in self.cards if c is not a1)), "only the focused card is pink")
+        for c in self.cards:
+            if c is not a1:
+                self.assertEqual((c.rows[0].cells[0][0], c.rows[1].cells[0][0]), ("╭", "│"), "unfocused: rounded thin line")
 
     def test_avatar_region_and_band_colour(self):
         for sid in NAMES:
             c = self.card(sid)
-            for i in (1, 2, 3):
+            for i in (1, 2):
                 chars = c.rows[i].width_text(2, 8)
                 self.assertEqual(len(chars), 6, f"{sid} row {i}")
                 self.assertTrue(set(chars) <= set(" ▀▄█"), f"{sid} row {i}: {chars!r}")
-        def band(sid):  # the bottom half-pixel of the last avatar row: fg of '▄', bg of '▀'
-            return [x[1] if x[0] == "▄" else x[2] for x in self.card(sid).rows[3].cells[2:8] if x[0] in ("▄", "▀")]
+                self.assertEqual(c.rows[i].width_text(8, 10), "  ", "two blank cells between avatar and text")
+            self.assertEqual(self.card(sid).rows[3].cells[2][0], "■", "row 3 is not part of the avatar")
+
+        def band(sid):  # bottom half-pixel of the last avatar row: fg of '▄', bg of '▀'
+            return [x[1] if x[0] == "▄" else x[2] for x in self.card(sid).rows[2].cells[2:8] if x[0] in ("▄", "▀")]
         self.assertTrue(any(is_orange(x) for x in band("a1")), f"claude band orange: {band('a1')}")
         self.assertTrue(band("b1") and all(is_green(x) for x in band("b1")), f"codex band green: {band('b1')}")
-        g = band("c1")  # c1 is idle -> whole head darkened, so only check it is neither orange nor green
+        g = band("c1")
         self.assertTrue(g and not any(is_orange(x) or is_green(x) for x in g), f"other agent band grey: {g}")
 
-    def test_initial_focus_highlight(self):
-        lums = {sid: lum(self.card(sid).rows[0].cells[0][1]) for sid in NAMES}
-        others = [v for sid, v in lums.items() if sid not in ("a1", "a3", "d1")]  # a3/d1: red border (attention/waiting)
-        self.assertGreater(lums["a1"], max(others), f"first card is focused and must have the brightest border: {lums}")
 
-    def test_focus_moves_and_brightens(self):
+class FocusMove(unittest.TestCase):
+    def test_pink_thick_border_follows_focus(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
-        t = Term(env, w=200, h=50); self.addCleanup(t.close)
-        cs = ready(t); self.assertTrue(cs)
-        sig = lambda cards: {n: [lum(x[1]) for x in by_name(cards, n).border_cells()] for n in NAMES.values()}
-        before = sig(cs)
+        t = Term(env, w=200, h=50); self.addCleanup(t.close); self.assertTrue(ready(t))
+        before = {n: border_colours(by_name(find_cards(t.snap()), n)) for n in NAMES.values()}
         t.keys("j")
-        after = wait(lambda: (lambda s: s if s != before else None)(sig(ready(t) or cs)), 3)
-        self.assertTrue(after, "border did not change after j")
-        changed = [n for n in before if before[n] != after[n]]
-        self.assertEqual(sorted(changed), ["alpha-main", "pj-fallback"], "only old and new focus change")
-        mean = lambda l: sum(v for v in l if v is not None) / len(l)
-        self.assertGreater(mean(after["pj-fallback"]), mean(before["pj-fallback"]), "focused border gets brighter")
-        self.assertLess(mean(after["alpha-main"]), mean(before["alpha-main"]), "old focus dims back")
+        self.assertTrue(wait(lambda: by_name(find_cards(t.snap()), NAMES["a2"]).rows[0].cells[0][0] == "┏", 3), "focus moved to a2 (thick)")
+        cs = find_cards(t.snap())
+        self.assertEqual(by_name(cs, NAMES["a1"]).rows[0].cells[0][0], "╭", "a1 back to rounded")
+        after = {n: border_colours(by_name(cs, n)) for n in NAMES.values()}
+        changed = sorted(n for n in NAMES.values() if after[n] != before[n])
+        self.assertEqual(changed, sorted([NAMES["a1"], NAMES["a2"]]), "only the old and the new focus change colour")
+        self.assertEqual(after[NAMES["a2"]], {C_FOCUS}); self.assertEqual(after[NAMES["a1"]], {STATUS_COLOUR["working"]}, "old focus gets its status colour back")
+
+
+class Wide232(unittest.TestCase):
+    """The user's popup: 232 columns -> 5 columns of 44, all five groups on one band."""
+
+    def test_five_columns(self):
+        env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
+        t = Term(env, w=232, h=50); self.addCleanup(t.close)
+        cs = ready(t); self.assertTrue(cs, t.text())
+        self.assertEqual(layout(232), (5, 44))
+        self.assertEqual({c.w for c in cs}, {44})
+        first = [c for c in cs if c.r == min(x.r for x in cs)]
+        self.assertEqual(sorted(c.c for c in first), [0, 46, 92, 138, 184], "5 columns")
+        titles = t.snap()[min(x.r for x in cs) - 1].text
+        self.assertEqual(titles.count("▾"), 5, titles)
+        self.assertEqual(len(t.text().rstrip("\n").split("\n")), 50)
+
+
+class Narrow(unittest.TestCase):
+    """40-wide columns (82 cols, 2 columns): status and time always stay; branch gives way first, then the name."""
+
+    def test_yielding_order(self):
+        env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
+        t = Term(env, w=82, h=100); self.addCleanup(t.close)
+        cs = ready(t); self.assertTrue(cs, t.text())
+        self.assertEqual({c.w for c in cs}, {40})
+        for c in cs:
+            l1 = c.line(1); sid = l1
+            self.assertRegex(l1, r"(⏵ working|⏸ idle|● done|⏳ waiting)( · \w+)?\s+\d+[smhd] [│┃]$", f"{sid}: status and time are always the right end of line 1: {l1!r}")
+        a1 = sorted(cs, key=lambda c: (c.r, c.c))[0]  # alpha-main: first group, first card (its name is cut to "alph…" next to a long status)
+        self.assertIn("alp", a1.line(1)); self.assertIn("…", a1.line(1), "the name gives way")
+        self.assertIn("⑂ feature", a1.line(2), "branch is cut (…) before the name is")
+        self.assertIn("Opus 5.5", a1.line(2), "model stays while the branch is cut")
 
 
 class StderrFooter(unittest.TestCase):
@@ -261,7 +310,7 @@ class ModelCache(unittest.TestCase):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs)
-        self.assertIn("opus", by_name(cs, "alpha-main").line(3).lower())
+        self.assertIn("opus", by_name(cs, "alpha-main").line(2).lower())
         log = env.tmp / "a1.jsonl"
         with open(log, "a") as f:  # a big attachment line: the assistant entry is now outside the 64KB tail
             f.write('{"type":"attachment","content":"' + "A" * (200 << 10) + '"}\n')
@@ -269,7 +318,38 @@ class ModelCache(unittest.TestCase):
         self.assertTrue(wait(lambda: env.show_calls() >= n0 + 2, 8), "board should have polled again")
         time.sleep(0.6)
         c = by_name(find_cards(t.snap()), "alpha-main")
-        self.assertIn("opus", c.line(3).lower(), "model must be kept from the previous poll:\n" + t.text())
+        self.assertIn("opus", c.line(2).lower(), "model must be kept from the previous poll:\n" + t.text())
+
+
+class HudModel(unittest.TestCase):
+    """T6 acceptance: the model.display_name that `agmux statusline` captured shows on the card (full chain: payload -> file -> store -> card)."""
+
+    def feed(self, env, sid, display_name, pct=33, **extra):
+        p = json.dumps({"session_id": sid, "model": {"display_name": display_name}, "context_window": {"used_percentage": pct, "remaining_percentage": 100 - pct}, **extra}).encode()
+        r = subprocess.run([BIN, "statusline"], input=p, capture_output=True, env={"PATH": "/usr/bin:/bin", "HOME": str(env.home), "XDG_STATE_HOME": str(env.state)})
+        assert r.returncode == 0, r.stderr
+
+    def test_display_name_and_percentage_from_statusline(self):
+        env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
+        self.feed(env, "n-b1", "Fancy Model 9", pct=77)  # b1 has no jsonl: the HUD name is the only model source
+        t = Term(env, w=200, h=50); self.addCleanup(t.close)
+        cs = ready(t); self.assertTrue(cs)
+        b1 = by_name(cs, "bravo-29")
+        self.assertRegex(b1.line(2), r"Fancy Model 9 [│┃]$", b1.line(2)); self.assertIn("77%", b1.line(3))
+        sq = [x for x in b1.rows[3].cells if x[0] == "■"]
+        self.assertEqual(len([x for x in sq if x[1] == C_RED]), (77 * 6 + 50) // 100, "77% -> red, 5 of 6 cells")
+
+    def test_effort_is_not_shown_yet(self):  # design: effort's field name is unverified, so it must not be read
+        env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
+        self.feed(env, "n-b1", "Fancy Model 9", effort="xhigh", reasoning_effort="xhigh", thinking={"effort": "xhigh"})
+        t = Term(env, w=200, h=50); self.addCleanup(t.close)
+        cs = ready(t); self.assertTrue(cs); self.assertNotIn("xhigh", t.text())
+
+    def test_live_update_when_statusline_runs_again(self):
+        env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
+        t = Term(env, w=200, h=50); self.addCleanup(t.close); self.assertTrue(ready(t))
+        self.feed(env, "n-b1", "Late Model", pct=12)
+        self.assertTrue(wait(lambda: "Late Model" in by_name(find_cards(t.snap()), "bravo-29").line(2), 8), "board should pick the file up on the next poll")
 
 
 class FooterMessages(unittest.TestCase):

@@ -9,7 +9,7 @@ BIN = os.environ.get("AGMUX_BIN") or os.path.expanduser("~/go/bin/agmux")
 SOCK = os.environ.get("AGMUX_TEST_SOCK", "agmux-test")  # convention: agmux-test; override when another session shares the machine
 HERE = pathlib.Path(__file__).resolve().parent
 
-_lock = open(HERE / ".lock", "w")
+_lock = open(HERE / f".lock-{os.environ.get('AGMUX_TEST_SOCK', 'agmux-test')}", "w")  # one runner per tmux socket name; other roles use other sockets
 fcntl.flock(_lock, fcntl.LOCK_EX)
 
 
@@ -45,6 +45,9 @@ d={d}
 if [ "$1" = show ]; then
   date +%s >> "$d/show.calls"
   if [ -e "$d/showfail" ]; then printf 'ccmux: show exploded\\nsecond poll-error line\\nthird poll-error line\\n' >&2; exit 1; fi
+  if [ -e "$d/orders" ]; then  # rotate through show.0.json .. show.N-1.json, one per poll
+    n=$(cat "$d/orders"); c=$(wc -l < "$d/show.calls"); cat "$d/show.$(( (c - 1) % n )).json"; exit 0
+  fi
   cat "$d/show.json"; exit 0
 fi
 printf '%s\\037' "$@" >> "$d/calls.log"; printf '\\n' >> "$d/calls.log"
@@ -67,6 +70,12 @@ exit 0
 
     def write_show(self, sessions):
         (self.fake / "show.json").write_text(json.dumps(sessions))
+
+    def write_show_orders(self, variants):
+        """Each poll gets the next variant (a different array order of the same sessions)."""
+        for i, v in enumerate(variants):
+            (self.fake / f"show.{i}.json").write_text(json.dumps(v))
+        (self.fake / "orders").write_text(str(len(variants)))
 
     def calls(self):
         p = self.fake / "calls.log"
@@ -284,7 +293,7 @@ def find_cards(snap, height=5):
             if not rows[-1].cells or not isin(rows[-1].cells[0][0], BL) or not isin(rows[-1].cells[-1][0], BR):  # empty row = capture caught a half-drawn frame
                 ok, why = False, "bottom corners missing / misaligned"
             for i in range(1, height - 1):
-                if len(rows[i].cells) < w or rows[i].cells[0][0] != "│" or rows[i].cells[-1][0] != "│":
+                if len(rows[i].cells) < w or not isin(rows[i].cells[0][0], "│┃") or not isin(rows[i].cells[-1][0], "│┃"):
                     ok, why = False, f"row {i} side borders misaligned: {rows[i].text!r}"
             cards.append(Card(r, c, w, rows, ok, why))
     return cards
@@ -396,6 +405,9 @@ def build_fixture(env, with_hud=True):
     )
 
 
+MIN_COL, GAP = 40, 2  # S1.1: column minimum 40 (was 56)
+
+
 def layout(W):
-    n = max(1, (W + 2) // 58)
+    n = max(1, (W + GAP) // (MIN_COL + GAP))
     return n, (W - 2 * (n - 1)) // n

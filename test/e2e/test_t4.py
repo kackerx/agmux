@@ -1,4 +1,4 @@
-"""T4 interaction + store polling. Spec: specs/design.md「交互」, specs/tasks.md T4 (x: y runs / any other key cancels; s: enter sends, esc or empty cancels).
+"""T4 interaction + store polling. Spec: specs/m1-mvp/design.md「交互」, specs/m1-mvp/tasks.md T4 (x: y runs / any other key cancels; s: enter sends, esc or empty cancels).
 
 The fake `ccmux` on PATH records argv of every non-`show` call, so each key is checked end-to-end as the exact command line.
 Focus order (d966219: h/l step through groups sorted by cwd, j/k within a group; ci is clamped):
