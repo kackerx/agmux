@@ -433,7 +433,7 @@ func footerFor(c *config.Config) []footerKey {
 	k := c.First
 	return []footerKey{
 		{k("down") + "/" + k("up") + " " + k("left") + "/" + k("right") + " move", false},
-		{k("jump") + " jump", true}, {k("search") + " search", false}, {k("fold") + " fold", false}, {k("preview") + " preview", false},
+		{k("jump") + " jump", true}, {k("search") + " search", false}, {k("flash") + " flash", false}, {k("fold") + " fold", false}, {k("preview") + " preview", false},
 		{k("focus_preview") + " focus preview", true}, {k("reply") + " reply", true}, {k("handoff") + " handoff", true},
 		{k("restart") + " restart", false}, {k("kill") + " kill", false}, {k("review") + " review", false},
 		{k("avatar") + " avatar", false}, {k("quit") + " quit", false},
@@ -472,12 +472,48 @@ func overlay(screen string, box []string, w int) string {
 		if y+i >= len(lines) {
 			break
 		}
-		l := lines[y+i]
-		// resets: an SGR left open where a line is cut must not color the box, nor the box the rest
-		lines[y+i] = pad(ansi.Truncate(l, x, ""), x) + "\x1b[0m" + ansi.Truncate(b, bw, "") + "\x1b[0m" + ansi.TruncateLeft(l, x+bw, "")
+		lines[y+i] = put(lines[y+i], x, ansi.Truncate(b, bw, ""))
 	}
 	return strings.Join(lines, "\n")
 }
+
+// put draws s over line from column x.
+func put(line string, x int, s string) string {
+	// resets: an SGR left open where the line is cut must not color s, nor s the rest
+	return pad(ansi.Truncate(line, x, ""), x) + "\x1b[0m" + s + "\x1b[0m" + ansi.TruncateLeft(line, x+ansi.StringWidth(s), "")
+}
+
+// flashAlphabet: home row first, as flash.tmux and sqlmux; then the same in upper case.
+const flashAlphabet = "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM"
+
+// flashLabels gives the cards (and folded titles) labels, nearest to the focused one first:
+// rows weigh a whole width w (|dy|*w + |dx|), ties go by screen order. Past 52, no label.
+func flashLabels(rects []rect, focus string, w int) map[string]string {
+	var f rect
+	for _, r := range rects {
+		if r.id == focus {
+			f = r
+		}
+	}
+	dist := func(r rect) int { return abs(r.y-f.y)*w + abs(r.x-f.x) }
+	rs := slices.Clone(rects)
+	slices.SortStableFunc(rs, func(a, b rect) int {
+		if d := dist(a) - dist(b); d != 0 {
+			return d
+		}
+		if a.y != b.y {
+			return a.y - b.y
+		}
+		return a.x - b.x
+	})
+	labels := map[string]string{}
+	for i, r := range rs[:min(len(rs), len(flashAlphabet))] {
+		labels[flashAlphabet[i:i+1]] = r.id
+	}
+	return labels
+}
+
+func abs(n int) int { return max(n, -n) }
 
 // footer is ccmux's key line; keys that need a tmux pane go dark for background sessions.
 func footer(noPane bool, w int) string {
@@ -518,4 +554,9 @@ func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, 
 	// ccmux stderr is often multi-line; one line keeps the screen exactly h tall
 	out = append(out, ansi.Truncate(firstLine(msg), w, "…"), footer(noPane, w))
 	return strings.Join(out, "\n"), rects, off
+}
+
+// flashLabel: like a yank highlight, the focus color behind dark text.
+func flashLabel(l string) string {
+	return lipgloss.NewStyle().Background(cFocus).Foreground(lipgloss.Color("#282a36")).Bold(true).Render(l)
 }

@@ -16,6 +16,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
@@ -67,6 +68,7 @@ const (
 	browsing mode = iota
 	confirmKill
 	pickAvatar // the avatar list is open; it has the keys
+	flashing   // s: every card wears a label; pressing one moves the focus there
 )
 
 type Model struct {
@@ -86,6 +88,8 @@ type Model struct {
 	query      string // the / filter; "" = every card
 	searching  bool   // the filter's input box has the keys
 	searchFrom string // the focus when / was pressed: esc puts it back
+
+	labels map[string]string // flash label → card (or folded title) ID, fixed when s was pressed
 
 	preview   bool       // p: show the focused pane on the right
 	pv        previewMsg // the latest capture
@@ -338,6 +342,13 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.kill(m.target)
+	case flashing: // a label moves the focus and ends it, esc just ends it; other keys do nothing
+		if id, ok := m.labels[k.String()]; ok {
+			m.mode, m.focus, m.msg = browsing, id, ""
+		} else if k.Type == tea.KeyEsc {
+			m.mode = browsing
+		}
+		return m, nil
 	case pickAvatar: // other keys do nothing while the list is open
 		switch m.keymap[k.String()] {
 		case "up":
@@ -357,6 +368,10 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return doneMsg{ok: ok, err: src.SetAvatar(s, sp.ID)}
 			}
 		}
+		return m, nil
+	}
+	if k.Type == tea.KeyEsc && m.query != "" && m.keymap["esc"] == "quit" { // a kept filter goes first
+		m.query = ""
 		return m, nil
 	}
 	return m.do(m.keymap[k.String()])
@@ -403,6 +418,14 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch action {
+	case "flash":
+		if m.w == 0 {
+			return m, nil
+		}
+		// ponytail: labels cards scrolled off screen too; fine while a board fits a screen or two.
+		_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.folded, nil)
+		m.mode, m.labels, m.msg = flashing, flashLabels(rects, m.focus, m.cardsW()), ""
+		return m, nil
 	case "search": // with a filter on, / edits it
 		m.searching, m.searchFrom, m.msg = true, m.focus, ""
 		return m, nil
@@ -753,7 +776,7 @@ func (m Model) View() string {
 		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.passThrough())
 	}
 	ss, hits := m.shown()
-	out, _, _ := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right, hits)
+	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right, hits)
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
 		cursor := ""
 		if m.searching {
@@ -766,7 +789,23 @@ func (m Model) View() string {
 		}
 		out = strings.Join(lines, "\n")
 	}
+	if m.mode == flashing { // the board dims, every card shows its label on its top border
+		lines := strings.Split(out, "\n")
+		for i := 1; i < len(lines)-2; i++ {
+			lines[i] = fg(cMuted, ansi.Strip(lines[i]))
+		}
+		for label, id := range m.labels {
+			for _, r := range rects {
+				if y := 1 + r.y - off; r.id == id && y >= 1 && y < len(lines)-2 {
+					lines[y] = put(lines[y], r.x+1, flashLabel(label))
+				}
+			}
+		}
+		out = strings.Join(lines, "\n")
+	}
 	switch { // the footer is always the last line
+	case m.mode == flashing:
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " jump: press a label · esc cancel")
 	case m.searching:
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " enter keep the filter · esc clear it")
 	case m.mode == pickAvatar:

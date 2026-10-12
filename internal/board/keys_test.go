@@ -187,7 +187,7 @@ func TestKeys(t *testing.T) {
 		{"d reviews interactively", []string{"d"}, [][]string{{"(interactive)", "review", "a1"}}, false},
 		{"x y kills", []string{"x", "y"}, [][]string{{"kill", "a1"}}, false},
 		{"x other cancels", []string{"x", "n", "x", "q"}, nil, false},
-		{"background: enter / H / s refused", []string{"j", "enter", "H", "s", "x", "y"}, [][]string{{"kill", "a2"}}, false},
+		{"background: enter / H / i refused", []string{"j", "enter", "H", "i", "x", "y"}, [][]string{{"kill", "a2"}}, false},
 		{"q quits", []string{"q"}, nil, true},
 		{"arrow keys move", []string{"down", "r", "up", "right", "r"}, [][]string{{"restart", "a2"}, {"restart", "b1"}}, false},
 		{"up comes back", []string{"down", "up", "r"}, [][]string{{"restart", "a1"}}, false},
@@ -1841,8 +1841,8 @@ func TestSearchFilter(t *testing.T) {
 	if m = tm.(Model); m.query != "a" {
 		t.Errorf("ctrl+h is backspace: %q", m.query)
 	}
-	if !strings.Contains(ansi.Strip(footer(false, 300)), "enter jump · / search · f fold") {
-		t.Error("footer: … enter jump · / search · f fold …")
+	if !strings.Contains(ansi.Strip(footer(false, 300)), "enter jump · / search · s flash · f fold") {
+		t.Error("footer: … enter jump · / search · s flash · f fold …")
 	}
 }
 
@@ -1911,5 +1911,77 @@ func TestBranchHilite(t *testing.T) {
 	defer lipgloss.SetColorProfile(old)
 	if l := line2(store.Session{Branch: "cd"}, 36, []int{1}); !strings.Contains(l, fg(cFocus, "d")) || strings.Contains(l, fg(cFocus, "c")) {
 		t.Errorf("%q", l)
+	}
+}
+
+// Labels go nearest-first from the focused card (itself: a); a row away weighs a whole width.
+func TestFlashLabels(t *testing.T) {
+	var rects []rect
+	for _, y := range []int{0, 6, 12} {
+		for _, x := range []int{0, 50, 100} {
+			rects = append(rects, rect{id: fmt.Sprintf("%d,%d", x, y), x: x, y: y})
+		}
+	}
+	got := flashLabels(rects, "50,6", 150)
+	want := map[string]string{"a": "50,6", "s": "0,6", "d": "100,6", "f": "50,0", "g": "50,12", "h": "0,0", "j": "100,0", "k": "0,12", "l": "100,12"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("%v\nwant %v", got, want)
+	}
+	many := make([]rect, 60)
+	for i := range many {
+		many[i] = rect{id: fmt.Sprint(i), x: 0, y: i * 5}
+	}
+	l := flashLabels(many[:30], "0", 100)
+	if l["m"] != "25" || l["A"] != "26" || l["F"] != "29" {
+		t.Errorf("past 26 come upper case: %v", l)
+	}
+	if l := flashLabels(many, "0", 100); len(l) != 52 || l["M"] != "51" {
+		t.Errorf("52 labels at most: %d", len(l))
+	}
+}
+
+// s: labels on every card's top border, the rest dim; a label moves the focus (no jump), esc
+// cancels, other keys are ignored.
+func TestFlash(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "s")
+	v := m.View()
+	lines := strings.Split(ansi.Strip(v), "\n")
+	if !strings.HasPrefix(lines[2], "┏a━") || !strings.HasPrefix(lines[7], "╭d─") || !strings.Contains(lines[2], "╭s─") || !strings.Contains(v, flashLabel("s")) {
+		t.Fatalf("labels a / s / d on one, three, two:\n%q", lines[:9])
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "jump: press a label · esc cancel") {
+		t.Errorf("footer %q", last)
+	}
+	if strings.Contains(v, fg(cName, "one")) || !strings.Contains(v, fg(cMuted, ansi.Strip(strings.Split(v, "\n")[3]))) {
+		t.Error("the board dims behind the labels")
+	}
+	m, quit := press(t, m, "1", "z", "q", "d")
+	if quit || m.mode != browsing || m.focus != "a2" || len(r.calls) != 0 {
+		t.Errorf("non-labels ignored, d → two: quit %v mode %v focus %s calls %q", quit, m.mode, m.focus, r.calls)
+	}
+	m, _ = press(t, m, "s", "esc")
+	if m.mode != browsing || m.focus != "a2" {
+		t.Errorf("esc cancels: mode %v focus %s", m.mode, m.focus)
+	}
+	m, _ = press(t, m, "l", "f", "h", "s", "s") // /b folded: its title is a target too
+	if m.focus != headerID("/b") {
+		t.Errorf("folded title: focus %q", m.focus)
+	}
+}
+
+// With a filter kept, esc drops it first; the next esc quits.
+func TestEscClearsKeptFilter(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "/")
+	m = typeKeys(t, m, "thr")
+	m, quit := press(t, m, "enter", "esc")
+	if quit || m.query != "" {
+		t.Fatalf("quit %v query %q", quit, m.query)
+	}
+	if _, quit = press(t, m, "esc"); !quit {
+		t.Error("then esc quits")
 	}
 }
