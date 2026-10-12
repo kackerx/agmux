@@ -47,6 +47,9 @@
 - `a`（`keys.avatar`）在焦点卡片上打开居中的浮层列表：每行一个 sprite（2 行渲染）+ `id  name`，当前绑定的那行用 focus 色标出；`up`/`down` 移动，`jump`（enter）绑定并关闭，`quit`（esc）取消。绑定立刻写 avatars.json，卡片下一帧换头像。
 - 浮层打开时其它键无效；预览获焦时 `a` 不拦截（直通）。
 - 折叠标题或无名字的会话：按名字绑不了就按 session ID 绑，消息行提示 "bound to session id (name missing)"。
+- 「会话名」= 卡片上显示的名字（summary，没有就是 project），同一 project 里没 summary 的会话共用一个绑定——用户在配置里写的就是卡片上看到的。
+- 浮层打开时光标停在**当前头像**那一行（直接 enter 等于不改）。
+- 旧 avatars.json 里按 session ID 写的条目不迁移（ID 每次重启都变）。
 
 ## `/` 模糊搜索过滤（用户 2026-10-12 新增；细节照 sqlmux 的实现对齐：~/proj/sqlmux internal/ui/match.go、internal/app/tree.go）
 - 算法：和 sqlmux 一样直接用 fzf 的 `github.com/junegunn/fzf/src/algo`（MIT）`FuzzyMatchV2`，得分和高亮位置与 fzf 完全一致；它不是稳定 API，**固定版本**、只在 `internal/fuzzy/match.go` 一个文件里封装（`Filter(pattern, items) []Match{Index, Score, Pos}`），`init()` 里 `algo.Init("default")`。
