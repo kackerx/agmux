@@ -8,7 +8,7 @@ agmux = 基于 ccmux（v1.4.3）的 CLI + TUI，用来看和管理 tmux 里跑�
 |---|---|---|---|
 | M1 MVP | 看板浮窗 `agmux board`：按 cwd 分列的卡片、像素头像、键位 / 鼠标操作、`agmux statusline` 透传拿上下文 | T1–T8 通过；T9 审查通过、T13 审查测试中 | [m1-mvp/design.md](m1-mvp/design.md) · [m1-mvp/tasks.md](m1-mvp/tasks.md) |
 | M2 预览 | 右侧预览窗口：tmux 抓屏 + 按键直通回复；switch / send 迁到 tmux；sidebar 和详情页顺延 | 全部通过；整套回归 fa040a5（d27522d 上 342 条） | [m2-preview/design.md](m2-preview/design.md) · [m2-preview/tasks.md](m2-preview/tasks.md) |
-| M3 配置与定制 | 界面文案全英文；配置文件：键位、状态色 / 焦点色、头像；面板里选头像 | T16–T20 全部通过（5c42cb1）；待用户验收；T21（预览 tab 进出）、T22（搜索黄底 + n/N）、T23（flash 改先打子串）、T24（预览画光标）排队 | [m3-config/design.md](m3-config/design.md) · [m3-config/tasks.md](m3-config/tasks.md) |
+| M3 配置与定制 | 界面文案全英文；配置文件：键位、状态色 / 焦点色、头像；面板里选头像 | T16–T20 全部通过（5c42cb1）；待用户验收；T21（预览 tab 进出）、T22（搜索黄底 + n/N）、T23（flash 改先打子串）、T24（预览画光标）开发中；第三批 T25（最大列数可配）、T26（边框统一灰色）排队 | [m3-config/design.md](m3-config/design.md) · [m3-config/tasks.md](m3-config/tasks.md) |
 | M4 agmux mod | Claude Code 插件：后台 shell 明细、`$.session.usage()` 直读上下文、`session.receive` 拦截交接 | 备忘 | [m4-mod.md](m4-mod.md) |
 | 之后 | 用户手动选择 / 绑定头像的 UI；拓扑视图；Postgres 持久化；分组键切换 | backlog | 见下「预留扩展点」 |
 
