@@ -255,3 +255,28 @@ func TestMaxColumns(t *testing.T) {
 		}
 	}
 }
+
+// T26: colors.border, empty by default (borders follow the status); "" is allowed only there.
+func TestBorderColor(t *testing.T) {
+	if Default().Colors["border"] != "" || !strings.Contains(Default().String(), "border = \"\"\n") {
+		t.Errorf("default %q", Default().Colors["border"])
+	}
+	c, err := Parse("cfg", []byte("[colors]\nborder = \"#585b70\"\n"))
+	if err != nil || c.Colors["border"] != "#585b70" {
+		t.Errorf("%v %q", err, c.Colors["border"])
+	}
+	if back, err := Parse("cfg", []byte(c.String())); err != nil || back.Colors["border"] != "#585b70" {
+		t.Errorf("round trip: %v", err)
+	}
+	if c, err = Parse("cfg", []byte("[colors]\nborder = \"\"\n")); err != nil || c.Colors["border"] != "" {
+		t.Errorf("an empty border is the default spelled out: %v", err)
+	}
+	if back, err := Parse("cfg", []byte(Default().String())); err != nil || back.Colors["border"] != "" {
+		t.Errorf("the printed default loads back: %v", err)
+	}
+	for _, toml := range []string{"[colors]\nborder = \"gray\"\n", "[colors]\nworking = \"\"\n", "[colors]\nborder = \"300\"\n"} {
+		if _, err := Parse("cfg", []byte(toml)); err == nil || !strings.Contains(err.Error(), "is neither #rrggbb nor an ANSI color") {
+			t.Errorf("%q: %v", toml, err)
+		}
+	}
+}

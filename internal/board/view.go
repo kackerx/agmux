@@ -48,6 +48,7 @@ var (
 	cBarHigh  = lipgloss.Color("#ff6188") // ≥ 60%
 	cBarEmpty = lipgloss.Color("#585b70")
 	cFocus    = lipgloss.Color("#ff8ebe")
+	cBorder   = lipgloss.Color("")        // every card's border but the focused one's; empty: follows the status
 	cMatch    = lipgloss.Color("#f2d06b") // search hits: this background, dark text, like nvim's Search
 	cOff      = lipgloss.Color("#45475a") // disabled footer keys
 )
@@ -55,7 +56,7 @@ var (
 // useConfig applies config.toml: colors, and the footer built from the key bindings.
 func useConfig(c *config.Config) {
 	for name, v := range map[string]*lipgloss.Color{
-		"working": &cWorking, "idle": &cDim, "done": &cDone, "attention": &cRed, "focus": &cFocus, "match": &cMatch,
+		"working": &cWorking, "idle": &cDim, "done": &cDone, "attention": &cRed, "focus": &cFocus, "match": &cMatch, "border": &cBorder,
 		"name": &cName, "branch": &cBranch, "model": &cModel, "effort": &cEffort, "dir": &cDir,
 		"bar_low": &cGreen, "bar_mid": &cYellow, "bar_high": &cBarHigh, "bar_empty": &cBarEmpty,
 		"muted": &cMuted, "disabled": &cOff,
@@ -261,6 +262,9 @@ func card(s store.Session, w, h int, focused bool, frame int, now time.Time, hl 
 		border, mood = cDone, avatar.Normal
 	case s.Status != "idle":
 		mood = avatar.Normal
+	}
+	if cBorder != "" { // one color for them all: the status shows in the status line and the avatar
+		border = cBorder
 	}
 	bs := lipgloss.RoundedBorder()
 	if focused { // a thick line in its own color: a status-colored thick line was too easy to miss

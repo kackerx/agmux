@@ -94,6 +94,7 @@ leave_preview = ["tab"]       # 默认和 focus_preview 同一个键（进出都
 working = "#ffb86c"
 focus = "#ff8ebe"
 match = "#f2d06b"   # 搜索命中字符的底色（字固定深色 #2d2a2e）
+border = "#585b70"  # 所有非焦点卡的边框统一用这个色（默认空 = 边框跟状态变色）；焦点卡仍是 focus，状态行和头像神态仍按状态着色
 
 [layout]
 max_columns = 4                     # 终端够宽时最多几列卡片（1–8）；每列至少 40 列宽，所以窄终端到不了这个数（5 列约需 ≥ 200 列）

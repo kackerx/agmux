@@ -1772,6 +1772,9 @@ func TestEveryColorWired(t *testing.T) {
 	toml := "[colors]\n"
 	sgr := map[string]string{}
 	for i, n := range config.Colors {
+		if n == "border" { // set, it replaces the status colors on borders: TestBorderColor
+			continue
+		}
 		toml += fmt.Sprintf("%s = \"#0000%02x\"\n", n, i+1)
 		sgr[n] = fmt.Sprintf("38;2;0;0;%dm", i+1)
 	}
@@ -3137,5 +3140,60 @@ func TestMaxColumnsLayout(t *testing.T) {
 	m := psized(ss, 232, 30)
 	if v := strings.Split(ansi.Strip(m.View()), "\n")[1]; strings.Count(v, "▾") != 5 {
 		t.Errorf("five groups in the first row: %q", v)
+	}
+}
+
+// T26: with colors.border set every unfocused card has that border; the focused one keeps the focus
+// color; the status line and the avatar's mood still follow the status. Unset, borders follow the status.
+func TestBorderColor(t *testing.T) {
+	trueColor(t)
+	defer useConfig(config.Default())
+	mk := func(status string, mod func(*store.Session)) store.Session {
+		s := store.Session{ID: "x", Name: "n", Status: status, AvatarID: "bot-01", AgentType: "claude", ContextPct: -1}
+		if mod != nil {
+			mod(&s)
+		}
+		return s
+	}
+	cards := map[string]store.Session{
+		"working": mk("working", nil), "idle": mk("idle", nil), "done": mk("idle", func(s *store.Session) { s.Done = true }),
+		"alert": mk("idle", func(s *store.Session) { s.Attention = "permission" }), "waiting": mk("waiting", nil),
+	}
+	statusColor := map[string]lipgloss.Color{"working": cWorking, "idle": cDim, "done": cDone, "alert": cRed, "waiting": cRed}
+	sgr := func(c lipgloss.Color) string { start, _, _ := strings.Cut(fg(c, "x"), "x"); return start }
+	top := func(name string, focused bool) string {
+		first, _, _ := strings.Cut(card(cards[name], 48, 5, focused, 0, now, hit{}), "\n")
+		return first
+	}
+	for name := range cards { // unset: as before
+		if got := top(name, false); !strings.HasPrefix(got, sgr(statusColor[name])+"╭") {
+			t.Errorf("%s unset: %q", name, got)
+		}
+	}
+	cfg, err := config.Parse("cfg", []byte("[colors]\nborder = \"#123456\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	useConfig(cfg)
+	for name := range cards {
+		if got := top(name, false); !strings.HasPrefix(got, "\x1b[38;2;18;52;86m╭") {
+			t.Errorf("%s: %q", name, got)
+		}
+		for _, l := range strings.Split(card(cards[name], 48, 5, false, 0, now, hit{}), "\n") {
+			if strings.HasPrefix(l, sgr(statusColor[name])+"│") && statusColor[name] != cBorder {
+				t.Errorf("%s: a side in the status color: %q", name, l)
+			}
+		}
+		if got := top(name, true); !strings.HasPrefix(got, sgr(cFocus)+"┏") {
+			t.Errorf("%s focused: %q", name, got)
+		}
+	}
+	// the status line and the avatar are untouched
+	if !strings.Contains(card(cards["working"], 48, 5, false, 0, now, hit{}), fg(cWorking, "⏵ working")) {
+		t.Error("the status word keeps its color")
+	}
+	sp, _ := avatar.ByID("bot-01")
+	if face := strings.Split(avatar.Render(sp, "claude", avatar.Alert, 0), "\n"); !strings.Contains(card(cards["alert"], 48, 5, false, 0, now, hit{}), face[0]) {
+		t.Error("the alert avatar keeps its mood")
 	}
 }

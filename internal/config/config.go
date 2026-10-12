@@ -37,12 +37,12 @@ var defaultKeys = map[string][]string{
 
 // Colors, in print order.
 var Colors = []string{
-	"working", "idle", "done", "attention", "focus", "match", "name", "branch", "model", "effort", "dir",
+	"working", "idle", "done", "attention", "focus", "match", "border", "name", "branch", "model", "effort", "dir",
 	"bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled",
 }
 
 var defaultColors = map[string]string{
-	"working": "#ffb86c", "idle": "#585b70", "done": "#50fa7b", "attention": "#ff6188", "focus": "#ff8ebe", "match": "#f2d06b",
+	"working": "#ffb86c", "idle": "#585b70", "done": "#50fa7b", "attention": "#ff6188", "focus": "#ff8ebe", "match": "#f2d06b", "border": "",
 	"name": "5", "branch": "12", "model": "14", "effort": "13", "dir": "11",
 	"bar_low": "#a6e3a1", "bar_mid": "#f9e2af", "bar_high": "#ff6188", "bar_empty": "#585b70",
 	"muted": "#6272a4", "disabled": "#45475a",
@@ -160,6 +160,10 @@ func Parse(path string, data []byte) (*Config, error) {
 	for name, v := range raw.Colors {
 		if _, ok := defaultColors[name]; !ok {
 			return nil, fmt.Errorf("%s: colors.%s: unknown color (one of %s)", path, name, strings.Join(Colors, ", "))
+		}
+		if name == "border" && v == "" { // empty: borders follow the status, as before
+			c.Colors[name] = v
+			continue
 		}
 		if n, err := strconv.Atoi(v); !colorRe.MatchString(v) && (err != nil || n < 0 || n > 255) {
 			return nil, fmt.Errorf("%s: colors.%s: %q is neither #rrggbb nor an ANSI color 0-255", path, name, v)
