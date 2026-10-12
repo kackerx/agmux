@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -238,6 +239,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	key := gs[gi].key
 	if d, ok := directions[k.String()]; ok {
+		if m.w == 0 { // no layout before the first WindowSizeMsg
+			return m, nil
+		}
 		// ponytail: lays the board out again per key press; fine for tens of sessions.
 		_, rects := layout(gs, m.w, m.focus, m.frame, m.now(), m.folded)
 		if id := nearest(rects, m.focus, d); id != "" {
@@ -288,11 +292,12 @@ var directions = map[string][2]int{
 	"l": {1, 0}, "right": {1, 0}, "h": {-1, 0}, "left": {-1, 0},
 }
 
-// nearest finds where the focus moves from rect id in direction d ("" = at the edge, stay):
-// among the rects entirely on that side, the closest one that overlaps it across the direction of
-// travel, ties going to the most overlap. Sideways (h/l) a card may overlap nothing there (a folded
-// title sits on the title row, columns differ in height); then the nearest column's vertically
-// closest one is taken, so h/l never strands the focus. Up/down stays strict.
+// nearest finds where the focus moves from rect id in direction d ("" = at the edge, stay).
+//   - j/k: among the rects entirely below / above that overlap it horizontally, the closest,
+//     ties going to the most overlap; across groups and bands.
+//   - h/l: only inside its own band, in the closest column on that side: the rect overlapping it
+//     most vertically, or when none does (a folded title sits on the title row; columns differ in
+//     height) the vertically closest. No column there in this band: stay.
 func nearest(rects []rect, id string, d [2]int) string {
 	var cur rect
 	for _, r := range rects {
@@ -305,7 +310,7 @@ func nearest(rects []rect, id string, d [2]int) string {
 	}
 	// overlap of two intervals; negative = the gap between them
 	overlap := func(a1, a2, b1, b2 int) int { return min(a2, b2) - max(a1, b1) }
-	best, bestKey := "", [4]int{}
+	best, bestKey := "", []int(nil)
 	for _, r := range rects {
 		var gap, ov int
 		switch d {
@@ -318,28 +323,21 @@ func nearest(rects []rect, id string, d [2]int) string {
 		case [2]int{-1, 0}:
 			gap, ov = cur.x-(r.x+r.w), overlap(cur.y, cur.y+cur.h, r.y, r.y+r.h)
 		}
-		if r.id == id || gap < 0 || ov <= 0 && d[0] == 0 {
+		switch {
+		case r.id == id || gap < 0:
+			continue
+		case d[0] == 0 && ov <= 0: // j/k: must overlap
+			continue
+		case d[0] != 0 && r.band != cur.band: // h/l: stay in the band
 			continue
 		}
-		miss := 0 // 1 = no overlap (sideways fallback): always loses to an overlapping one
-		if ov <= 0 {
-			miss = 1
-		}
-		key := [4]int{miss, gap, max(-ov, 0), -ov}
-		if best == "" || less(key, bestKey) {
+		// nearest first; then -ov: overlapping ones (negative, more is smaller) beat the rest,
+		// which rank by vertical distance
+		if key := []int{gap, -ov}; best == "" || slices.Compare(key, bestKey) < 0 {
 			best, bestKey = r.id, key
 		}
 	}
 	return best
-}
-
-func less(a, b [4]int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] < b[i]
-		}
-	}
-	return false
 }
 
 const noPane = "后台会话没有 tmux pane：不能跳转 / 发送"

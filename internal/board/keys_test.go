@@ -153,6 +153,7 @@ func TestKeys(t *testing.T) {
 		{"background: enter / H / s refused", []string{"j", "enter", "H", "s", "x", "y"}, [][]string{{"kill", "a2"}}, false},
 		{"q quits", []string{"q"}, nil, true},
 		{"arrow keys move", []string{"down", "r", "up", "right", "r"}, [][]string{{"restart", "a2"}, {"restart", "b1"}}, false},
+		{"up comes back", []string{"down", "up", "r"}, [][]string{{"restart", "a1"}}, false},
 		{"text starting with - stays text", []string{"s", "--help", "enter"}, sent("%1", "--help"), false},
 		{"burst of keys = one by one", []string{"lr"}, [][]string{{"restart", "b1"}}, false},
 		{"unfolding focuses the group's first card", []string{"l", "f", "f", "r"}, [][]string{{"restart", "b1"}}, false},
@@ -420,7 +421,7 @@ func TestSpatialNav(t *testing.T) {
 }
 
 func TestNearestEmpty(t *testing.T) {
-	if nearest(nil, "x", directions["j"]) != "" || nearest([]rect{{"a", 0, 0, 10, 5}}, "zz", directions["j"]) != "" {
+	if nearest(nil, "x", directions["j"]) != "" || nearest([]rect{{"a", 0, 0, 10, 5, 0}}, "zz", directions["j"]) != "" {
 		t.Error("unknown focus or no rects: stay")
 	}
 }
@@ -480,5 +481,74 @@ func TestSwitchNoClientStays(t *testing.T) {
 	m, quit := press(t, m, "enter")
 	if quit || !strings.Contains(ansi.Strip(m.View()), "AGMUX_CLIENT") {
 		t.Errorf("quit=%v, want the AGMUX_CLIENT hint on the message line", quit)
+	}
+}
+
+// h/l stays in its band and takes the closest column there, even when that column is a folded title.
+func TestSpatialNavBands(t *testing.T) {
+	ss := staticSrc{}
+	for _, s := range []struct{ id, group string }{
+		{"a1", "/a"}, {"a2", "/a"}, {"a3", "/a"}, {"b1", "/b"}, {"b2", "/b"}, {"c1", "/c"}, {"d1", "/d"}, {"e1", "/e"},
+	} {
+		ss = append(ss, store.Session{ID: s.id, Name: s.id, GroupKey: s.group, TmuxPane: "%1", Status: "idle", ContextPct: -1})
+	}
+	nav := func(w int, fold bool, from string, keys ...string) string {
+		m := New(ss, &fakeRunner{})
+		tm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 80})
+		m = tm.(Model)
+		if fold {
+			m.folded["/b"] = true
+		}
+		m.focus = from
+		m, _ = press(t, m, keys...)
+		return m.focus
+	}
+	b := headerID("/b")
+	for _, c := range []struct {
+		w          int
+		fold       bool
+		from, keys string
+		want       string
+	}{
+		{200, true, "a1", "l", b},     // 4 columns: the folded title next door, not c1 further on
+		{200, true, "c1", "h", b},     // and from the other side
+		{200, true, b, "l", "c1"},     // off the title again
+		{200, false, "d1", "l", "d1"}, // band's right edge
+		{200, false, "e1", "l", "e1"}, // band 2 has only e1: h/l stay
+		{200, false, "e1", "h", "e1"},
+		{120, true, "a3", "l", b},     // 2 columns: stays in band 1, never d1 in band 2
+		{120, false, "a3", "l", "b2"}, // nothing level with a3: the vertically closest in that column
+		{120, false, "e1", "h", "e1"}, // band 3, alone
+		{120, false, "c1", "l", "d1"},
+		{120, false, "a3", "j", "c1"}, // j/k still cross bands
+	} {
+		if got := nav(c.w, c.fold, c.from, c.keys); got != c.want {
+			t.Errorf("%d cols fold=%v: %s %s → %q, want %q", c.w, c.fold, c.from, c.keys, got, c.want)
+		}
+	}
+}
+
+func TestNearestTies(t *testing.T) {
+	cur := rect{"c", 10, 0, 10, 5, 0}
+	rs := []rect{cur, {"less", 0, 6, 12, 3, 0}, {"more", 14, 6, 10, 3, 0}, {"far", 10, 20, 10, 3, 0}}
+	if got := nearest(rs, "c", directions["j"]); got != "more" {
+		t.Errorf("j: same distance, most overlap wins: got %s", got)
+	}
+	side := []rect{cur, {"low", 30, 4, 10, 5, 0}, {"level", 30, 1, 10, 3, 0}, {"farcol", 50, 0, 10, 5, 0}, {"otherband", 22, 0, 5, 5, 1}}
+	if got := nearest(side, "c", directions["l"]); got != "level" {
+		t.Errorf("l: closest column, most vertical overlap: got %s", got)
+	}
+	apart := []rect{cur, {"below", 30, 9, 10, 3, 0}, {"further", 30, 20, 10, 3, 0}}
+	if got := nearest(apart, "c", directions["l"]); got != "below" {
+		t.Errorf("l with no overlap: vertically closest: got %s", got)
+	}
+}
+
+// Keys before the first WindowSizeMsg (e.g. stdout redirected) must not crash on a zero-width layout.
+func TestMoveBeforeSize(t *testing.T) {
+	m := New(sessions, &fakeRunner{})
+	for _, k := range []string{"j", "k", "h", "l"} {
+		tm, _ := m.Update(key(k))
+		m = tm.(Model)
 	}
 }

@@ -79,10 +79,11 @@ func groups(ss []store.Session) []group {
 	return gs
 }
 
-// rect is where a card sits in the body, in cells.
+// rect is where a card sits in the body, in cells; band is which row of groups it is in.
 type rect struct {
 	id         string
 	x, y, w, h int
+	band       int
 }
 
 // headerID is the focus ID of a folded group's title; session IDs never start with NUL.
@@ -105,14 +106,14 @@ func layout(gs []group, width int, focus string, frame int, now time.Time, folde
 		for i, g := range row {
 			x := i * (colW + colGap)
 			if folded[g.key] {
-				rects = append(rects, rect{headerID(g.key), x, top, colW, 1})
+				rects = append(rects, rect{headerID(g.key), x, top, colW, 1, start / n})
 				cols[i] = append(cols[i], header(g, colW, true, focus == headerID(g.key)))
 				height = max(height, 1)
 				continue
 			}
 			cols[i] = append(cols[i], header(g, colW, false, false))
 			for _, s := range g.sessions {
-				rects = append(rects, rect{s.ID, x, top + len(cols[i]), colW, cardH})
+				rects = append(rects, rect{s.ID, x, top + len(cols[i]), colW, cardH, start / n})
 				cols[i] = append(cols[i], strings.Split(card(s, colW, cardH, s.ID == focus, frame, now), "\n")...)
 			}
 			height = max(height, len(cols[i]))
