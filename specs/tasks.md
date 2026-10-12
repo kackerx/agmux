@@ -33,6 +33,7 @@
 
 ### T5 卡片改版（待做）
 - 列最小宽 56 → 40；头像 6×6 → 4×4（4 列 × 2 行，6 个 sprite 重画，色带保留）；名字前加 agent 图标（claude U+EC82 / codex U+EC81 / 其它 U+EC20，色带同色）。
+- 边框色跟状态走（working 橙 / done 绿 / idle 暗灰 / 需要处理 红），焦点 = 同色粗线边框。
 - 行内重排：第 1 行 图标+名 · 状态 · 时间；第 2 行 分支 · 模型·effort；第 3 行 上下文条+百分比 · ⚇ agents · ⚙ shell。去掉 prompt 行，删掉 promptLine / Detail 及其测试和 fixture 字段。
 - 验收：TestColumns 改成 {113→2, 81→1, 82→2, 232→5×44, 200→4×48}；`agmux avatars` 每块 2 行每行 4 格；卡片单测覆盖三行字段与让位顺序；`tmux -L` 232×50 真机 5 列。
 
