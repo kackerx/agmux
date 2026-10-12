@@ -16,7 +16,7 @@
 - `a` 浮层列表、j/k、enter 绑定写 avatars.json、esc 取消；当前绑定高亮。
 - 验收：单测 优先级三层；黑盒 a → 列表出现 6 个 sprite、光标在当前头像行，j 两次 enter 后卡片头像变成当前头像下两格的 sprite、avatars.json 里是 `{"<name>":"<id>"}`，重启看板仍是该头像；esc 不写文件。
 
-### T19 `/` 模糊搜索过滤（开发中；用户 2026-10-12 新增）
+### T19 `/` 模糊搜索过滤（adea4fb，审查中 / 测试中；esc 先清过滤待随 T20 一起改）
 - 按 design.md「模糊搜索过滤」：fzf algo 封装在 internal/fuzzy（固定版本）、扩展语法、三字段高亮、实时过滤、`3/14` 计数、enter 保留 / esc 清空、no match、ctrl+h 退格。
 - 验收：单测 `orch` 命中 orchestrator、`^sql` 只命中前缀、`!test` 排除、`'main` 精确、smartcase；高亮位置按字素簇；过滤后布局只含命中卡片、组数变化；黑盒 fixture 输入 `orch` 只剩 orchestrator 卡，esc 恢复 9 张。
 
