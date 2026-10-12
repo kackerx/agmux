@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	minColW  = 56
+	minColW  = 40
 	colGap   = 2
 	cardH    = 5
 	barCells = 10
@@ -25,21 +25,19 @@ const (
 // Colors: ANSI slots match claude-hud's segments, so they follow the terminal theme like the HUD does;
 // hex values are ccmux's picker palette and claude-hud's context bar.
 var (
-	cName       = lipgloss.Color("5")  // claude-hud session name (35)
-	cModel      = lipgloss.Color("14") // hud model segment
-	cEffort     = lipgloss.Color("13")
-	cDir        = lipgloss.Color("11") // hud directory icon
-	cBranch     = lipgloss.Color("12") // hud git segment
-	cMuted      = lipgloss.Color("#6272a4")
-	cWorking    = lipgloss.Color("#ffb86c")
-	cDone       = lipgloss.Color("#50fa7b")
-	cRed        = lipgloss.Color("#ff6188")
-	cAlertFocus = lipgloss.Color("#ffb3c4") // focused card that needs attention: red, but brighter
-	cDim        = lipgloss.Color("#585b70")
-	cGreen      = lipgloss.Color("#a6e3a1")
-	cYellow     = lipgloss.Color("#f9e2af")
-	cFocus      = lipgloss.Color("#f8f8f2")
-	cOff        = lipgloss.Color("#45475a") // disabled footer keys: visible on #221e1e, darker than cMuted
+	cName    = lipgloss.Color("5")  // claude-hud session name (35)
+	cModel   = lipgloss.Color("14") // hud model segment
+	cEffort  = lipgloss.Color("13")
+	cDir     = lipgloss.Color("11") // hud directory icon
+	cBranch  = lipgloss.Color("12") // hud git segment
+	cMuted   = lipgloss.Color("#6272a4")
+	cWorking = lipgloss.Color("#ffb86c")
+	cDone    = lipgloss.Color("#50fa7b")
+	cRed     = lipgloss.Color("#ff6188")
+	cDim     = lipgloss.Color("#585b70")
+	cGreen   = lipgloss.Color("#a6e3a1")
+	cYellow  = lipgloss.Color("#f9e2af")
+	cOff     = lipgloss.Color("#45475a") // disabled footer keys: visible on #221e1e, darker than cMuted
 )
 
 func fg(c lipgloss.Color, s string) string { return lipgloss.NewStyle().Foreground(c).Render(s) }
@@ -153,38 +151,44 @@ func midTrunc(s string, w int) string {
 
 // card renders a session as w×h cells. h is the full height including the border;
 // S1 only draws 5 (3 body lines), smaller heights keep the first h-2 lines.
+//
+//	╭──────────────────────────────────────────╮
+//	│ ▄▀▀▄   mods-tmux            ⏸ idle  2h │   avatar · agent icon + name · status · time
+//	│ ▀▄▄▀  ⑂ master                 Opus 5.5·high │   branch · model·effort
+//	│ ■■■■■■■■■■ --         ⚇ 2 agents  ⚙ 1 shell │   context bar · subagents · shells
+//	╰──────────────────────────────────────────╯
 func card(s store.Session, w, h int, focused bool, frame int, now time.Time) string {
-	border := cDim
 	alert := s.Attention != "" || s.Status == "waiting"
-	switch {
-	case alert && focused:
-		border = cAlertFocus
-	case alert:
-		border = cRed
-	case focused:
-		border = cFocus
-	}
-	inner := w - 2
-	tw := inner - 10 // " " + avatar(6) + "  " … " "
-
-	mood := avatar.Normal
+	border, mood := cDim, avatar.Dim
 	switch {
 	case alert:
-		mood = avatar.Alert
+		border, mood = cRed, avatar.Alert
 	case s.Status == "working":
-		mood = avatar.Scan
-	case s.Status == "idle" && !s.Done:
-		mood = avatar.Dim
+		border, mood = cWorking, avatar.Scan
+	case s.Done:
+		border, mood = cDone, avatar.Normal
+	case s.Status != "idle":
+		mood = avatar.Normal
+	}
+	bs := lipgloss.RoundedBorder()
+	if focused { // focus keeps the status color, only the line gets heavier
+		bs = lipgloss.ThickBorder()
 	}
 	sp, _ := avatar.ByID(s.AvatarID)
 	face := strings.Split(avatar.Render(sp, s.AgentType, mood, frame), "\n")
 
-	body := []string{line1(s, tw, now), line2(s, tw), line3(s, tw)}
-	b := fg(border, "╭"+strings.Repeat("─", inner)+"╮")
-	for i := range min(h-2, len(body)) {
-		b += "\n" + fg(border, "│") + " " + face[i] + "  " + pad(ansi.Truncate(body[i], tw, "…"), tw) + " " + fg(border, "│")
+	x := w - 4      // inside the border and its one-cell margins
+	tw := x - 4 - 2 // right of the avatar
+	body := []string{
+		face[0] + "  " + line1(s, tw, now),
+		face[1] + "  " + line2(s, tw),
+		line3(s, x),
 	}
-	return b + "\n" + fg(border, "╰"+strings.Repeat("─", inner)+"╯")
+	b := fg(border, bs.TopLeft+strings.Repeat(bs.Top, w-2)+bs.TopRight)
+	for i := range min(h-2, len(body)) {
+		b += "\n" + fg(border, bs.Left) + " " + pad(ansi.Truncate(body[i], x, "…"), x) + " " + fg(border, bs.Right)
+	}
+	return b + "\n" + fg(border, bs.BottomLeft+strings.Repeat(bs.Bottom, w-2)+bs.BottomRight)
 }
 
 // spread puts right flush against the right edge and gives left whatever is left.
@@ -194,58 +198,71 @@ func spread(left, right string, w int) string {
 	return pad(left, w-rw) + right
 }
 
-func line1(s store.Session, w int, now time.Time) string {
-	ago := fg(cMuted, relTime(s.LastActivity, now))
-	avail := w - ansi.StringWidth(ago) - 1
-	name := ansi.Truncate(s.Name, avail, "…")
-	left := fg(cName, name)
-	if room := avail - ansi.StringWidth(name) - 2; s.Branch != "" && room >= 5 { // branch gives way first
-		left += "  " + fg(cBranch, ansi.Truncate("⑂ "+s.Branch, room, "…"))
+// agentIcons are Nerd Font codicons (3.5+), drawn in the band color.
+var agentIcons = map[string]string{"claude": "\uec82", "codex": "\uec81"}
+
+func agentIcon(agentType string) string {
+	if i, ok := agentIcons[agentType]; ok {
+		return i
 	}
-	return spread(left, ago, w)
+	return "\uec20" // cod-robot
 }
 
-func line2(s store.Session, w int) string {
-	var st string
+// line1: icon + name on the left (cut first), status and time always on the right.
+func line1(s store.Session, w int, now time.Time) string {
+	right := status(s)
+	if ago := relTime(s.LastActivity, now); ago != "" {
+		right += "  " + fg(cMuted, ago)
+	}
+	return spread(fg(avatar.BandColor(s.AgentType), agentIcon(s.AgentType))+" "+fg(cName, s.Name), right, w)
+}
+
+func status(s store.Session) string {
 	switch {
 	case s.Status == "working":
-		st = fg(cWorking, "⏵ working")
+		st := fg(cWorking, "⏵ working")
 		if s.PendingTool != "" {
 			st += fg(cMuted, " · "+s.PendingTool)
 		} else if s.AgentsWorking {
 			st += fg(cMuted, " · agents")
 		}
+		return st
 	case s.Status == "waiting":
-		st = fg(cRed, "⏳ waiting")
+		return fg(cRed, "⏳ waiting")
 	case s.Done:
-		st = fg(cDone, "● done")
+		return fg(cDone, "● done")
 	case s.Status == "idle":
-		st = fg(cMuted, "⏸ idle")
-	default:
-		st = fg(cMuted, "● "+s.Status)
+		return fg(cMuted, "⏸ idle")
 	}
-	if n := len(s.Subagents); n > 0 {
-		st += "  " + fg(cMuted, fmt.Sprintf("⚇ %d %s", n, plural(n, "agent")))
-	}
-	if s.Shells > 0 {
-		st += "  " + fg(cMuted, fmt.Sprintf("⚙ %d %s", s.Shells, plural(s.Shells, "shell")))
-	}
-	return spread(st, contextBar(s.ContextPct), w)
+	return fg(cMuted, "● "+s.Status)
 }
 
-func line3(s store.Session, w int) string {
+// line2: branch on the left (cut first), model·effort on the right.
+func line2(s store.Session, w int) string {
 	right := ""
 	if m := modelName(s.Model); m != "" {
 		right = fg(cModel, m)
 		if s.Effort != "" {
-			right += fg(cMuted, " · ") + fg(cEffort, s.Effort)
+			right += fg(cMuted, "·") + fg(cEffort, s.Effort)
 		}
 	}
 	left := ""
-	if s.Detail != "" {
-		left = fg(cMuted, "󰭻 "+s.Detail)
+	if s.Branch != "" {
+		left = fg(cBranch, "⑂ "+s.Branch)
 	}
 	return spread(left, right, w)
+}
+
+// line3: context bar under the avatar, subagent / shell counts on the right.
+func line3(s store.Session, w int) string {
+	var right []string
+	if n := len(s.Subagents); n > 0 {
+		right = append(right, fg(cMuted, fmt.Sprintf("⚇ %d %s", n, plural(n, "agent"))))
+	}
+	if s.Shells > 0 {
+		right = append(right, fg(cMuted, fmt.Sprintf("⚙ %d %s", s.Shells, plural(s.Shells, "shell"))))
+	}
+	return spread(contextBar(s.ContextPct), strings.Join(right, "  "), w)
 }
 
 func plural(n int, word string) string {

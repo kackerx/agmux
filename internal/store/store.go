@@ -9,11 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
@@ -25,9 +22,8 @@ type Subagent = ccmux.Subagent
 type Session struct {
 	ID, Name, AgentType, CWD, GroupKey, Branch string
 	Status, Attention, PendingTool, TmuxPane   string
-	Done                                       bool   // ccmux's "done": idle, no subagent running, attentionState set
-	AgentsWorking                              bool   // Status is "working" only because subagents are
-	Detail                                     string // card line 3: backgroundDetail or one line of lastPrompt
+	Done                                       bool // ccmux's "done": idle, no subagent running, attentionState set
+	AgentsWorking                              bool // Status is "working" only because subagents are
 	Model, Effort                              string
 	ContextPct                                 int // <0 = unknown
 	Subagents                                  []Subagent
@@ -125,7 +121,7 @@ func (p *Poller) Run(ctx context.Context) {
 
 func (p *Poller) convert(r ccmux.Session) Session {
 	s := Session{
-		ID: r.ID, Name: firstLine(r.Summary), AgentType: r.AgentType, CWD: r.CWD, Branch: r.GitBranch,
+		ID: r.ID, Name: r.Summary, AgentType: r.AgentType, CWD: r.CWD, Branch: r.GitBranch,
 		Status: r.Status, Attention: r.AttentionType, PendingTool: r.PendingTool, TmuxPane: r.TmuxPane,
 		ContextPct: -1, Subagents: r.Subagents, LastActivity: r.LastActivityAt,
 	}
@@ -142,11 +138,6 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		}
 	}
 	s.Done = s.Status == "idle" && r.AttentionState != ""
-	if r.TrackingMode == "background" {
-		s.Detail = firstLine(r.BackgroundDetail)
-	} else {
-		s.Detail = promptLine(r.LastPrompt)
-	}
 	s.GroupKey = groupKey(s)
 	s.AvatarID = avatar.For(p.Avatars, s.ID).ID
 	if r.NativeSessionID != "" {
@@ -165,58 +156,6 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		p.models[s.ID] = s.Model
 	}
 	return s
-}
-
-var (
-	crossSessionRe = regexp.MustCompile(`<cross-session-message\b([^>]*)>`)
-	fromNameRe     = regexp.MustCompile(`\bfrom-name="([^"]*)"`)
-	summaryRe      = regexp.MustCompile(`(?s)<task-notification>.*?<summary>(.*?)</summary>`)
-	openTagRe      = regexp.MustCompile(`<([a-z][a-z0-9_-]*)(?:\s[^>]*)?>`)
-)
-
-// promptLine picks the one line of lastPrompt worth showing on a card.
-func promptLine(p string) string {
-	if m := crossSessionRe.FindStringSubmatchIndex(p); m != nil {
-		from := "?"
-		if n := fromNameRe.FindStringSubmatch(p[m[2]:m[3]]); n != nil {
-			from = n[1]
-		}
-		// only the message body: the boilerplate after the closing tag is never the content
-		body, _, _ := strings.Cut(p[m[1]:], "</cross-session-message>")
-		return strings.TrimSpace("← " + from + ": " + firstLine(stripPairedTags(body)))
-	}
-	if m := summaryRe.FindStringSubmatch(p); m != nil {
-		return firstLine(m[1])
-	}
-	return firstLine(stripPairedTags(p))
-}
-
-// stripPairedTags removes <name …> / </name> markers (keeping what is between them) only when
-// the closing tag exists, so <leader>, Vec<T> and a < b survive.
-func stripPairedTags(s string) string {
-	for _, m := range openTagRe.FindAllStringSubmatch(s, -1) {
-		if closing := "</" + m[1] + ">"; strings.Contains(s, closing) {
-			s = strings.ReplaceAll(strings.ReplaceAll(s, m[0], ""), closing, "")
-		}
-	}
-	return s
-}
-
-// firstLine is the first non-blank line, with control characters (tabs, escapes) dropped
-// so text from other programs can't break the card layout.
-func firstLine(s string) string {
-	for l := range strings.Lines(s) {
-		l = strings.TrimSpace(strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) {
-				return ' '
-			}
-			return r
-		}, l))
-		if l != "" {
-			return l
-		}
-	}
-	return ""
 }
 
 // hudContextPct reads context_window.used_percentage from a claude-hud payload.

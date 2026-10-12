@@ -1,5 +1,5 @@
-// Package avatar draws 6×6 pixel-art agent heads with half-block characters
-// (6 columns × 3 rows) and remembers which head a session wears.
+// Package avatar draws 4×4 pixel-art agent heads with half-block characters
+// (4 columns × 2 rows) and remembers which head a session wears.
 package avatar
 
 import (
@@ -15,56 +15,48 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Sprite pixels: '.' transparent, 'B' body, 'E' eye, 'b' agentType band.
+// size is the sprite's width and height in pixels; it renders as size columns × size/2 rows.
+const size = 4
+
+// Sprite pixels: '.' transparent, 'B' body, 'E' eye, 'b' agentType band (the bottom row).
+// Eyes need body on both sides so Scan can sweep them.
 type Sprite struct {
 	ID, Name string
 	Body     lipgloss.Color
-	Pixels   [6]string
+	Pixels   [size]string
 }
 
 var Sprites = []Sprite{
-	{"bot-01", "Clawd", "#d97757", [6]string{
-		".BBBB.",
-		"BEBBEB",
-		"BBBBBB",
-		".BBBB.",
-		".B..B.",
-		"bbbbbb"}},
-	{"bot-02", "Boxy", "#8be9fd", [6]string{
-		"BBBBBB",
-		"BEBBEB",
-		"BBBBBB",
-		"B.BB.B",
-		"BBBBBB",
-		"bbbbbb"}},
-	{"bot-03", "Sprout", "#bd93f9", [6]string{
-		"..BB..",
-		".BBBB.",
-		"BEBBEB",
-		"BBBBBB",
-		"B.BB.B",
-		"bbbbbb"}},
-	{"bot-04", "Boo", "#f8f8f2", [6]string{
-		".BBBB.",
-		"BBBBBB",
-		"BEBBEB",
-		"BBBBBB",
-		"BB..BB",
-		"bbbbbb"}},
-	{"bot-05", "Mochi", "#f1fa8c", [6]string{
-		"B....B",
-		"BBBBBB",
-		"BEBBEB",
-		"BBBBBB",
-		".BBBB.",
-		"bbbbbb"}},
-	{"bot-06", "Cyclops", "#ff79c6", [6]string{
-		".BBBB.",
-		"BBBBBB",
-		"BBEEBB",
-		"BBBBBB",
-		".B..B.",
-		"bbbbbb"}},
+	{"bot-01", "Clawd", "#d97757", [size]string{
+		".BB.",
+		"BEEB",
+		"BBBB",
+		"bbbb"}},
+	{"bot-02", "Boxy", "#8be9fd", [size]string{
+		"BBBB",
+		"BEEB",
+		"B..B",
+		"bbbb"}},
+	{"bot-03", "Sprout", "#bd93f9", [size]string{
+		".B..",
+		"BEEB",
+		"BBBB",
+		"bbbb"}},
+	{"bot-04", "Boo", "#f8f8f2", [size]string{
+		".BB.",
+		"BEEB",
+		"B.B.",
+		"bbbb"}},
+	{"bot-05", "Mochi", "#f1fa8c", [size]string{
+		"B..B",
+		"BEEB",
+		".BB.",
+		"bbbb"}},
+	{"bot-06", "Cyclops", "#ff79c6", [size]string{
+		".BB.",
+		"BEBB",
+		"BBBB",
+		"bbbb"}},
 }
 
 // Mood is what the eyes say.
@@ -82,8 +74,8 @@ const (
 	alertColor = lipgloss.Color("#ff6188")
 )
 
-// Band colors follow ccmux's agent label colors.
-func bandColor(agentType string) lipgloss.Color {
+// BandColor is the agentType color (ccmux's agent label colors), also used for the agent icon.
+func BandColor(agentType string) lipgloss.Color {
 	switch agentType {
 	case "claude":
 		return "#ffb86c"
@@ -93,15 +85,15 @@ func bandColor(agentType string) lipgloss.Color {
 	return "#6272a4"
 }
 
-// Render returns 3 lines of 6 cells. frame drives the Scan / Alert animation.
+// Render returns size/2 lines of size cells. frame drives the Scan / Alert animation.
 func Render(s Sprite, agentType string, mood Mood, frame int) string {
-	var px [6][6]lipgloss.Color
+	var px [size][size]lipgloss.Color
 	shift := 0
 	if mood == Scan {
 		shift = []int{0, 1, 0, -1}[frame%4]
 		for _, row := range s.Pixels { // only sweep if every eye lands on the head
 			for x := range row {
-				if row[x] == 'E' && (x+shift < 0 || x+shift > 5 || row[x+shift] == '.' || row[x+shift] == 'b') {
+				if row[x] == 'E' && (x+shift < 0 || x+shift >= size || row[x+shift] == '.' || row[x+shift] == 'b') {
 					shift = 0
 				}
 			}
@@ -117,7 +109,7 @@ func Render(s Sprite, agentType string, mood Mood, frame int) string {
 			case 'B', 'E':
 				px[y][x] = s.Body
 			case 'b':
-				px[y][x] = bandColor(agentType)
+				px[y][x] = BandColor(agentType)
 			}
 		}
 		for x, c := range row {
@@ -135,10 +127,10 @@ func Render(s Sprite, agentType string, mood Mood, frame int) string {
 			}
 		}
 	}
-	lines := make([]string, 3)
+	lines := make([]string, size/2)
 	for r := range lines {
 		var b strings.Builder
-		for x := range 6 {
+		for x := range size {
 			top, bot := px[2*r][x], px[2*r+1][x]
 			st := lipgloss.NewStyle()
 			ch := "▀"

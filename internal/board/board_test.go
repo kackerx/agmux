@@ -39,7 +39,7 @@ func fixture(t *testing.T) []store.Session {
 
 func TestColumns(t *testing.T) {
 	for _, c := range []struct{ w, n, colW int }{
-		{40, 1, 40}, {113, 1, 113}, {114, 2, 56}, {120, 2, 59}, {200, 3, 65},
+		{30, 1, 30}, {81, 1, 81}, {82, 2, 40}, {113, 2, 55}, {200, 4, 48}, {232, 5, 44},
 	} {
 		if n, colW := columns(c.w); n != c.n || colW != c.colW {
 			t.Errorf("columns(%d) = %d×%d, want %d×%d", c.w, n, colW, c.n, c.colW)
@@ -72,7 +72,8 @@ func TestView(t *testing.T) {
 					t.Errorf("w=%d card %s line %d width %d, want %d", w, r.id, dy, cw, colW)
 				}
 			}
-			if top := ansi.Strip(ansi.Cut(lines[1+r.y], r.x, r.x+1)); top != "╭" {
+			corner := map[bool]string{false: "╭", true: "┏"}[r.id == ss[0].ID] // the focused card is thick
+			if top := ansi.Strip(ansi.Cut(lines[1+r.y], r.x, r.x+1)); top != corner {
 				t.Errorf("w=%d card %s: corner %q at its rect", w, r.id, top)
 			}
 		}
@@ -80,7 +81,7 @@ func TestView(t *testing.T) {
 	t.Setenv("HOME", "/Users/dev") // the fixture's home, so headers shorten to ~ on any machine
 	out, _, _ := view(ss, 200, 50, "", 0, now, "", false)
 	plain := ansi.Strip(out)
-	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "← sqlmux-code-reviewer: review notes", "q 退出"} {
+	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "⏵ working · agents", "● done", "q 退出"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("view missing %q", want)
 		}
@@ -106,90 +107,119 @@ func TestCardStatus(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	base := store.Session{ID: "a", Name: "n", AgentType: "claude", AvatarID: "bot-01", ContextPct: -1}
 	cases := []struct {
-		name  string
-		mod   func(*store.Session)
-		head  string         // status text, exactly as colored
-		color lipgloss.Color // its color
-		tail  string         // what follows it (plain)
-		mood  avatar.Mood
-		alert bool
+		name   string
+		mod    func(*store.Session)
+		head   string         // status text, exactly as colored
+		color  lipgloss.Color // its color
+		tail   string         // what follows it (plain)
+		mood   avatar.Mood
+		border lipgloss.Color
 	}{
-		{"waiting", func(s *store.Session) { s.Status = "waiting" }, "⏳ waiting", cRed, "", avatar.Alert, true},
-		{"attention", func(s *store.Session) { s.Status = "idle"; s.Attention = "permission" }, "⏸ idle", cMuted, "", avatar.Alert, true},
-		{"attention beats working", func(s *store.Session) { s.Status = "working"; s.Attention = "permission" }, "⏵ working", cWorking, "", avatar.Alert, true},
+		{"waiting", func(s *store.Session) { s.Status = "waiting" }, "⏳ waiting", cRed, "", avatar.Alert, cRed},
+		{"attention", func(s *store.Session) { s.Status = "idle"; s.Attention = "permission" }, "⏸ idle", cMuted, "", avatar.Alert, cRed},
+		{"attention beats working", func(s *store.Session) { s.Status = "working"; s.Attention = "permission" }, "⏵ working", cWorking, "", avatar.Alert, cRed},
 		{"working + tool", func(s *store.Session) {
 			s.Status = "working"
 			s.PendingTool = "Bash"
 			s.Subagents = make([]ccmux.Subagent, 1)
-		}, "⏵ working", cWorking, " · Bash  ⚇ 1 agent", avatar.Scan, false},
-		{"raw working + agents: no 'agents'", func(s *store.Session) { s.Status = "working"; s.Subagents = make([]ccmux.Subagent, 2) }, "⏵ working", cWorking, "  ⚇ 2 agents", avatar.Scan, false},
+		}, "⏵ working", cWorking, " · Bash", avatar.Scan, cWorking},
+		{"raw working + agents: no 'agents'", func(s *store.Session) { s.Status = "working"; s.Subagents = make([]ccmux.Subagent, 2) }, "⏵ working", cWorking, "", avatar.Scan, cWorking},
 		{"working because of agents", func(s *store.Session) {
 			s.Status = "working"
 			s.AgentsWorking = true
 			s.Subagents = make([]ccmux.Subagent, 1)
-		}, "⏵ working", cWorking, " · agents  ⚇ 1 agent", avatar.Scan, false},
-		{"done", func(s *store.Session) { s.Status = "idle"; s.Done = true }, "● done", cDone, "", avatar.Normal, false},
-		{"idle", func(s *store.Session) { s.Status = "idle" }, "⏸ idle", cMuted, "", avatar.Dim, false},
+		}, "⏵ working", cWorking, " · agents", avatar.Scan, cWorking},
+		{"done", func(s *store.Session) { s.Status = "idle"; s.Done = true }, "● done", cDone, "", avatar.Normal, cDone},
+		{"idle", func(s *store.Session) { s.Status = "idle" }, "⏸ idle", cMuted, "", avatar.Dim, cDim},
 	}
 	sp, _ := avatar.ByID("bot-01")
 	for _, c := range cases {
 		s := base
 		c.mod(&s)
-		l2 := line2(s, 60)
-		if !strings.Contains(l2, fg(c.color, c.head)) || !strings.HasPrefix(ansi.Strip(l2), c.head+c.tail+" ") {
-			t.Errorf("%s: line 2 %q, want %q in %s then %q", c.name, ansi.Strip(l2), c.head, c.color, c.tail)
+		l1 := line1(s, 40, now)
+		if !strings.Contains(l1, fg(c.color, c.head)) || !strings.HasSuffix(ansi.Strip(l1), " "+c.head+c.tail) {
+			t.Errorf("%s: line 1 %q, want it to end with %q (%q in %s)", c.name, ansi.Strip(l1), c.head+c.tail, c.head, c.color)
 		}
 		for f := range 2 { // moods differ on different frames: Alert on even, Scan on odd
-			cd := card(s, 60, 5, false, f, now)
+			cd := card(s, 44, 5, false, f, now)
 			for i, l := range strings.Split(avatar.Render(sp, "claude", c.mood, f), "\n") {
 				if !strings.Contains(cd, l) {
 					t.Errorf("%s frame %d: eyes line %d are not mood %d", c.name, f, i, c.mood)
 				}
 			}
 		}
-		border := map[[2]bool]lipgloss.Color{{false, false}: cDim, {false, true}: cFocus, {true, false}: cRed, {true, true}: cAlertFocus} // [alert, focused]
-		for _, focused := range []bool{false, true} {
-			want, _, _ := strings.Cut(fg(border[[2]bool{c.alert, focused}], "╭"), "╭")
-			if !strings.Contains(card(s, 60, 5, focused, 0, now), want+"╭") {
-				t.Errorf("%s focused=%v: border color wrong", c.name, focused)
+		// border = status color; focus keeps it and switches to the thick line
+		for corner, focused := range map[string]bool{"╭": false, "┏": true} {
+			want, _, _ := strings.Cut(fg(c.border, corner), corner)
+			if cd := card(s, 44, 5, focused, 0, now); !strings.HasPrefix(cd, want+corner) {
+				t.Errorf("%s focused=%v: border should start %q in %s", c.name, focused, corner, c.border)
 			}
 		}
 	}
 }
 
 func TestCardLines(t *testing.T) {
-	s := store.Session{Name: "qa-acceptance-pap-be-dev", Branch: "feature/qa-acceptance-pap", LastActivity: now.Add(-3 * time.Minute), ContextPct: -1}
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	s := store.Session{
+		Name: "qa-acceptance-pap-be-dev", AgentType: "claude", Status: "idle", LastActivity: now.Add(-3 * time.Minute),
+		Branch: "feature/qa-acceptance-pap", Model: "claude-opus-5-5", Effort: "high", ContextPct: -1,
+	}
+
+	// line 1: icon + name give way; status and time always stay
 	for _, c := range []struct {
-		w            int
-		branch       string // "" = must not show
-		branchCutOff bool
-	}{{60, "⑂ feature/qa-acceptance-pap", false}, {40, "⑂ feat", true}, {30, "", false}} {
+		w       int
+		nameCut bool
+	}{{40, false}, {22, true}} {
 		l := ansi.Strip(line1(s, c.w, now))
-		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, s.Name+" ") || !strings.HasSuffix(l, " 3m") {
-			t.Errorf("w=%d line 1 %q: want full name first, 3m last, width %d", c.w, l, c.w)
+		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, "\uec82 qa-") || !strings.HasSuffix(l, " ⏸ idle  3m") ||
+			strings.Contains(l, s.Name) == c.nameCut || strings.Contains(l, "…") != c.nameCut {
+			t.Errorf("w=%d line 1 %q: name cut=%v, status and time last", c.w, l, c.nameCut)
 		}
-		switch {
-		case c.branch == "" && strings.Contains(l, "⑂"):
-			t.Errorf("w=%d: branch should give way: %q", c.w, l)
-		case c.branch != "" && (!strings.Contains(l, c.branch) || strings.Contains(l, "…") != c.branchCutOff):
-			t.Errorf("w=%d: want %q (cut=%v) in %q", c.w, c.branch, c.branchCutOff, l)
+	}
+	for at, icon := range map[string]string{"claude": "\uec82", "codex": "\uec81", "gemini": "\uec20", "": "\uec20"} {
+		if l := line1(store.Session{Name: "n", AgentType: at}, 30, now); !strings.HasPrefix(l, fg(avatar.BandColor(at), icon)) {
+			t.Errorf("%q: icon should be %U in the band color", at, []rune(icon)[0])
 		}
 	}
 
+	// line 2: branch gives way, model·effort flush right
 	for _, c := range []struct {
-		model, effort, want string
-	}{{"claude-opus-5-5", "high", "Opus 5.5 · high"}, {"claude-opus-5-5", "", "Opus 5.5"}, {"", "high", ""}} {
-		l := ansi.Strip(line3(store.Session{Detail: "hello", Model: c.model, Effort: c.effort}, 50))
-		if ansi.StringWidth(l) != 50 || !strings.HasPrefix(l, "󰭻 hello") || !strings.HasSuffix(l, " "+c.want) || (c.want == "" && strings.TrimSpace(l) != "󰭻 hello") {
-			t.Errorf("line 3 %q: want %q flush right", l, c.want)
+		w             int
+		model, effort string
+		right         string
+		branchCut     bool
+	}{
+		{60, "claude-opus-5-5", "high", "Opus 5.5·high", false},
+		{34, "claude-opus-5-5", "high", "Opus 5.5·high", true},
+		{60, "claude-opus-5-5", "", "Opus 5.5", false},
+		{60, "", "high", "", false},
+	} {
+		s := s
+		s.Model, s.Effort = c.model, c.effort
+		l := ansi.Strip(line2(s, c.w))
+		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, "⑂ feature/") || !strings.HasSuffix(l, c.right) ||
+			strings.Contains(l, "feature/qa-acceptance-pap") == c.branchCut || (c.right == "" && strings.Contains(l, "high")) {
+			t.Errorf("w=%d line 2 %q: want %q flush right, branch cut=%v", c.w, l, c.right, c.branchCut)
 		}
 	}
 
-	for n, want := range map[int]string{0: "", 1: "⚙ 1 shell ", 2: "⚙ 2 shells"} {
-		l := ansi.Strip(line2(store.Session{Status: "idle", Shells: n, ContextPct: -1}, 60))
-		if (want == "") == strings.Contains(l, "⚙") || !strings.Contains(l, want) {
-			t.Errorf("Shells=%d: %q, want %q", n, l, want)
+	// line 3: context bar at the left edge, counts on the right
+	for _, c := range []struct {
+		agents, shells int
+		right          string
+	}{{0, 0, ""}, {2, 0, "⚇ 2 agents"}, {0, 1, "⚙ 1 shell"}, {1, 2, "⚇ 1 agent  ⚙ 2 shells"}} {
+		s := store.Session{ContextPct: 41, Subagents: make([]ccmux.Subagent, c.agents), Shells: c.shells}
+		l := ansi.Strip(line3(s, 40))
+		if ansi.StringWidth(l) != 40 || !strings.HasPrefix(l, "■■■■■■■■■■ 41%") || !strings.HasSuffix(l, c.right) ||
+			(c.shells == 0 && strings.Contains(l, "⚙")) || (c.agents == 0 && strings.Contains(l, "⚇")) {
+			t.Errorf("agents=%d shells=%d line 3 %q, want %q on the right", c.agents, c.shells, l, c.right)
 		}
+	}
+
+	// in the card: line 3's bar starts right under the avatar
+	lines := strings.Split(ansi.Strip(card(s, 44, 5, false, 0, now)), "\n")
+	if !strings.HasPrefix(lines[3], "│ ■") || ansi.StringWidth(lines[1]) != 44 {
+		t.Errorf("card rows: %q", lines)
 	}
 }
 

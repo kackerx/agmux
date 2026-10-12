@@ -19,11 +19,11 @@ func TestRenderShape(t *testing.T) {
 		for _, m := range []Mood{Normal, Scan, Alert, Dim} {
 			for f := range 4 {
 				lines := strings.Split(Render(s, "claude", m, f), "\n")
-				if len(lines) != 3 {
+				if len(lines) != 2 {
 					t.Fatalf("%s mood %d: %d lines", s.ID, m, len(lines))
 				}
 				for i, l := range lines {
-					if w := ansi.StringWidth(l); w != 6 {
+					if w := ansi.StringWidth(l); w != 4 {
 						t.Errorf("%s mood %d frame %d line %d: width %d", s.ID, m, f, i, w)
 					}
 				}

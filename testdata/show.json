@@ -17,8 +17,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-proj-sqlmux/dd717302-3fbd-40c0-98eb-20b69b435172.jsonl",
     "lastActivityAt": "2026-10-11T16:38:04.042Z",
     "updatedAt": "2026-10-12T01:11:28.227Z",
-    "backgroundDetail": "handoff written, queued for a new session (synthetic)",
-    "lastPrompt": "apply the fix now",
     "attentionState": null
   },
   {
@@ -39,8 +37,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-proj-sqlmux/19762a85-00ce-418f-a684-7199165e02bd.jsonl",
     "lastActivityAt": "2026-10-12T01:29:31.383Z",
     "updatedAt": "2026-10-12T01:29:31.674Z",
-    "backgroundDetail": null,
-    "lastPrompt": "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1000.sock\" from-name=\"sqlmux-code-reviewer\" from-mode=\"bypass\">\nreview notes for batch 1, synthetic\nsecond line of the synthetic message\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user.",
     "attentionState": null
   },
   {
@@ -61,8 +57,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-proj-sqlmux-e2e/bd8201ec-e255-4d0d-ba88-7413f3c10329.jsonl",
     "lastActivityAt": "2026-10-12T01:49:01.652Z",
     "updatedAt": "2026-10-12T01:49:04.723Z",
-    "backgroundDetail": null,
-    "lastPrompt": "<task-notification>\n<task-id>t0001</task-id>\n<status>completed</status>\n<summary>Background command \"go test ./...\" completed (exit code 0)</summary>\n</task-notification>",
     "attentionState": "unread"
   },
   {
@@ -83,8 +77,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-proj-sqlmux/42ea8ae2-d550-46aa-9e58-8e2949dbd9d6.jsonl",
     "lastActivityAt": "2026-10-12T01:49:10.939Z",
     "updatedAt": "2026-10-12T01:49:14.929Z",
-    "backgroundDetail": null,
-    "lastPrompt": "continue the review from the handoff",
     "attentionState": null
   },
   {
@@ -105,8 +97,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-proj-sqlmux/7e2064fc-b00d-4193-a851-cf7d611ee468.jsonl",
     "lastActivityAt": "2026-10-12T03:29:46.545Z",
     "updatedAt": "2026-10-12T03:29:46.873Z",
-    "backgroundDetail": null,
-    "lastPrompt": "the database restarted, retry",
     "attentionState": null
   },
   {
@@ -127,8 +117,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-ProjectsFolder-shopcart-worktrees-hotfix-rename-flag/f566a75d-e244-4fcd-9c61-bf8d97a8bcf6.jsonl",
     "lastActivityAt": "2026-10-12T03:32:33.344Z",
     "updatedAt": "2026-10-12T03:32:33.746Z",
-    "backgroundDetail": null,
-    "lastPrompt": "merge to staging and deploy",
     "attentionState": null
   },
   {
@@ -149,8 +137,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-ProjectsFolder-shopcart-worktrees-hotfix-rename-flag/9007f7b4-a1ae-4d72-9442-ec57c42b1a54.jsonl",
     "lastActivityAt": "2026-10-12T03:19:13.506Z",
     "updatedAt": "2026-10-12T03:23:12.058Z",
-    "backgroundDetail": null,
-    "lastPrompt": "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1000.sock\" from-name=\"rename-flag\" from-mode=\"bypass\">\nfixes accepted, deploying to staging\nsecond line of the synthetic message\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user.",
     "attentionState": null
   },
   {
@@ -171,8 +157,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-ProjectsFolder-shopcart-worktrees-hotfix-rename-flag/3762736f-7e3c-4165-af33-c52042cb6ffd.jsonl",
     "lastActivityAt": "2026-10-12T03:28:13.730Z",
     "updatedAt": "2026-10-12T03:30:25.487Z",
-    "backgroundDetail": null,
-    "lastPrompt": "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1000.sock\" from-name=\"rename-flag\" from-mode=\"bypass\">\nresults received, all items pass\nsecond line of the synthetic message\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user.",
     "attentionState": null
   },
   {
@@ -193,8 +177,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-proj-shopcart-dsl/21334aa2-f916-4852-8efc-8ea91906c590.jsonl",
     "lastActivityAt": "2026-10-12T03:34:22.027Z",
     "updatedAt": "2026-10-12T03:34:25.441Z",
-    "backgroundDetail": null,
-    "lastPrompt": "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1000.sock\" from-name=\"rename-flag\" from-mode=\"bypass\">\nintegration check received\nsecond line of the synthetic message\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user.",
     "attentionState": null
   },
   {
@@ -215,8 +197,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev--config/37dddc73-1632-45c5-90c3-aec0622d1d8d.jsonl",
     "lastActivityAt": "2026-10-12T02:44:17.000Z",
     "updatedAt": "2026-10-12T02:49:42.520Z",
-    "backgroundDetail": null,
-    "lastPrompt": "make <leader> switch the input method to English",
     "attentionState": null
   },
   {
@@ -237,8 +217,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev--config/9a27a0c4-e45c-4d99-84bf-382d88a19da6.jsonl",
     "lastActivityAt": "2026-10-12T02:03:11.341Z",
     "updatedAt": "2026-10-12T02:03:13.120Z",
-    "backgroundDetail": null,
-    "lastPrompt": null,
     "attentionState": null
   },
   {
@@ -259,8 +237,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev--config/afbf710f-2dba-4f71-a29e-9ac3ec373ee3.jsonl",
     "lastActivityAt": "2026-10-12T03:33:56.017Z",
     "updatedAt": "2026-10-12T03:34:10.264Z",
-    "backgroundDetail": null,
-    "lastPrompt": "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1000.sock\" from-name=\"agmux-orchestrator\" from-mode=\"bypass\">\natomic write approved\nsecond line of the synthetic message\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user.",
     "attentionState": null
   },
   {
@@ -291,8 +267,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-proj-agmux/c8cbecee-e813-4fe4-b7ed-b971ef4878bc.jsonl",
     "lastActivityAt": "2026-10-12T03:33:55.856Z",
     "updatedAt": "2026-10-12T03:34:05.170Z",
-    "backgroundDetail": null,
-    "lastPrompt": "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1000.sock\" from-name=\"agmux-tester\" from-mode=\"bypass\">\nT1 results: all pass\nsecond line of the synthetic message\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user.",
     "attentionState": "unread"
   },
   {
@@ -313,8 +287,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-proj-agmux/d21bb0f4-5f99-46ae-a1df-54fb37f2adfa.jsonl",
     "lastActivityAt": "2026-10-12T03:34:26.890Z",
     "updatedAt": "2026-10-12T03:34:28.544Z",
-    "backgroundDetail": null,
-    "lastPrompt": "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1000.sock\" from-name=\"agmux-orchestrator\" from-mode=\"bypass\">\ndesign settled, start T2–T4\nsecond line of the synthetic message\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user.",
     "attentionState": null
   },
   {
@@ -335,8 +307,6 @@
     "logPath": "/Users/dev/.claude/projects/-Users-dev-proj-agmux/e44efbbf-befc-489b-ab0d-9f30e9217f7e.jsonl",
     "lastActivityAt": "2026-10-12T03:33:35.788Z",
     "updatedAt": "2026-10-12T03:33:36.137Z",
-    "backgroundDetail": null,
-    "lastPrompt": "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1000.sock\" from-name=\"agmux-orchestrator\" from-mode=\"bypass\">\nT1 results accepted\nsecond line of the synthetic message\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user.",
     "attentionState": null
   }
 ]
