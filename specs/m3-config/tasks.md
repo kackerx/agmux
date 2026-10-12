@@ -70,12 +70,12 @@
 - **先实测再写死**：dev 先用一个真 pane 验证 cursor_shape 的取值（0/1/2 还是文字）和 cursor_flag 在 vim 插入态 / Claude Code 输入框里的值，把结果写进 design.md 再实现。
 - 验收：黑盒 真 pane 里跑 `printf 'abc'` 后预览第一行第 4 格反色；`tput civis` 后不画；滚动后不画。
 
-### T25 最大列数可配置（通过 @f9f4ecf，报错统一 81e6032 待 e2e 复核）
+### T25 最大列数可配置（通过 @81e6032 / test_t25）
 - 用户 2026-10-12 验收：内容显示绰绰有余，想收窄到 5 列。现在 view.go `maxCols = 4` 写死。
 - 做法：config.toml 新增 `[layout] max_columns = 4`（1–8，默认 4 不变；最小列宽 40 不动，终端够宽才会真到 5 列：5 列约需 ≥ 200 列）；`agmux config` 打印它；README 配置示例加一行、说明「宽度够时最多几列」。用户自己的 config 写 5。
 - 验收：单测 232 列 max_columns=5 → 5 列、=4 → 4 列、180 列 =5 → 4 列（受最小列宽限制）；config 超范围 / 非整数报错一行；黑盒 232×50 夹具配 5 → 抓屏数到 5 张卡一行。
 
-### T26 非焦点卡边框统一灰色（通过 @5c7ac6c，报错提示 81e6032 待 e2e 复核；只有 border 允许空串）
+### T26 非焦点卡边框统一灰色（通过 @81e6032 / test_t26；只有 border 允许空串）
 - 用户 2026-10-12 验收：边框色跟状态太花哨分散注意力，想全部灰色、只留 focus 粉边框，状态靠卡片里的状态行 / 头像神态区分。
 - 做法：新增颜色项 `colors.border`，默认空 = 沿用现在「跟状态」；设了就所有非焦点卡的边框都用它（focus 边框仍是 `colors.focus`）。状态行文字（⏵ working / ● done / 告警）和头像神态不受影响，仍按状态着色。不动 working/idle/done/attention 四项的语义（它们还管状态行和头像）。README 颜色表加一行，示例给 `border = "#585b70"`。
 - 验收：单测 border 设了 → working / done / alert 卡的边框转义码都是 border 色、focus 卡仍 focus 色、状态行仍是状态色；没设 → 和现在一样；黑盒 配置后抓屏带色核对。
