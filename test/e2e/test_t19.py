@@ -40,8 +40,8 @@ class Base(unittest.TestCase):
     def focused(self, t=None):
         return [card_name(c) for c in find_cards((t or self.t).snap()) if border_colours(c) == {F}]
 
-    def titles(self):
-        return [re.sub(r"\s{2,}.*", "", r.text.strip()) for r in self.t.snap() if r.text.lstrip().startswith(("▾", "▸"))]
+    def titles(self):  # every group title on screen, left to right, top to bottom (several share a row)
+        return [m for r in self.t.snap() if r.text.lstrip().startswith(("▾", "▸")) for m in re.findall(r"[▾▸] \S+ \(\d+\)", r.text)]
 
     @staticmethod
     def lit_chars(row, c0=0, c1=None):
@@ -296,6 +296,70 @@ class Review(Base):
         self.t.keys("j"); time.sleep(0.3); self.assertEqual(self.focused(), ["pj-fallback"])
         self.t.esc(); time.sleep(0.5)
         self.assertEqual(len(self.names()), 9); self.assertEqual(self.focused(), ["pj-fallback"], "not back on charlie-59 (the card that had focus before /)")
+
+
+class SecondRound(Base):
+    """T19 second review (224179b)."""
+
+    def test_equal_scores_land_on_the_card_that_comes_first_in_the_layout_not_in_the_poll(self):
+        S = json.loads((self.env.fake / "show.json").read_text()); base = S[0]
+        mk = lambda i, proj: dict(base, id=i, summary="twin", project=proj, cwd=f"{self.env.home}/work/{proj}", mainRepoRoot=f"{self.env.home}/work/{proj}", gitBranch="main",
+                                  tmuxPane=f"%5{ord(proj)}", status="idle", subagents=[], pendingTool=None, nativeSessionId="n-" + i, logPath=None)
+        tb, ta = mk("tb", "b"), mk("ta", "a")
+        self.env.write_show([tb, ta]); self.env.pane_ids = {tb["tmuxPane"]: "tb", ta["tmuxPane"]: "ta"}  # the poll lists /b before /a
+        self.t.close(); self.t = Term(self.env, w=200, h=50); self.addCleanup(self.t.close)
+        self.assertTrue(wait(lambda: len(find_cards(self.t.snap())) == 2, 8), self.t.text())
+        self.assertEqual(self.titles(), ["▾ ~/work/a (1)", "▾ ~/work/b (1)"], "the layout puts /a first")
+        self.search("twin", enter=True)
+        self.assertEqual(self.count(), (2, 2)); self.t.keys("Enter")
+        self.assertTrue(wait(lambda: self.env.actions(), 3)); self.assertEqual(self.env.actions(), [["switch", "ta"]], "same score: the first card of the layout, whatever order ccmux listed them in")
+
+    def test_clearing_the_filter_with_the_focus_in_a_group_that_folds_back_lands_on_its_title(self):
+        self.t.keys("l"); time.sleep(0.3); self.assertEqual(self.focused(), ["bravo-29"])
+        self.t.keys("f"); time.sleep(0.4); self.assertIn("▸ ~/work/bravo (2)", self.t.text())
+        self.search("bravo-29", enter=True)
+        self.assertEqual(self.names(), ["bravo-29"], "the folded group opened for its match"); self.assertEqual(self.focused(), ["bravo-29"])
+        self.t.esc(); time.sleep(0.5)
+        self.assertIn("▸ ~/work/bravo (2)", self.t.text(), "the group folded back")
+        self.t.keys("Enter"); time.sleep(0.5)
+        self.assertEqual(self.env.actions(), [], "the focus is on the folded title (enter would have jumped to a card otherwise: the first card of the board is alpha-main)")
+        self.assertIn("▾ ~/work/bravo (2)", self.t.text(), "enter on the title unfolds the group")
+
+    def test_esc_in_the_input_returns_to_the_place_before_slash_even_when_that_is_a_folded_title(self):
+        self.t.keys("l"); time.sleep(0.3); self.t.keys("f"); time.sleep(0.4); self.assertIn("▸ ~/work/bravo (2)", self.t.text())
+        self.t.keys("/"); self.t.lit("'echo-l"); time.sleep(0.4); self.assertEqual(self.names(), ["echo-long"])
+        self.t.esc(); time.sleep(0.5)
+        self.assertEqual(len(self.names()), 7, "back to the normal layout with bravo folded"); self.assertIn("▸ ~/work/bravo (2)", self.t.text())
+        self.t.keys("Enter"); time.sleep(0.5)
+        self.assertEqual(self.env.actions(), [], "the focus is the bravo title, not a card"); self.assertIn("▾ ~/work/bravo (2)", self.t.text())
+
+    def test_esc_in_the_input_returns_to_the_card_that_had_focus_when_it_is_visible(self):
+        self.t.keys("l"); time.sleep(0.3); self.assertEqual(self.focused(), ["bravo-29"])
+        self.search("echo"); self.t.esc(); time.sleep(0.5)
+        self.assertEqual(self.focused(), ["bravo-29"])
+
+    def test_f_while_a_filter_is_on_says_so_and_changes_nothing(self):
+        self.search("alpha", enter=True); before = (self.names(), self.titles())
+        self.t.keys("f"); time.sleep(0.5)
+        self.assertIn("clear the filter to fold", self.t.text()); self.assertEqual((self.names(), self.titles()), before, "nothing folded")
+        self.assertTrue(self.t.alive())
+        self.t.esc(); time.sleep(0.5)
+        self.assertEqual(len(self.names()), 9); self.assertIn("▾ ~/work/alpha (3)", self.t.text(), "the group is as it was")
+
+    def test_f_while_typing_in_the_input_is_text_not_fold(self):
+        self.t.keys("/"); self.t.lit("f"); time.sleep(0.3)
+        self.assertIn("/ f▏", self.top()); self.assertEqual(len(self.names()), self.count()[0])
+
+    def test_f_without_a_filter_still_folds_and_unfolds(self):
+        self.t.keys("f"); time.sleep(0.4); self.assertIn("▸ ~/work/alpha (3)", self.t.text()); self.assertEqual(len(self.names()), 6)
+        self.assertNotIn("clear the filter to fold", self.t.text())
+        self.t.keys("f"); time.sleep(0.4); self.assertEqual(len(self.names()), 9)
+
+    def test_f_inside_a_filter_that_was_folded_before_keeps_the_fold_for_later(self):
+        self.t.keys("f"); time.sleep(0.4)  # alpha folded
+        self.search("echo", enter=True); self.t.keys("f"); time.sleep(0.4)
+        self.assertIn("clear the filter to fold", self.t.text())
+        self.t.esc(); time.sleep(0.5); self.assertIn("▸ ~/work/alpha (3)", self.t.text(), "alpha is still folded: f during the filter did not unfold it either")
 
 
 class ReviewWithPanes(WithPanes):
