@@ -78,10 +78,11 @@ type Model struct {
 	capturing bool       // a capture is in flight; don't stack them
 	pvFocus   bool       // tab: keys go to the previewed pane
 	scroll    int        // lines the preview is scrolled back with the wheel
+	keys      *serial    // forwarded keys reach the pane in the order they were typed
 }
 
 func New(src Source, run Runner) Model {
-	return Model{src: src, run: run, now: time.Now, getenv: os.Getenv, folded: map[string]bool{}}
+	return Model{src: src, run: run, now: time.Now, getenv: os.Getenv, folded: map[string]bool{}, keys: newSerial()}
 }
 
 // Run polls p in the background and runs the board until the user quits.

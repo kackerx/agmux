@@ -148,7 +148,29 @@ func sendKeysArgs(pane string, k tea.KeyMsg) []string {
 // maxScroll bounds how far back the wheel scrolls the preview.
 const maxScroll = 2000
 
-// forward sends k to the focused pane and recaptures right after, in the same command, so the
+// serial runs jobs one at a time in the order they were queued. Forwarded keys go through it:
+// bubbletea runs each tea.Cmd on its own goroutine, so a fast burst ("a b c", split into one
+// KeyMsg per rune and space) would otherwise reach the pane in any order.
+type serial struct{ jobs chan func() }
+
+func newSerial() *serial {
+	s := &serial{make(chan func(), 256)}
+	go func() {
+		for job := range s.jobs {
+			job()
+		}
+	}()
+	return s
+}
+
+// do queues f now (Update calls it, in key order) and returns a Cmd that waits for f's result.
+func (s *serial) do(f func() tea.Msg) tea.Cmd {
+	done := make(chan tea.Msg, 1)
+	s.jobs <- func() { done <- f() }
+	return func() tea.Msg { return <-done }
+}
+
+// forward sends k to the focused pane and recaptures right after, in the same job, so the
 // capture can't come back before the key arrived.
 func (m *Model) forward(k tea.KeyMsg) tea.Cmd {
 	_, _, s, ok := m.current()
@@ -158,11 +180,11 @@ func (m *Model) forward(k tea.KeyMsg) tea.Cmd {
 	}
 	m.scroll, m.capturing = 0, true
 	r, pane, n := m.run, s.TmuxPane, m.previewLinesN()
-	return func() tea.Msg {
+	return m.keys.do(func() tea.Msg {
 		if _, err := r.Tmux(args...); err != nil {
 			return previewMsg{pane: pane, err: err}
 		}
 		out, err := r.Tmux("capture-pane", "-p", "-e", "-t", pane, "-S", "-"+strconv.Itoa(n))
 		return previewMsg{pane, out, err}
-	}
+	})
 }

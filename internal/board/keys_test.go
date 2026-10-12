@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ func (s staticSrc) Sessions() []store.Session { return s }
 func (s staticSrc) Err() error                { return nil }
 
 type fakeRunner struct {
+	mu       sync.Mutex // forwarded keys call Tmux from the serial worker
 	calls    [][]string
 	at       []time.Time // when each call was made
 	err      error
@@ -32,6 +34,8 @@ type fakeRunner struct {
 func init() { enterDelay = 0 } // TestSendWaitsBeforeEnter sets its own
 
 func (f *fakeRunner) Tmux(args ...string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, append([]string{"tmux"}, args...))
 	f.at = append(f.at, time.Now())
 	if err := f.tmuxFail[args[0]]; err != nil {
@@ -58,6 +62,8 @@ func sent(pane, text string) [][]string {
 }
 
 func (f *fakeRunner) Run(args ...string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, args)
 	return f.err
 }
@@ -875,5 +881,42 @@ func TestPreviewWheelAndClicks(t *testing.T) {
 	tm, _ = m.Update(tea.MouseMsg{X: 50, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	if m = tm.(Model); m.pvFocus || m.focus != "b1" {
 		t.Errorf("a click on a card takes the keys back: pvFocus=%v focus=%s", m.pvFocus, m.focus)
+	}
+}
+
+// A burst typed into the preview reaches the pane in order even though bubbletea runs each
+// key's command on its own goroutine.
+func TestForwardedKeysKeepOrder(t *testing.T) {
+	for round := range 20 {
+		r := &fakeRunner{}
+		m, _ := press(t, wide(r, 232, 50), "P", "tab")
+		r.mu.Lock()
+		r.calls = nil
+		r.mu.Unlock()
+		var cmds []tea.Cmd
+		for _, k := range []tea.KeyMsg{
+			{Type: tea.KeyRunes, Runes: []rune("a")}, {Type: tea.KeySpace, Runes: []rune(" ")}, {Type: tea.KeyRunes, Runes: []rune("b")},
+			{Type: tea.KeySpace, Runes: []rune(" ")}, {Type: tea.KeyRunes, Runes: []rune("-")}, {Type: tea.KeyRunes, Runes: []rune("修一下")},
+			{Type: tea.KeyRunes, Runes: []rune("c")}, {Type: tea.KeyEnter},
+		} {
+			tm, cmd := m.Update(k)
+			m = tm.(Model)
+			cmds = append(cmds, cmd)
+		}
+		var wg sync.WaitGroup
+		for i := len(cmds) - 1; i >= 0; i-- { // run them like bubbletea: concurrently, in any order
+			wg.Add(1)
+			go func(c tea.Cmd) { defer wg.Done(); c() }(cmds[i])
+		}
+		wg.Wait()
+		var got []string
+		for _, c := range r.calls {
+			if c[1] == "send-keys" {
+				got = append(got, c[len(c)-1])
+			}
+		}
+		if want := []string{"a", " ", "b", " ", "-", "修一下", "c", "Enter"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("round %d: keys reached the pane as %q", round, got)
+		}
 	}
 }
