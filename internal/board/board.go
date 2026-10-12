@@ -95,7 +95,7 @@ func Run(p *store.Poller) error {
 
 type frameMsg struct{}
 
-// doneMsg reports a finished ccmux command.
+// doneMsg reports a finished ccmux or tmux command.
 type doneMsg struct {
 	ok      string // message on success
 	err     error
@@ -375,6 +375,10 @@ func nearest(rects []rect, id string, d [2]int) string {
 	return best
 }
 
+// enterDelay separates the text from its Enter: an Enter that lands in the same read as the text
+// can be taken as part of a paste and not submit (ccmux waits the same).
+var enterDelay = 150 * time.Millisecond
+
 const noPane = "后台会话没有 tmux pane：不能跳转 / 发送"
 
 func (m Model) say(c lipgloss.Color, text string) Model {
@@ -422,18 +426,16 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 // (a bare switch-client moves whichever was active last, and in a nested fl-* float that is the
 // float's own client), so the client is chosen explicitly: $AGMUX_CLIENT, else the most recently
 // active client not attached to agmux's own session (or, when that leaves none, agmux runs in an
-// ordinary pane: the most recent client of its own session). When agmux sits in a session that
-// other clients show (the nested float), that session is detached afterwards so the float closes.
+// ordinary pane: the most recent client of its own session).
 const clientsFormat = "#{client_activity}\t#{client_name}\t#{client_session}"
 
 func switchTo(r Runner, getenv func(string) string, pane string) error {
 	own := ""
 	if p := getenv("TMUX_PANE"); p != "" {
-		out, err := r.Tmux("display-message", "-p", "-t", p, "#{session_name}")
-		if err != nil {
-			return err
+		// a stale TMUX_PANE (e.g. left in the server's global environment) just means "no own session"
+		if out, err := r.Tmux("display-message", "-p", "-t", p, "#{session_name}"); err == nil {
+			own = strings.TrimSuffix(out, "\n") // session names may end in spaces
 		}
-		own = strings.TrimSpace(out)
 	}
 	out, err := r.Tmux("list-clients", "-F", clientsFormat)
 	if err != nil {
@@ -451,7 +453,8 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 			clients = append(clients, cl{n, f[1], f[2]})
 		}
 	}
-	client, fallback := getenv("AGMUX_CLIENT"), false
+	exact := getenv("AGMUX_CLIENT")
+	client := exact
 	if client == "" {
 		best := -1
 		for _, c := range clients {
@@ -464,7 +467,7 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 		best := -1
 		for _, c := range clients {
 			if c.activity > best {
-				client, best, fallback = c.name, c.activity, true
+				client, best = c.name, c.activity
 			}
 		}
 	}
@@ -474,10 +477,17 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 	if _, err := r.Tmux("switch-client", "-c", client, "-t", pane); err != nil {
 		return err
 	}
+	// Close the nested float only when the launcher said exactly which client is the user's: a
+	// guessed client might be the float's own. Detach the other clients of agmux's session one by
+	// one (-s would also kick the user's client off when the target pane is in that same session).
+	if exact == "" || own == "" {
+		return nil
+	}
 	for _, c := range clients {
-		if !fallback && own != "" && c.session == own && c.name != client {
-			_, err := r.Tmux("detach-client", "-s", own)
-			return err
+		if c.session == own && c.name != client {
+			if _, err := r.Tmux("detach-client", "-t", c.name); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -494,6 +504,7 @@ func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		_, err := r.Tmux("send-keys", "-t", pane, "-l", "--", text) // -l: literal, -- : text may start with -
 		if err == nil {
+			time.Sleep(enterDelay)
 			_, err = r.Tmux("send-keys", "-t", pane, "Enter")
 		}
 		return doneMsg{ok: ok, err: err}

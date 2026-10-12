@@ -49,6 +49,8 @@ bind-key a run-shell 'tmux display-popup -w 90% -h 90% -E "AGMUX_CLIENT=#{client
 
 `enter` 跳转时要知道切哪个终端。浮窗里 tmux 没有「当前 client」，agmux 默认选最近活动、且不在看板自己所在 session 里的那个 client。经 `run-shell` 把 `#{client_name}` 传给 `AGMUX_CLIENT` 就能精确指定；`display-popup` 的 `-e` 和命令里的 `#{…}` 不会被展开，所以要套一层 `run-shell`。
 
+浮窗里再 attach 一个 session 的嵌套用法（浮窗里跑 `tmux attach`，看板在那个 session 里）：只有传了 `AGMUX_CLIENT`，跳转后 agmux 才会把浮窗里的那个 client detach 掉、浮窗随之关闭；没传就只切换，浮窗留着。
+
 ### 上下文百分比
 
 卡片上的上下文条来自 Claude Code 的状态栏数据。让 agmux 包住你现有的状态栏命令：

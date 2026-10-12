@@ -29,7 +29,7 @@ func Run(bin string, args ...string) ([]byte, error) {
 		// exited 0 but left a background child holding stdout; what it printed is complete
 		return stdout.Bytes(), nil
 	case errors.Is(err, exec.ErrNotFound):
-		return nil, fmt.Errorf("%s not found in $PATH: %w", bin, exec.ErrNotFound)
+		return nil, notFound(bin)
 	case err != nil && ctx.Err() != nil:
 		return nil, fmt.Errorf("%s: timed out after %s", line, timeout)
 	case err != nil:
@@ -41,3 +41,9 @@ func Run(bin string, args ...string) ([]byte, error) {
 	}
 	return stdout.Bytes(), nil
 }
+
+// notFound reads "<bin> not found in $PATH" and still matches exec.ErrNotFound.
+type notFound string
+
+func (e notFound) Error() string { return string(e) + " not found in $PATH" }
+func (notFound) Unwrap() error   { return exec.ErrNotFound }

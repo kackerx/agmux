@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -20,14 +21,22 @@ func (s staticSrc) Sessions() []store.Session { return s }
 func (s staticSrc) Err() error                { return nil }
 
 type fakeRunner struct {
-	calls   [][]string
-	err     error
-	script  string            // what Interactive runs (sh -c); default: true
-	tmuxOut map[string]string // tmux subcommand → stdout; list-clients defaults to one client /dev/c
+	calls    [][]string
+	at       []time.Time // when each call was made
+	err      error
+	script   string            // what Interactive runs (sh -c); default: true
+	tmuxOut  map[string]string // tmux subcommand → stdout; list-clients defaults to one client /dev/c
+	tmuxFail map[string]error  // tmux subcommand → error
 }
+
+func init() { enterDelay = 0 } // TestSendWaitsBeforeEnter sets its own
 
 func (f *fakeRunner) Tmux(args ...string) (string, error) {
 	f.calls = append(f.calls, append([]string{"tmux"}, args...))
+	f.at = append(f.at, time.Now())
+	if err := f.tmuxFail[args[0]]; err != nil {
+		return "", err
+	}
 	if out, ok := f.tmuxOut[args[0]]; ok {
 		return out, f.err
 	}
@@ -428,50 +437,91 @@ func TestNearestEmpty(t *testing.T) {
 	}
 }
 
-// Which client enter switches, and whether agmux's own session is detached afterwards.
+// Which client enter switches, and which clients are detached afterwards.
 func TestSwitchTo(t *testing.T) {
 	const pane = "%7"
+	display := []string{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}
+	sw := func(c string) []string { return []string{"tmux", "switch-client", "-c", c, "-t", pane} }
+	detach := func(c string) []string { return []string{"tmux", "detach-client", "-t", c} }
 	for _, c := range []struct {
 		name    string
 		env     map[string]string
+		own     string // display-message output
 		clients string // list-clients output: activity \t name \t session
 		want    [][]string
 		err     string
 	}{
-		{"AGMUX_CLIENT wins over activity", map[string]string{"AGMUX_CLIENT": "/dev/x"},
+		{"AGMUX_CLIENT wins over activity", map[string]string{"AGMUX_CLIENT": "/dev/x"}, "",
 			"5\t/dev/a\tmain\n9\t/dev/b\tother\n",
-			[][]string{listClients, {"tmux", "switch-client", "-c", "/dev/x", "-t", pane}}, ""},
-		{"direct popup: most recent client", nil,
+			[][]string{listClients, sw("/dev/x")}, ""},
+		{"direct popup: most recent client", nil, "",
 			"5\t/dev/a\tmain\n9\t/dev/b\tother\n3\t/dev/c\tmain\n",
-			[][]string{listClients, {"tmux", "switch-client", "-c", "/dev/b", "-t", pane}}, ""},
-		{"nested fl-* float: skip own session, then detach it", map[string]string{"TMUX_PANE": "%2"},
+			[][]string{listClients, sw("/dev/b")}, ""},
+		{"nested float without AGMUX_CLIENT: switch the outer one, detach nothing", map[string]string{"TMUX_PANE": "%2"}, "fl-1\n",
 			"5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n",
-			[][]string{
-				{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients,
-				{"tmux", "switch-client", "-c", "/dev/outer", "-t", pane},
-				{"tmux", "detach-client", "-s", "fl-1"},
-			}, ""},
-		{"in a pane no other client shows: no detach", map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/outer"},
-			"5\t/dev/outer\tmain\n",
-			[][]string{
-				{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients,
-				{"tmux", "switch-client", "-c", "/dev/outer", "-t", pane},
-			}, ""},
-		{"ordinary pane: only own-session clients → most recent of them, no detach", map[string]string{"TMUX_PANE": "%2"},
+			[][]string{display, listClients, sw("/dev/outer")}, ""},
+		{"nested float with AGMUX_CLIENT: detach each other client of own session", map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/outer"}, "fl-1\n",
+			"5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n4\t/dev/nested2\tfl-1\n",
+			[][]string{display, listClients, sw("/dev/outer"), detach("/dev/nested"), detach("/dev/nested2")}, ""},
+		{"the chosen client is in own session: never detached", map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/outer"}, "fl-1\n",
+			"5\t/dev/outer\tfl-1\n",
+			[][]string{display, listClients, sw("/dev/outer")}, ""},
+		{"session names with spaces", map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/outer"}, "my float\n",
+			"5\t/dev/outer\tmy main\n9\t/dev/nested\tmy float\n",
+			[][]string{display, listClients, sw("/dev/outer"), detach("/dev/nested")}, ""},
+		{"a session name ending in a space is not trimmed", map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/outer"}, "fl \n",
+			"5\t/dev/outer\tfl\n9\t/dev/nested\tfl \n",
+			[][]string{display, listClients, sw("/dev/outer"), detach("/dev/nested")}, ""},
+		{"ordinary pane: only own-session clients → most recent of them, no detach", map[string]string{"TMUX_PANE": "%2"}, "fl-1\n",
 			"4\t/dev/old\tfl-1\n9\t/dev/mine\tfl-1\n",
-			[][]string{
-				{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients,
-				{"tmux", "switch-client", "-c", "/dev/mine", "-t", pane},
-			}, ""},
-		{"no client at all: error, nothing switched", map[string]string{"TMUX_PANE": "%2"},
+			[][]string{display, listClients, sw("/dev/mine")}, ""},
+		{"no client at all: error, nothing switched", map[string]string{"TMUX_PANE": "%2"}, "fl-1\n",
 			"",
-			[][]string{{"tmux", "display-message", "-p", "-t", "%2", "#{session_name}"}, listClients}, "AGMUX_CLIENT"},
+			[][]string{display, listClients}, "AGMUX_CLIENT"},
 	} {
-		r := &fakeRunner{tmuxOut: map[string]string{"list-clients": c.clients, "display-message": "fl-1\n"}}
+		r := &fakeRunner{tmuxOut: map[string]string{"list-clients": c.clients, "display-message": c.own}}
 		err := switchTo(r, func(k string) string { return c.env[k] }, pane)
 		if !reflect.DeepEqual(r.calls, c.want) || (err == nil) != (c.err == "") || err != nil && !strings.Contains(err.Error(), c.err) {
 			t.Errorf("%s:\n calls %q\n want  %q\n err %v", c.name, r.calls, c.want, err)
 		}
+	}
+}
+
+// A TMUX_PANE that no longer exists (left in the server's global environment) is not an error.
+func TestSwitchStaleTmuxPane(t *testing.T) {
+	r := &fakeRunner{tmuxFail: map[string]error{"display-message": errors.New("can't find pane: %2")},
+		tmuxOut: map[string]string{"list-clients": "5\t/dev/a\tmain\n"}}
+	if err := switchTo(r, func(k string) string { return map[string]string{"TMUX_PANE": "%2"}[k] }, "%7"); err != nil ||
+		!reflect.DeepEqual(r.calls[len(r.calls)-1], []string{"tmux", "switch-client", "-c", "/dev/a", "-t", "%7"}) {
+		t.Errorf("err %v, calls %q", err, r.calls)
+	}
+}
+
+// A failing tmux step stops the chain: no detach after a failed switch, no Enter after failed text.
+func TestTmuxFailuresStopTheChain(t *testing.T) {
+	r := &fakeRunner{tmuxFail: map[string]error{"switch-client": errors.New("tmux switch-client: no such client")},
+		tmuxOut: map[string]string{"list-clients": "5\t/dev/outer\tmain\n9\t/dev/nested\tfl-1\n", "display-message": "fl-1\n"}}
+	m := newModel(r)
+	m.getenv = func(k string) string { return map[string]string{"TMUX_PANE": "%2", "AGMUX_CLIENT": "/dev/outer"}[k] }
+	m, quit := press(t, m, "enter")
+	if quit || r.calls[len(r.calls)-1][1] != "switch-client" || !strings.Contains(ansi.Strip(m.View()), "no such client") {
+		t.Errorf("failed switch: quit=%v calls %q", quit, r.calls)
+	}
+
+	r = &fakeRunner{tmuxFail: map[string]error{"send-keys": errors.New("tmux send-keys: can't find pane")}}
+	m, _ = press(t, newModel(r), "s", "hi", "enter")
+	if len(r.calls) != 1 || !strings.Contains(ansi.Strip(m.View()), "can't find pane") {
+		t.Errorf("failed text must not be followed by Enter: %q", r.calls)
+	}
+}
+
+func TestSendWaitsBeforeEnter(t *testing.T) {
+	enterDelay = 120 * time.Millisecond
+	defer func() { enterDelay = 0 }()
+	r := &fakeRunner{}
+	press(t, newModel(r), "H")
+	if len(r.at) != 2 || r.at[1].Sub(r.at[0]) < 120*time.Millisecond {
+		t.Errorf("Enter must come ≥120ms after the text: %v", r.calls)
 	}
 }
 

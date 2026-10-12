@@ -3,7 +3,6 @@ package ccmux
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -40,7 +39,7 @@ func TestRun(t *testing.T) {
 	}
 
 	t.Setenv("PATH", t.TempDir())
-	if _, err := Run("show"); err == nil || !strings.HasPrefix(err.Error(), "ccmux not found in $PATH") {
+	if _, err := Run("show"); err == nil || err.Error() != "ccmux not found in $PATH: install ccmux and make sure `ccmux show --json` works" {
 		t.Errorf("missing: %v", err)
 	}
 }
