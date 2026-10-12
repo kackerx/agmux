@@ -12,15 +12,16 @@ S1 只做 `agmux board`：全屏看板，在 tmux popup（fl-* 浮窗，约 180�
 ## 数据源
 ### A. `ccmux show --json`【已实测】每 2s 轮询
 数组，每项用到的字段：`id`、`summary`（会话名，可能为 null → 退回 `project`）、`agentType`、`cwd`、`project`、`mainRepoRoot`、`gitBranch`、
-`status`（idle / working / …）、`attentionType`、`pendingTool`、`tmuxPane`（background 模式下 null）、`trackingMode`、
+`status`（idle / working / waiting）、`attentionType`、`attentionState`、`lastPrompt`、`pendingTool`、`tmuxPane`（background 模式下 null）、`trackingMode`、
 `subagents[]`（agentId / status / pendingTool）、`nativeSessionId`、`logPath`、`lastActivityAt`、`updatedAt`、`backgroundDetail`。
 ### B. HUD 状态文件 `$XDG_STATE_HOME/agmux/<session_id>.json`（默认 ~/.local/state/agmux/）【待接线】
 Claude Code 每次刷新状态栏把 payload JSON 喂给 ~/.config/bin/claude-hud；在那脚本里加一行 `printf '%s' "$payload" > …/<session_id>.json` 落盘（这改动在 ~/.config 仓库，要用户批准）。
-agmux 按 `nativeSessionId` 找文件，取：`context_window.used_percentage`（注意取紧跟 `remaining_percentage` 的那个，rate_limits 里有同名字段）、模型、effort、`session_name`。
+agmux 按 `nativeSessionId` 找文件，取 JSON 路径 `context_window.used_percentage`（`rate_limits` 下也有同名字段，别取错）、模型、effort。百分比**截断**取整（29.6 → 29），和 claude-hud 一致。background 会话没有状态栏、没有 HUD 文件，永远显示 `--`，这是预期。HUD 文件 S1 不清理（每个几 KB）。
 写入方用 `printf > tmp && mv` 原子落盘，但 agmux 读到解析失败的文件仍按不存在处理，不报错。
 除 used_percentage / session_name 外，其余字段名未核实：拿到第一份真实 payload 再定，dev 先按文件不存在处理。
 ### C. jsonl 兜底（只取模型）
 文件可达 16MB，不能整读：从末尾读最后 64KB，倒序找最后一条 `"type":"assistant"`，取 `message.model`。
+找不到（真机约 8%：末尾是大 attachment 或超长 assistant 行）就沿用该会话上一次轮询到的模型，store 里按会话 ID 缓存；首次就找不到显示空。
 不从 jsonl 推算上下文百分比（各模型窗口大小不同，算不准）；B 没接上时百分比显示 `--`，进度条全空。
 
 ## 数据模型
@@ -64,7 +65,8 @@ type Session struct {
 ╰──────────────────────────────────────────────────────────╯
 ```
 - 字段颜色和 ~/.config/bin/claude-hud 的段一一对应：名洋红、模型青、effort 紫、目录黄、分支橙红。
-- 状态：`⏵ working` 橙、`⏸ idle` 蓝灰、`● done` 绿（ccmux 配色）；`attentionType` 非空时整张卡边框红。焦点卡片边框变亮。不单独拎出需要处理的会话。
+- 状态（按 ccmux 1.4.3 的规则）：`⏵ working` 橙，后面接 pendingTool，只因子 agent 而 working 时接 `agents`；`⏸ idle` 蓝灰；`● done` 绿 = status idle 且 `attentionState` 非空；`⏳ waiting` 红 = status waiting。`attentionType` 非空或 waiting 时整张卡边框红。焦点卡片边框变亮。不单独拎出需要处理的会话。
+- 这些字段 T1 没解析（`attentionState`、`lastPrompt`），T3 补进 `ccmux.Session` / `store.Session`，T1 不返工。
 - 上下文条：■（U+25A0）10 格，空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 10 格全暗 + `--`。
 - 第 3 行左边：background 模式用 `backgroundDetail`，否则按 `lastPrompt` 的形态取一行再截断：
   - cross-session message → `← <from-name>: <正文第一行>`
@@ -79,7 +81,7 @@ type Session struct {
 - 焦点卡片边框高亮；方向键 / hjkl 移动（j/k 列内，h/l 跨列），鼠标点卡片 = 选中。
 - enter 或双击 / 单击已选中的卡片：`ccmux switch <id>` 然后退出 TUI（popup 关掉才能看到目标 pane）。
 - `H`：`ccmux send <id> /handoff`（agent 正在 working 时会排到下一轮，这是 ccmux 的行为）。
-- `r` = `ccmux restart <id>`，`x` = `ccmux kill <id>`（先 y/n 确认），`d` = `ccmux review <id>`，`s` = 提示输入一行后 `ccmux send <id> <text>`。
+- `r` = `ccmux restart <id>`，`x` = `ccmux kill <id>`（先 y/n 确认），`d` = `ccmux review <id>`——它是交互式 TUI（内部起 hunk），用 `tea.ExecProcess` 把终端交给它，退出后回看板；`s` = 提示输入一行后 `ccmux send <id> <text>`。
 - `q` / esc 退出。`ccmux` 子命令的 stderr 显示在底栏一行，不弹窗。
 - `tmuxPane` 为 null（background）的会话：switch / send 置灰，底栏提示。
 

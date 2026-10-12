@@ -4,7 +4,7 @@
 
 ## S1 看板浮窗
 
-### T1 骨架 + store（测试通过 @5dec1f9，等审查）
+### T1 骨架 + store（测试通过 @5dec1f9；审查退回 2 条必须改，待修）
 - `go mod init github.com/kackerx/agmux`；`agmux board` 子命令；`agmux show` 打印 store 里的会话一行一个（调试用，顺便当测试探针）。
 - `internal/ccmux`：exec `ccmux show --json` 解析成 `[]Session`；exec 其它子命令。
 - `internal/store`：Store 接口 + 内存实现，每 2s 轮询；合并 HUD 文件（存在才读）和 jsonl 模型兜底（末尾 64KB 倒序找）。
