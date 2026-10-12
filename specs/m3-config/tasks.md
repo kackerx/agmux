@@ -16,9 +16,15 @@
 - `a` 浮层列表、j/k、enter 绑定写 avatars.json、esc 取消；当前绑定高亮。
 - 验收：单测 优先级三层；黑盒 a → 列表出现 6 个 sprite、光标在当前头像行，j 两次 enter 后卡片头像变成当前头像下两格的 sprite、avatars.json 里是 `{"<name>":"<id>"}`，重启看板仍是该头像；esc 不写文件。
 
-### T19 `/` 模糊搜索过滤（修复 d27522d 复审中 / 回归中）
+### T19 `/` 模糊搜索过滤（复审退回 3 必改 + 1 测试缺口，待修）
 - 按 design.md「模糊搜索过滤」：fzf algo 封装在 internal/fuzzy（固定版本）、扩展语法、三字段高亮、实时过滤、`3/14` 计数、enter 保留 / esc 清空、no match、ctrl+h 退格。
 - 验收：单测 `orch` 命中 orchestrator、`^sql` 只命中前缀、`!test` 排除、`'main` 精确、smartcase；高亮位置按字素簇；过滤后布局只含命中卡片、组数变化；黑盒 fixture 输入 `orch` 只剩 orchestrator 卡，esc 恢复 9 张。
+- 复审退回（reviewer @d27522d，探针在其 scratch cr-t19-d27522d/probes/）：
+  1. 同分落点按布局顺序：Filter 前把会话按 groups() 展平后的顺序喂进去（TestProbeEnterTieLayoutOrder）。
+  2. 清空过滤后焦点卡被恢复的折叠藏起来 → 焦点落到该组折叠标题，输入框 esc 回 searchFrom 那条路同样处理（TestProbeEscClearIntoFoldedGroup）。
+  3. 过滤态下 `f` 不做事 + 消息行 "clear the filter to fold"（TestProbeFoldUnderFilter）。
+  4. 测试缺口：收 probes/probe_fold_test.go 的 TestProbeFilterOpensFoldedForEverything 进 keys_test.go（钉住 items/current/方向键/flash/mouse 五处 foldedNow）。
+  5. 顺手：输入框过滤条件补 `unicode.Is(unicode.Cf, r)`；n 含直通锁定保留的卡（spec 已写明，不改代码）。
 - 定稿（2026-10-12 tester 退回「折叠 + 空模式计数 9/9 但屏上 6 张」）：计数是命中数/会话总数，不是屏上卡数；空模式不过滤、折叠照旧，9/9 正确，不改代码，tester 改断言。
 
 ### T20 `s` 全局定位 flash + 回复改 `i`（复审通过 @00fcdab+b6b75e2，补测 4e5d63c；回归中）
