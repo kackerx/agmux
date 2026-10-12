@@ -68,7 +68,7 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 	var content []string
 	switch {
 	case !ok || s.TmuxPane == "":
-		content = []string{fg(cMuted, "没有 pane")}
+		content = []string{fg(cMuted, "no pane")}
 		if ok {
 			title = fg(cName, s.Name)
 		}

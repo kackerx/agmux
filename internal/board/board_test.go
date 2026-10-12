@@ -81,7 +81,7 @@ func TestView(t *testing.T) {
 	t.Setenv("HOME", "/Users/dev") // the fixture's home, so headers shorten to ~ on any machine
 	out, _, _ := view(ss, 200, 50, "", 0, now, "", false, nil, 200, nil)
 	plain := ansi.Strip(out)
-	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "⏵ working", "● done", "q 退出"} {
+	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "⏵ working", "● done", "q quit"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("view missing %q", want)
 		}

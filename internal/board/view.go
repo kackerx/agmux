@@ -371,8 +371,8 @@ var footerKeys = []struct {
 	text     string
 	needPane bool
 }{
-	{"j/k 卡片", false}, {"h/l 跨列", false}, {"enter 跳转", true}, {"f 折叠", false}, {"P 预览", false}, {"tab 进入预览", true}, {"s 回复", true}, {"H 交接", true},
-	{"r 重启", false}, {"x 杀", false}, {"d review", false}, {"q 退出", false},
+	{"j/k h/l move", false}, {"enter jump", true}, {"f fold", false}, {"p preview", false}, {"tab focus preview", true},
+	{"s reply", true}, {"H handoff", true}, {"r restart", false}, {"x kill", false}, {"d review", false}, {"q quit", false},
 }
 
 // footer is ccmux's key line; keys that need a tmux pane go dark for background sessions.

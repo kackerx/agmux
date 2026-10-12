@@ -239,7 +239,7 @@ func TestPromptTargetIsPinned(t *testing.T) {
 		m, _ = press(t, m, keys[0])
 		src.ss = sessions[:2] // b1 disappears; focus would fall back to a1
 		m, _ = press(t, m, keys[1:]...)
-		if len(r.calls) != 0 || !strings.Contains(m.View(), "three 已经不在了") {
+		if len(r.calls) != 0 || !strings.Contains(m.View(), "three is gone") {
 			t.Errorf("%v: calls %q, want none and a 'gone' message", keys, r.calls)
 		}
 	}
@@ -252,7 +252,7 @@ func TestPromptSurvivesResults(t *testing.T) {
 	m = tm.(Model)
 	m, _ = press(t, m, "x")
 	tm, _ = m.Update(cmd()) // its result lands while the kill prompt is open
-	if !strings.Contains(tm.(Model).View(), "y 确认") {
+	if !strings.Contains(tm.(Model).View(), "y to confirm") {
 		t.Error("a finished command must not hide the open prompt")
 	}
 }
@@ -274,7 +274,7 @@ func TestReview(t *testing.T) {
 	}{
 		{"echo progress >&2; echo 'hunk: no changes to review' >&2; exit 1", "ccmux review: hunk: no changes to review"},
 		{"exit 2", "exit status 2"},
-		{"echo fine >&2", "review 结束：one"},
+		{"echo fine >&2", "review finished: one"},
 	} {
 		m := newModel(&fakeRunner{script: c.script})
 		cmd, done := m.review(sessions[0])
@@ -359,7 +359,7 @@ func TestFold(t *testing.T) {
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "▾ /a (2)") || !strings.Contains(v, " one ") {
 		t.Errorf("f twice should leave /a open:\n%s", v)
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "f 折叠") {
+	if !strings.Contains(ansi.Strip(m.View()), "f fold") {
 		t.Error("footer lists f")
 	}
 }
@@ -652,13 +652,13 @@ func wide(r *fakeRunner, w, h int) Model {
 
 func TestPreviewToggle(t *testing.T) {
 	r := &fakeRunner{}
-	m, _ := press(t, wide(r, 99, 40), "P")
-	if m.preview || !strings.Contains(ansi.Strip(m.View()), "不足 100 列") {
-		t.Fatal("under 100 columns P refuses and says why")
+	m, _ := press(t, wide(r, 99, 40), "p")
+	if m.preview || !strings.Contains(ansi.Strip(m.View()), "at least 100 columns") {
+		t.Fatal("under 100 columns p refuses and says why")
 	}
 
 	m = wide(r, 232, 50)
-	tm, cmd := m.Update(key("P"))
+	tm, cmd := m.Update(key("p"))
 	m = tm.(Model)
 	if !m.previewOn() || m.cardsW() != 232-92 {
 		t.Fatalf("preview on: cards %d wide, want 140", m.cardsW())
@@ -716,9 +716,9 @@ func TestPreviewToggle(t *testing.T) {
 		}
 	}
 
-	m, _ = press(t, m, "P")
+	m, _ = press(t, m, "p")
 	if m.previewOn() || m.cardsW() != 232 || strings.Contains(ansi.Strip(m.View()), "line 200") {
-		t.Error("P again closes it and the cards get the full width back")
+		t.Error("p again closes it and the cards get the full width back")
 	}
 }
 
@@ -737,7 +737,7 @@ func runAll(cmd tea.Cmd) {
 func TestPreviewFollowsFocus(t *testing.T) {
 	r := &fakeRunner{}
 	m := wide(r, 232, 50)
-	m, _ = press(t, m, "P") // capture %1 (result not fed back, so not "in flight" for the next tests)
+	m, _ = press(t, m, "p") // capture %1 (result not fed back, so not "in flight" for the next tests)
 	m.capturing = false
 	tm, cmd := m.Update(key("l"))
 	m = tm.(Model)
@@ -755,15 +755,15 @@ func TestPreviewFollowsFocus(t *testing.T) {
 			t.Fatalf("no capture without a pane, got %q", pm.pane)
 		}
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "没有 pane") {
+	if !strings.Contains(ansi.Strip(m.View()), "no pane") {
 		t.Error("a background session's preview says it has no pane")
 	}
 	m, _ = press(t, m, "f") // focus on the folded /a title
-	if !strings.Contains(ansi.Strip(m.View()), "没有 pane") {
+	if !strings.Contains(ansi.Strip(m.View()), "no pane") {
 		t.Error("a folded title's preview says no pane")
 	}
 	// clicks hit the cards as laid out beside the preview (3 columns of 45 at 232), not full width
-	m2, _ := press(t, wide(&fakeRunner{}, 232, 50), "P")
+	m2, _ := press(t, wide(&fakeRunner{}, 232, 50), "p")
 	tm, _ = m2.Update(tea.MouseMsg{X: 50, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	if tm.(Model).focus != "b1" {
 		t.Errorf("click at x=50 beside the preview: focus %q, want b1", tm.(Model).focus)
@@ -778,7 +778,7 @@ func TestPreviewFollowsFocus(t *testing.T) {
 // The preview refreshes on the 500ms frame tick (the cards keep their 2s poll).
 func TestPreviewRefreshesOnFrame(t *testing.T) {
 	r := &fakeRunner{}
-	m, _ := press(t, wide(r, 232, 50), "P")
+	m, _ := press(t, wide(r, 232, 50), "p")
 	m.capturing = false // the opening capture came back
 	before := len(r.calls)
 	tm, cmd := m.Update(frameMsg{})
@@ -835,13 +835,13 @@ func TestPreviewPassThrough(t *testing.T) {
 	if m.pvFocus {
 		t.Fatal("tab with the preview closed")
 	}
-	m, _ = press(t, m, "P", "tab")
+	m, _ = press(t, m, "p", "tab")
 	if !m.pvFocus {
 		t.Fatal("tab should focus the preview")
 	}
 	v := m.View()
 	focusEsc, _, _ := strings.Cut(fg(cFocus, "╭"), "╭")
-	if !strings.Contains(v, focusEsc+"╭") || !strings.HasSuffix(ansi.Strip(v), "按键直通 pane · tab 回到卡片") {
+	if !strings.Contains(v, focusEsc+"╭") || !strings.HasSuffix(ansi.Strip(v), "keys go to the pane · tab back to the cards") {
 		t.Error("focused preview: #ff8ebe border and the pass-through footer")
 	}
 	r.calls = nil
@@ -866,7 +866,7 @@ func TestPreviewPassThrough(t *testing.T) {
 		t.Error("tab gives the keys back to the board, then q quits")
 	}
 
-	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "P", "j", "tab") // a2: no pane
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "p", "j", "tab") // a2: no pane
 	if m.pvFocus {
 		t.Error("no pane, nothing to type into")
 	}
@@ -874,7 +874,7 @@ func TestPreviewPassThrough(t *testing.T) {
 
 func TestPreviewWheelAndClicks(t *testing.T) {
 	r := &fakeRunner{}
-	m, _ := press(t, wide(r, 232, 50), "P")
+	m, _ := press(t, wide(r, 232, 50), "p")
 	m.capturing = false
 	wheel := func(m Model, x int, b tea.MouseButton) (Model, tea.Cmd) {
 		tm, cmd := m.Update(tea.MouseMsg{X: x, Y: 10, Action: tea.MouseActionPress, Button: b})
@@ -940,7 +940,7 @@ func TestSReplies(t *testing.T) {
 		t.Errorf("after s, keys go to the pane: quit=%v %q", quit, sends)
 	}
 
-	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "P", "s") // already open: s only takes the keys
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "p", "s") // already open: s only takes the keys
 	if !m.previewOn() || !m.pvFocus {
 		t.Error("s with the preview open focuses it")
 	}
@@ -949,11 +949,11 @@ func TestSReplies(t *testing.T) {
 		t.Error("s on a session without a pane does nothing")
 	}
 	m, _ = press(t, wide(&fakeRunner{}, 99, 40), "s")
-	if m.preview || !strings.Contains(ansi.Strip(m.View()), "不足 100 列") {
+	if m.preview || !strings.Contains(ansi.Strip(m.View()), "at least 100 columns") {
 		t.Error("s on a narrow terminal says why it can't open the preview")
 	}
-	if !strings.Contains(ansi.Strip(wide(&fakeRunner{}, 232, 50).View()), "tab 进入预览 · s 回复 · H 交接") {
-		t.Error("footer order: … tab 进入预览 · s 回复 · H 交接 …")
+	if !strings.Contains(ansi.Strip(wide(&fakeRunner{}, 232, 50).View()), "tab focus preview · s reply · H handoff") {
+		t.Error("footer order: … tab focus preview · s reply · H handoff …")
 	}
 }
 
@@ -962,7 +962,7 @@ func TestSReplies(t *testing.T) {
 func TestForwardedKeysKeepOrder(t *testing.T) {
 	for round := range 20 {
 		r := &fakeRunner{}
-		m, _ := press(t, wide(r, 232, 50), "P", "tab")
+		m, _ := press(t, wide(r, 232, 50), "p", "tab")
 		r.mu.Lock()
 		r.calls = nil
 		r.mu.Unlock()
@@ -998,7 +998,7 @@ func TestForwardedKeysKeepOrder(t *testing.T) {
 func TestPreviewEdges(t *testing.T) {
 	// a tiny terminal must not crash the preview
 	for h := 5; h >= 1; h-- {
-		m, _ := press(t, wide(&fakeRunner{}, 120, 20), "P")
+		m, _ := press(t, wide(&fakeRunner{}, 120, 20), "p")
 		m.pv = previewMsg{pane: "%1", text: "a\nb\nc\n"}
 		tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: h})
 		_ = tm.(Model).View()
@@ -1006,7 +1006,7 @@ func TestPreviewEdges(t *testing.T) {
 
 	// a capture coming back frees the next frame's capture
 	r := &fakeRunner{}
-	m, _ := press(t, wide(r, 232, 50), "P")
+	m, _ := press(t, wide(r, 232, 50), "p")
 	tm, _ := m.Update(previewMsg{pane: "%1", text: "x"})
 	m = tm.(Model)
 	before := len(r.calls)
@@ -1017,20 +1017,20 @@ func TestPreviewEdges(t *testing.T) {
 	}
 
 	// widths: at least 60 for the preview, opens at 100, closes below
-	if m := wide(&fakeRunner{}, 100, 40); func() bool { m, _ = press(t, m, "P"); return !m.previewOn() || m.cardsW() != 40 }() {
+	if m := wide(&fakeRunner{}, 100, 40); func() bool { m, _ = press(t, m, "p"); return !m.previewOn() || m.cardsW() != 40 }() {
 		t.Errorf("100 columns: preview on, cards %d (want 40)", m.cardsW())
 	}
-	m, _ = press(t, wide(&fakeRunner{}, 100, 40), "P")
+	m, _ = press(t, wide(&fakeRunner{}, 100, 40), "p")
 	tm, _ = m.Update(tea.WindowSizeMsg{Width: 99, Height: 40})
 	if m = tm.(Model); m.previewOn() || m.cardsW() != 99 {
 		t.Errorf("99 columns: preview off, cards %d", m.cardsW())
 	}
-	if m, _ = press(t, m, "P"); m.preview {
+	if m, _ = press(t, m, "p"); m.preview {
 		t.Error("too narrow with the preview still set: P turns it off")
 	}
 
 	// stale content for another pane never shows; a capture error does
-	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "P")
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "p")
 	m.pv = previewMsg{pane: "%3", text: "stale-from-b1"}
 	if strings.Contains(ansi.Strip(m.View()), "stale-from-b1") {
 		t.Error("content captured for another pane must not show")
@@ -1057,7 +1057,7 @@ func TestPreviewNavUsesCardWidth(t *testing.T) {
 	m := New(ss, &fakeRunner{})
 	m.getenv = func(string) string { return "" }
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
-	m, _ = press(t, tm.(Model), "P", "l", "l", "l")
+	m, _ = press(t, tm.(Model), "p", "l", "l", "l")
 	if m.focus != "c1" {
 		t.Errorf("focus %s, want c1 (d1 is in the next band beside the preview)", m.focus)
 	}
@@ -1067,7 +1067,7 @@ func TestPreviewNavUsesCardWidth(t *testing.T) {
 // pane that is no longer focused.
 func TestPreviewFollowsEveryFocusChange(t *testing.T) {
 	r := &fakeRunner{}
-	m, _ := press(t, wide(r, 232, 50), "P")
+	m, _ := press(t, wide(r, 232, 50), "p")
 	m.capturing = false
 	tm, cmd := m.Update(tea.MouseMsg{X: 50, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}) // click b1
 	m = tm.(Model)

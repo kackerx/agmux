@@ -70,7 +70,7 @@ type Model struct {
 	target store.Session   // what the open x prompt acts on, fixed when it opened
 	folded map[string]bool // group keys folded with f; this run only
 
-	preview   bool       // P: show the focused pane on the right
+	preview   bool       // p: show the focused pane on the right
 	pv        previewMsg // the latest capture
 	capturing bool       // a capture is in flight; don't stack them
 	pvFocus   bool       // tab: keys go to the previewed pane
@@ -267,9 +267,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pvFocus, m.msg = true, ""
 		}
 		return m, nil
-	case "P":
+	case "p":
 		if m.w < previewMinTerm && !m.preview { // too narrow to open; an open one still closes
-			return m.say(cMuted, "终端不足 100 列，开不了预览"), nil
+			return m.say(cMuted, "the preview needs a terminal at least 100 columns wide"), nil
 		}
 		m.preview, m.msg = !m.preview, ""
 		cmd := m.capture()
@@ -291,13 +291,13 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch k.String() {
 	case "H":
-		return m.send(s, "/handoff", "已发送 /handoff → "+s.Name)
+		return m.send(s, "/handoff", "sent /handoff → "+s.Name)
 	case "s": // reply: open the preview if needed and give it the keys (P + tab)
 		if s.TmuxPane == "" {
 			return m, nil // msgLine already shows noPane
 		}
 		if m.w < previewMinTerm {
-			return m.say(cMuted, "终端不足 100 列，开不了预览"), nil
+			return m.say(cMuted, "the preview needs a terminal at least 100 columns wide"), nil
 		}
 		m.preview, m.pvFocus, m.msg = true, true, ""
 		cmd := m.capture()
@@ -306,8 +306,8 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode, m.target, m.msg = confirmKill, s, ""
 		return m, nil
 	case "r":
-		m.msg = fg(cMuted, " 重启 "+s.Name+"…")
-		return m, m.ccmux("已重启 "+s.Name, "restart", s.ID)
+		m.msg = fg(cMuted, " restarting "+s.Name+"…")
+		return m, m.ccmux("restarted "+s.Name, "restart", s.ID)
 	case "d":
 		return m, tea.ExecProcess(m.review(s))
 	}
@@ -372,7 +372,7 @@ func nearest(rects []rect, id string, d [2]int) string {
 // can be taken as part of a paste and not submit (ccmux waits the same).
 var enterDelay = 150 * time.Millisecond
 
-const noPane = "后台会话没有 tmux pane：不能跳转 / 发送"
+const noPane = "background session, no tmux pane: can't jump or send"
 
 func (m Model) say(c lipgloss.Color, text string) Model {
 	m.msg = fg(c, " "+text)
@@ -391,7 +391,7 @@ func (m Model) review(s store.Session) (*exec.Cmd, tea.ExecCallback) {
 				err = errors.New("ccmux review: " + last)
 			}
 		}
-		return doneMsg{ok: "review 结束：" + s.Name, err: err, retrack: true}
+		return doneMsg{ok: "review finished: " + s.Name, err: err, retrack: true}
 	}
 }
 
@@ -475,7 +475,7 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 		}
 	}
 	if client == "" {
-		return errors.New("没有可切换的 tmux client：设 AGMUX_CLIENT=<client>（tmux list-clients 里的名字）")
+		return errors.New("no tmux client to switch: set AGMUX_CLIENT=<client> (a name from tmux list-clients)")
 	}
 	if _, err := r.Tmux("switch-client", "-c", client, "-t", pane); err != nil {
 		return err
@@ -501,7 +501,7 @@ func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
 	case s.TmuxPane == "":
 		return m, nil // msgLine already shows noPane
 	case !m.alive(s.ID):
-		return m.say(cRed, s.Name+" 已经不在了，没有发送"), nil
+		return m.say(cRed, s.Name+" is gone; not sent"), nil
 	}
 	r, pane := m.run, s.TmuxPane
 	return m, func() tea.Msg {
@@ -516,9 +516,9 @@ func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
 
 func (m Model) kill(s store.Session) (tea.Model, tea.Cmd) {
 	if !m.alive(s.ID) {
-		return m.say(cMuted, s.Name+" 已经不在了"), nil
+		return m.say(cMuted, s.Name+" is gone"), nil
 	}
-	return m, m.ccmux("已杀掉 "+s.Name, "kill", s.ID)
+	return m, m.ccmux("killed "+s.Name, "kill", s.ID)
 }
 
 // mouse: click a card to focus it, click the focused card again to jump to it. Over the preview
@@ -566,7 +566,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m Model) msgLine(focused store.Session) string {
 	switch m.mode {
 	case confirmKill:
-		return fg(cRed, " 杀掉 "+m.target.Name+"？y 确认，其它键取消")
+		return fg(cRed, " kill "+m.target.Name+"? y to confirm, any other key cancels")
 	}
 	var parts []string
 	if m.msg != "" {
@@ -592,7 +592,7 @@ func (m Model) View() string {
 	}
 	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right)
 	if m.pvFocus && m.previewOn() { // the footer is always the last line
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " 按键直通 pane · tab 回到卡片")
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · tab back to the cards")
 	}
 	return out
 }
