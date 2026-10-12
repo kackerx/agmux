@@ -1,8 +1,8 @@
-# 任务清单
+# M1 任务清单
 
 状态：待做 / 开发中 / 审查中 / 测试中 / 通过。每项通过的条件是测试那边拿出证据。
 
-## S1 看板浮窗（代码 336732a + e2e 套件 1c70e82，审查 / 测试全部通过，待用户验收）
+## 初版 T1–T4（代码 336732a + e2e 套件 1c70e82，审查 / 测试通过，用户已验收并提出改版）
 一条能证伪的实测命令：`cd test/e2e && AGMUX_BIN=~/go/bin/agmux python3 -m unittest -v`（约 130 秒，独立 `-L agmux-test` socket，不碰真 tmux / ccmux）。
 
 ### T1 骨架 + store（通过）
@@ -29,7 +29,7 @@
 - 键位和鼠标照 design.md；`ccmux` 子命令通过一个可替换的 runner 接口 exec（测试里换成记录命令的假 runner）。
 - 验收：单测断言按键 → 期望的 ccmux 命令行；tmux 黑盒：按 q 退出、enter 后进程退出。
 
-## S1.1 验收改版（用户 2026-10-12 验收意见）
+## 验收改版 T5–T6（用户 2026-10-12 验收意见）
 
 ### T5 卡片改版（待做）
 - 列最小宽 56 → 40；头像 6×6 → 4×4（4 列 × 2 行，6 个 sprite 重画，色带保留）；名字前加 agent 图标（claude U+EC82 / codex U+EC81 / 其它 U+EC20，色带同色）。
@@ -40,9 +40,6 @@
 ### T6 `agmux statusline` + `agmux setup`（待做）
 - 按 design.md「数据源 B」做。statusline：echo 一份假 payload 进去，文件落盘且原命令的 stdout 原样出来、退出码透传；写目录不可写时仍透传。setup：对临时 HOME 下的 settings.json 三种情况（无 statusLine / 有 X / 已是 agmux）打印正确，`--write` 后 JSON 其它键原样、有 .bak。
 - 验收：store 读到 `model.display_name` 显示在卡片；effort 字段等用户跑 `agmux setup --write` 后抓到真实 payload 再接（dev 不能改用户的 settings.json）。
-
-## S2 备忘
-- 预览窗口：选中卡片后在旁边 / 下方看最近对话（ccmux `last` / `screen`），替代 S1 去掉的 prompt 行。
 
 ## 待用户定
 - [ ] T6 做完后用户自己跑 `agmux setup --write`，然后把 `~/.local/state/agmux/<自己会话 id>.json` 给 dev 核实 model / effort 字段名。
