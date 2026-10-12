@@ -51,6 +51,9 @@
 - 「会话名」= 卡片上显示的名字（summary，没有就是 project），同一 project 里没 summary 的会话共用一个绑定——用户在配置里写的就是卡片上看到的。
 - 浮层打开时光标停在**当前头像**那一行（直接 enter 等于不改）。
 - 旧 avatars.json 里按 session ID 写的条目不迁移（ID 每次重启都变）。
+- 折叠标题上按 `a`：不动作，消息行 "fold a group? pick a card first"。
+- avatars.json 的写入要先在锁内重读文件再合并这一条（两个看板同时开、或看板开着手改文件都不能丢条目）；文件读坏就拒写并报错；rename 成功后才更新内存。轮询时按 mtime 变化重读 avatars.json，另一个看板改的头像下次轮询就生效。文件内容是 `null` 当作空 map。
+- 绑定键 = summary，summary 若随对话变化绑定会失效——接受（用户 /rename 过的会话名不变）。
 
 ## `/` 模糊搜索过滤（用户 2026-10-12 新增；细节照 sqlmux 的实现对齐：~/proj/sqlmux internal/ui/match.go、internal/app/tree.go）
 - 算法：和 sqlmux 一样直接用 fzf 的 `github.com/junegunn/fzf/src/algo`（MIT）`FuzzyMatchV2`，得分和高亮位置与 fzf 完全一致；它不是稳定 API，**固定版本**、只在 `internal/fuzzy/match.go` 一个文件里封装（`Filter(pattern, items) []Match{Index, Score, Pos}`），`init()` 里 `algo.Init("default")`。
