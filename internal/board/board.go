@@ -228,6 +228,12 @@ func (m Model) shown() ([]store.Session, map[string]hit) {
 	if m.query == "" {
 		return ss, nil
 	}
+	// fed in layout order, so equal scores keep it (the poll's own order is nobody's)
+	var laid []store.Session
+	for _, g := range groups(ss) {
+		laid = append(laid, g.sessions...)
+	}
+	ss = laid
 	items := make([]string, len(ss))
 	for i, s := range ss {
 		items[i] = s.Name + " " + s.Branch + " " + tildePath(s.CWD)
@@ -393,9 +399,21 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.String() == "esc" && m.query != "" { // a kept filter goes first (alt+esc, two quick escs, doesn't)
 		m.current() // the focus stays on the card it is on now, not on one the filter had hidden
 		m.query = ""
+		m.focus = m.visibleFocus()
 		return m, nil
 	}
 	return m.do(m.keymap[k.String()])
+}
+
+// visibleFocus is the focus once the filter is gone: a card that f had folded away is not there to
+// hold it, so the focus goes to its group's title.
+func (m Model) visibleFocus() string {
+	for _, s := range m.src.Sessions() {
+		if s.ID == m.focus && m.folded[s.GroupKey] {
+			return headerID(s.GroupKey)
+		}
+	}
+	return m.focus
 }
 
 // searchKey edits the / filter, which applies as it is typed. enter keeps it and puts the focus
@@ -409,6 +427,7 @@ func (m Model) searchKey(k tea.KeyMsg) Model {
 		}
 	case tea.KeyEsc, tea.KeyCtrlC:
 		m.searching, m.query, m.focus = false, "", m.searchFrom
+		m.focus = m.visibleFocus()
 	case tea.KeyBackspace, tea.KeyCtrlH:
 		if r := []rune(m.query); len(r) > 0 {
 			m.query = string(r[:len(r)-1])
@@ -419,7 +438,7 @@ func (m Model) searchKey(k tea.KeyMsg) Model {
 		}
 		// a paste may carry \r, \t, ESC sequences: they'd tear the top bar
 		m.query += strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) {
+			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) { // Cf: U+202E and friends
 				return ' '
 			}
 			return r
@@ -478,6 +497,9 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		cmd := m.capture()
 		return m, cmd
 	case "fold": // fold / unfold the focused group; the focus stays on it
+		if m.query != "" { // every group is open under a filter: folding would show nothing
+			return m.say(cMuted, "clear the filter to fold"), nil
+		}
 		m.folded[key] = !m.folded[key]
 		m.focus, m.msg = m.items(gs)[gi][0], ""
 		return m, nil

@@ -2505,3 +2505,103 @@ func TestFlashPushSweep(t *testing.T) {
 		}
 	}
 }
+
+// Equal scores: enter goes to the first of them in the layout, not in the poll's order.
+func TestSearchEnterTieLayoutOrder(t *testing.T) {
+	ss := staticSrc{
+		{ID: "b1", Name: "x1", GroupKey: "/b", CWD: "/b", ContextPct: -1, TmuxPane: "%1"},
+		{ID: "a1", Name: "x2", GroupKey: "/a", CWD: "/a", ContextPct: -1, TmuxPane: "%2"},
+	}
+	m, _ := press(t, psized(ss, 232, 50), "/")
+	m = typeKeys(t, m, "x")
+	if m, _ = press(t, m, "enter"); m.focus != "a1" {
+		t.Errorf("tie: enter went to %s, the layout's first is a1", m.focus)
+	}
+}
+
+// Clearing the filter while the focus is on a card of a group f folded: the focus goes to that
+// group's title, not to the first item of the board. By esc on a kept filter and by esc in the box.
+func TestSearchClearIntoFoldedGroup(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "l", "f") // /b folded, focus on its title
+	if m.focus != headerID("/b") {
+		t.Fatalf("setup focus %q", m.focus)
+	}
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "thr")
+	if m, _ = press(t, m, "enter"); m.focus != "b1" { // /b is open under the filter
+		t.Fatalf("enter focus %q", m.focus)
+	}
+	if m, _ = press(t, m, "esc"); m.focus != headerID("/b") || m.query != "" {
+		t.Errorf("kept-filter esc: focus %q", m.focus)
+	}
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "l", "f", "/")
+	m = typeKeys(t, m, "thr")
+	m, _ = press(t, m, "enter", "/", "esc") // the box again, on the kept filter: back to where / was pressed
+	if m.focus != headerID("/b") {
+		t.Errorf("box esc: focus %q", m.focus)
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "▸ /b") {
+		t.Errorf("and it shows:\n%s", v)
+	}
+}
+
+// f under a filter does nothing but say why: every group is open there, and the hidden fold state
+// must not flip.
+func TestSearchFoldRefused(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 232, 50), "/")
+	m = typeKeys(t, m, "o")
+	m, _ = press(t, m, "enter", "f")
+	if m.folded["/a"] || !strings.Contains(ansi.Strip(m.View()), "clear the filter to fold") {
+		t.Errorf("folded %v\n%s", m.folded, ansi.Strip(m.View()))
+	}
+	if m, _ = press(t, m, "esc"); m.folded["/a"] || !strings.Contains(ansi.Strip(m.View()), "one") {
+		t.Error("after esc /a is as it was: open")
+	}
+	m, _ = press(t, m, "f") // no filter: folds
+	if !m.folded["/a"] {
+		t.Error("f folds without a filter")
+	}
+}
+
+// Invisible format characters (U+202E, zero-width joiners…) typed or pasted never reach the query.
+func TestSearchBoxDropsFormatChars(t *testing.T) {
+	m, _ := press(t, wide(&fakeRunner{}, 200, 40), "/")
+	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a‮b​c"), Paste: true})
+	if m = tm.(Model); m.query != "a b c" {
+		t.Errorf("query %q", m.query)
+	}
+}
+
+// /a folded by f, then a filter hitting both its cards: they are open, so the focus, j/k, a click
+// and s all reach them (items, current, the direction keys, flash and mouse all use the filter's folding).
+func TestSearchOpensFoldedForEverything(t *testing.T) {
+	setup := func() Model {
+		m, _ := press(t, wide(&fakeRunner{}, 232, 50), "f", "/") // /a folded
+		m = typeKeys(t, m, "o")                                  // one, two
+		m, _ = press(t, m, "enter")
+		return m
+	}
+	m := setup()
+	if _, _, s, ok := m.current(); !ok || s.ID != "a1" {
+		t.Errorf("enter: focus %q ok %v", m.focus, ok)
+	}
+	if m, _ = press(t, setup(), "j"); m.focus != "a2" {
+		t.Errorf("j: focus %q", m.focus)
+	}
+	m = setup()
+	ss, _ := m.shown()
+	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, nil, m.cardsW(), nil, nil)
+	clicked := false
+	for _, r := range rects {
+		if r.id == "a2" {
+			tm, _ := m.Update(tea.MouseMsg{X: r.x + 3, Y: 1 + r.y - off + 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+			clicked = tm.(Model).focus == "a2"
+		}
+	}
+	if !clicked {
+		t.Error("click on a2 did not focus it")
+	}
+	if m, _ = press(t, setup(), "s"); plabel(m, "a2") == "" {
+		t.Errorf("s: labels %v", m.labels)
+	}
+}
