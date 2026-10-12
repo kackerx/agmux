@@ -671,8 +671,10 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 	// went, the pattern didn't): what was drawn is what stays pressable
 	used := map[string]bool{}
 	was := map[string]string{}
+	drawn := map[string]bool{} // every letter that was on screen: a new hit never takes one a user saw on another
 	for _, p := range prev {
 		was[p.key()] = p.label
+		drawn[p.label] = true
 	}
 	for i := range ms {
 		if l := was[ms[i].key()]; l != "" && !skip[unicode.ToLower([]rune(l)[0])] && !used[l] {
@@ -681,7 +683,7 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 	}
 	var free []string
 	for _, r := range flashAlphabet {
-		if l := string(r); !skip[unicode.ToLower(r)] && !used[l] && !avoid[l] {
+		if l := string(r); !skip[unicode.ToLower(r)] && !used[l] && !avoid[l] && !drawn[l] {
 			free = append(free, l)
 		}
 	}

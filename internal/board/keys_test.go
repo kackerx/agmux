@@ -3452,3 +3452,42 @@ func TestFlashMessageLineNamesTheKey(t *testing.T) {
 		t.Errorf("msg line %q", v[len(v)-2])
 	}
 }
+
+// In one poll Bravo goes and a new card with a hit comes: the new card must not take Bravo's label
+// (the user saw it on Bravo), and pressing it is ignored. By the tick or by the key itself.
+func TestFlashSwapInOnePoll(t *testing.T) {
+	for _, via := range []string{"key", "tick"} {
+		src := &mutSrc{ss: slices.Clone([]store.Session(flashSrc))}
+		m := typed(t, psized(src, 232, 50), "sb")
+		h, _ := hitOf(m, "b1")
+		src.ss = slices.DeleteFunc(slices.Clone(src.ss), func(s store.Session) bool { return s.ID == "b1" })
+		src.ss = append(src.ss, store.Session{ID: "y", Name: "bob", GroupKey: "/h", CWD: "/h", ContextPct: -1, TmuxPane: "%9"})
+		if via == "tick" {
+			tm, _ := m.Update(frameMsg{})
+			m = tm.(Model)
+			if y, ok := hitOf(m, "y"); !ok || y.label == h.label || y.label == "" {
+				t.Errorf("tick: the new card has %+v; Bravo's label was %q", y, h.label)
+			}
+		}
+		before := m.focus
+		m, _ = press(t, m, h.label)
+		if m.mode != flashing || m.focus != before || m.flash.pat != "b" {
+			t.Errorf("%s: Bravo's label %q: mode %v focus %s pattern %q", via, h.label, m.mode, m.focus, m.flash.pat)
+		}
+	}
+}
+
+// View reads the board again for what it draws, but never writes that into the model.
+func TestFlashViewDoesNotWriteFreed(t *testing.T) {
+	src := &mutSrc{ss: slices.Clone([]store.Session(flashSrc))}
+	m := typed(t, psized(src, 232, 50), "sb")
+	m.flash.freed = map[string]bool{"z": true}
+	src.ss = slices.DeleteFunc(slices.Clone(src.ss), func(s store.Session) bool { return s.ID == "b1" })
+	_ = m.View()
+	if len(m.flash.freed) != 1 || !m.flash.freed["z"] {
+		t.Errorf("View wrote into the model's freed map: %v", m.flash.freed)
+	}
+	if _, ok := hitOf(m, "b1"); !ok {
+		t.Error("nor into its hits")
+	}
+}
