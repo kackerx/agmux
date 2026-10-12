@@ -4,7 +4,7 @@
 
 ## 文案
 - 所有界面文字改英文：底栏键位提示、消息行（no pane / no tmux client / review failed…）、确认提示、`--help`。状态词本来就是英文。README 保持中文。
-- 底栏默认：`j/k h/l move · enter jump · / search · s flash · f fold · p preview · tab focus preview · i reply · H handoff · r restart · x kill · d review · a avatar · q quit`（直通时：`keys go to the pane · ctrl+] back to the cards`）。
+- 底栏默认：`j/k h/l move · enter jump · / search · s flash · f fold · p preview · tab focus preview · i reply · H handoff · r restart · x kill · d review · a avatar · q quit`（直通时：`keys go to the pane · tab back to the cards`）。
 
 ## 配置文件
 - 路径 `~/.config/agmux/config.toml`【用户定】（设了 `$XDG_CONFIG_HOME` 就是 `$XDG_CONFIG_HOME/agmux/config.toml`，默认值等价），没有就全用默认值。TOML 用 `github.com/BurntSushi/toml`。
@@ -16,7 +16,7 @@
   up = ["k", "up"]         down = ["j", "down"]
   left = ["h", "left"]     right = ["l", "right"]
   jump = ["enter"]         fold = ["f"]
-  preview = ["p"]          focus_preview = ["tab"]   leave_preview = ["ctrl+]"]
+  preview = ["p"]          focus_preview = ["tab"]   leave_preview = ["tab"]
   reply = ["i"]            handoff = ["H"]
   search = ["/"]           flash = ["s"]
   restart = ["r"]          kill = ["x"]
