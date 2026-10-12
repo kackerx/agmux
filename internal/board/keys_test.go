@@ -2406,3 +2406,102 @@ func TestMidTruncKeepsHighlight(t *testing.T) {
 		t.Errorf("fallback: %q %q", got, midTrunc("abcdefgh", 5))
 	}
 }
+
+// spec: in flash, mouse clicks and the wheel are swallowed (cards and preview alike)
+func TestFlashSwallowsMouse(t *testing.T) {
+	m := wide(&fakeRunner{}, 232, 50)
+	m, _ = press(t, m, "p", "ctrl+]")
+	m.pvLines, m.capturing = 100, false
+	m, _ = press(t, m, "s")
+	before := m
+	for _, ev := range []tea.MouseMsg{
+		{X: 60, Y: 8, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft},      // another card
+		{X: 3, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft},       // the focused card (second click would jump)
+		{X: 200, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft},    // preview box: would lock the pane
+		{X: 200, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp}, // preview wheel: would scroll
+	} {
+		tm, cmd := m.Update(ev)
+		m = tm.(Model)
+		if m.mode != flashing || m.focus != before.focus || m.pvFocus || m.scroll != 0 || cmd != nil {
+			t.Errorf("%v: mode %v focus %q pvFocus %v scroll %d cmd %v", ev, m.mode, m.focus, m.pvFocus, m.scroll, cmd != nil)
+		}
+	}
+}
+
+// every label handed out is drawn, and every card top on screen has a label (exact window), for every height and focus
+func TestFlashWindowExact(t *testing.T) {
+	for h := 8; h <= 34; h++ {
+		m := column(10, h)
+		for i := 0; i < 10; i++ {
+			f, _ := press(t, m, "s")
+			lines := strings.Split(ansi.Strip(f.View()), "\n")
+			tops := 0
+			for _, l := range lines[1 : len(lines)-2] {
+				if strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "┏") {
+					tops++
+				}
+			}
+			drawn := 0
+			for lb := range f.labels {
+				for _, l := range lines[1 : len(lines)-2] {
+					if strings.HasPrefix(l, "╭"+lb) || strings.HasPrefix(l, "┏"+lb) {
+						drawn++
+					}
+				}
+			}
+			if drawn != len(f.labels) || tops != len(f.labels) {
+				t.Errorf("h=%d focus %s: %d labels, %d drawn, %d card tops on screen", h, m.focus, len(f.labels), drawn, tops)
+			}
+			m, _ = press(t, m, "j")
+		}
+	}
+}
+
+// after s, a poll inserts / removes cards (before the labeled ones, between them and the focus, after): the frozen labels
+// must never be drawn over the top bar, the message line or the footer, for every height and focus
+func TestFlashPushSweep(t *testing.T) {
+	mk := func(id, name string) store.Session {
+		return store.Session{ID: id, Name: name, GroupKey: "/g", TmuxPane: "%1", Status: "idle", ContextPct: -1}
+	}
+	for h := 8; h <= 34; h++ {
+		for fi := 0; fi < 10; fi++ {
+			for _, c := range []struct {
+				name  string
+				apply func(ss []store.Session) []store.Session
+			}{
+				{"insert 1 first", func(ss []store.Session) []store.Session { return append([]store.Session{mk("y0", "000")}, ss...) }},
+				{"insert 2 first", func(ss []store.Session) []store.Session {
+					return append([]store.Session{mk("y0", "000"), mk("y1", "001")}, ss...)
+				}},
+				{"insert 3 just before the focus", func(ss []store.Session) []store.Session {
+					out := slices.Clone(ss)
+					for i := 0; i < 3; i++ {
+						out = append(out, mk(fmt.Sprintf("y%d", i), fmt.Sprintf("n%02d-%d", max(fi-1, 0), i)))
+					}
+					return out
+				}},
+				{"remove card 0", func(ss []store.Session) []store.Session { return ss[1:] }},
+				{"remove card 0..2", func(ss []store.Session) []store.Session { return ss[3:] }},
+			} {
+				var ss []store.Session
+				for i := 0; i < 10; i++ {
+					ss = append(ss, mk(fmt.Sprintf("x%02d", i), fmt.Sprintf("n%02d", i)))
+				}
+				src := &mutSrc{ss: slices.Clone(ss)}
+				m := psized(src, 60, h)
+				for k := 0; k < fi; k++ {
+					m, _ = press(t, m, "j")
+				}
+				m, _ = press(t, m, "s")
+				src.ss = c.apply(slices.Clone(ss))
+				lines := strings.Split(ansi.Strip(m.View()), "\n")
+				if len(lines) != h {
+					t.Fatalf("h=%d %s focus %d: %d lines", h, c.name, fi, len(lines))
+				}
+				if !strings.HasPrefix(lines[0], " agmux") || strings.TrimSpace(lines[h-2]) != "" || !strings.HasPrefix(lines[h-1], " jump: press") {
+					t.Errorf("h=%d %s focus %d: top %q msg %q foot %q", h, c.name, fi, lines[0], lines[h-2], lines[h-1])
+				}
+			}
+		}
+	}
+}
