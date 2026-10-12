@@ -51,7 +51,7 @@
 - 代价（已知，用户决定）：直通里 `tab` 到不了 pane——Claude Code 的路径补全、shell 补全要在真终端里按；`shift+tab` 照常直通。
 - 验收：黑盒 预览关着按 tab → 预览开 + 边框粉 + 底栏 "keys go to the pane · tab back to the cards"；再按 tab → 边框普通色、预览还在、底栏回卡片提示；p 关预览；直通里 shift+tab 仍 send-keys 到 pane；config `leave_preview=["ctrl+]"]` 时 ctrl+] 也能退。
 
-### T22 搜索高亮改黄底 + 保留过滤后 n/N 上下跳（修复 2069326 复审 / 测试中）
+### T22 搜索高亮改黄底 + 保留过滤后 n/N 上下跳（审查通过 @2069326；测试中）
 - 用户 2026-10-12 验收：命中字符不要粉色前景，要像 nvim 的 Search——**黄底深字**（截图：浅黄底 #f2d06b 左右、字 #2d2a2e）。新增颜色项 `colors.match`（默认那个黄），命中字符画成 match 底 + 深字；design.md「命中字符用 focus 色高亮」那句改掉。
 - enter 保留过滤后，`n` / `N` 在命中的卡里按布局顺序跳下一张 / 上一张，到头回绕；新增动作 `next_match` / `prev_match`（默认 n / N，和现有默认键不冲突）；没保留过滤时 n/N 不做事；底栏在保留过滤态显示 `n/N next/prev · esc clear`。
 - 定稿（dev 提议照准）：保留过滤态底栏是在原整条底栏前面加 `n/N next/prev · esc clear ·`，不整行替换（enter jump 等提示还在）；n/N 和 j/k 一样从 m.current()（屏幕上画着焦点的那张）出发走下一张 / 上一张，不看原始 m.focus（审查退回：焦点卡被轮询改名后不再命中时，屏上焦点已退到第一张，按 n 却原地不动）。
