@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -32,6 +33,15 @@ type Session struct {
 	LastActivity                               time.Time
 }
 
+// AvatarKey is what avatar bindings are keyed by: the name, which survives restarts and
+// handoffs (the ID doesn't); the ID only when there is no name.
+func (s Session) AvatarKey() string {
+	if s.Name != "" {
+		return s.Name
+	}
+	return s.ID
+}
+
 type Store interface {
 	Sessions() []Session
 }
@@ -45,7 +55,10 @@ const PollInterval = 2 * time.Second
 type Poller struct {
 	Show     func() ([]ccmux.Session, error)
 	StateDir string          // where HUD files <nativeSessionId>.json live
-	Avatars  avatar.Bindings // nil = hash defaults only
+	Avatars  avatar.Bindings // avatars.json; nil = none
+
+	AvatarBind    map[string]string // config.toml's [avatars.bind]
+	AvatarDefault string            // config.toml's [avatars] default; "" = hash
 
 	refreshMu sync.Mutex        // serializes Refresh; guards models
 	models    map[string]string // session ID → last model found in its jsonl
@@ -82,6 +95,28 @@ func (p *Poller) Err() error {
 		return p.err
 	}
 	return p.avatarErr
+}
+
+// SetAvatar binds s's key to sprite id in avatars.json; the sessions show it right away.
+func (p *Poller) SetAvatar(s Session, id string) error {
+	if p.avatarErr != nil { // writing would drop whatever the user may still fix in the file
+		return p.avatarErr
+	}
+	p.refreshMu.Lock() // a poll in flight read the old binding; it must not land after this
+	defer p.refreshMu.Unlock()
+	if err := p.Avatars.Set(s.AvatarKey(), id); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ss := slices.Clone(p.sessions) // the board may still hold the old slice
+	for i := range ss {
+		if ss[i].AvatarKey() == s.AvatarKey() {
+			ss[i].AvatarID = id
+		}
+	}
+	p.sessions = ss
+	return nil
 }
 
 // Refresh polls ccmux once.
@@ -139,7 +174,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 	}
 	s.Done = s.Status == "idle" && r.AttentionState != ""
 	s.GroupKey = groupKey(s)
-	s.AvatarID = avatar.For(p.Avatars, s.ID).ID
+	s.AvatarID = avatar.For(p.Avatars, p.AvatarBind, p.AvatarDefault, s.AvatarKey()).ID
 	hudModel := ""
 	if r.NativeSessionID != "" {
 		s.ContextPct, hudModel = readHUD(filepath.Join(p.StateDir, r.NativeSessionID+".json"))

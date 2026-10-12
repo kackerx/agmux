@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -163,15 +164,16 @@ func darken(c lipgloss.Color) lipgloss.Color {
 	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r/2, g/2, b/2))
 }
 
-// Bindings maps session ID → avatar ID.
+// Bindings maps a session's key (its name, or its ID when it has none) → avatar ID.
 type Bindings interface {
-	Get(sessionID string) (id string, ok bool)
-	Set(sessionID, id string) error
+	Get(key string) (id string, ok bool)
+	Set(key, id string) error
 }
 
-// FileBindings stores bindings in avatars.json as {"<sessionID>":"<avatarID>"}.
+// FileBindings stores bindings in avatars.json as {"<key>":"<avatarID>"}.
 type FileBindings struct {
 	Path string
+	mu   sync.Mutex // the board sets while the poller reads
 	m    map[string]string
 }
 
@@ -191,14 +193,18 @@ func LoadBindings(path string) (*FileBindings, error) {
 	return b, nil
 }
 
-func (b *FileBindings) Get(sessionID string) (string, bool) {
-	id, ok := b.m[sessionID]
+func (b *FileBindings) Get(key string) (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	id, ok := b.m[key]
 	return id, ok
 }
 
 // Set writes the whole file atomically (tmp + rename) so a crash never leaves it half-written.
-func (b *FileBindings) Set(sessionID, id string) error {
-	b.m[sessionID] = id
+func (b *FileBindings) Set(key, id string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.m[key] = id
 	data, err := json.MarshalIndent(b.m, "", "  ")
 	if err != nil {
 		return err
@@ -223,17 +229,23 @@ func ByID(id string) (Sprite, bool) {
 	return Sprite{}, false
 }
 
-// For returns the session's bound sprite, or a stable hash-picked default.
-// A nil b means no bindings.
-func For(b Bindings, sessionID string) Sprite {
+// For picks the sprite for a session key: the state file's binding (b, nil = none), then
+// config.toml's (conf), then def — a sprite ID, or "hash" for a stable pick from the key.
+// An ID naming no sprite falls through to the next.
+func For(b Bindings, conf map[string]string, def, key string) Sprite {
 	if b != nil {
-		if id, ok := b.Get(sessionID); ok {
+		if id, ok := b.Get(key); ok {
 			if s, ok := ByID(id); ok {
 				return s
 			}
 		}
 	}
+	for _, id := range []string{conf[key], def} {
+		if s, ok := ByID(id); ok {
+			return s
+		}
+	}
 	h := fnv.New32a()
-	h.Write([]byte(sessionID))
+	h.Write([]byte(key))
 	return Sprites[h.Sum32()%uint32(len(Sprites))]
 }

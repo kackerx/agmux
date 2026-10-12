@@ -16,16 +16,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/execx"
 	"github.com/kackerx/agmux/internal/store"
 )
 
-// Source is what the board reads: the store plus its last poll error.
+// Source is what the board reads: the store plus its last poll error; and where avatars are bound.
 type Source interface {
 	store.Store
 	Err() error
+	SetAvatar(s store.Session, id string) error
 }
 
 // Runner runs ccmux and tmux; tests swap in one that records them.
@@ -62,6 +64,7 @@ type mode int
 const (
 	browsing mode = iota
 	confirmKill
+	pickAvatar // the avatar list is open; it has the keys
 )
 
 type Model struct {
@@ -74,7 +77,8 @@ type Model struct {
 	focus  string // session ID; follows the session across polls
 	msg    string // one line above the footer: ccmux stderr, hints
 	mode   mode
-	target store.Session   // what the open x prompt acts on, fixed when it opened
+	target store.Session   // what the open x prompt / avatar list acts on, fixed when it opened
+	pick   int             // the avatar list's cursor, an index into avatar.Sprites
 	folded map[string]bool // group keys folded with f; this run only
 
 	preview   bool       // p: show the focused pane on the right
@@ -285,6 +289,26 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.kill(m.target)
+	case pickAvatar: // other keys do nothing while the list is open
+		switch m.keymap[k.String()] {
+		case "up":
+			m.pick = max(m.pick-1, 0)
+		case "down":
+			m.pick = min(m.pick+1, len(avatar.Sprites)-1)
+		case "quit":
+			m.mode = browsing
+		case "jump": // off the UI goroutine: it writes a file and may wait for a poll
+			m.mode = browsing
+			src, s, sp := m.src, m.target, avatar.Sprites[m.pick]
+			return m, func() tea.Msg {
+				ok := s.Name + " wears " + sp.Name
+				if s.Name == "" {
+					ok = "bound to session id (name missing)"
+				}
+				return doneMsg{ok: ok, err: src.SetAvatar(s, sp.ID)}
+			}
+		}
+		return m, nil
 	}
 	return m.do(m.keymap[k.String()])
 }
@@ -354,6 +378,9 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case "kill":
 		m.mode, m.target, m.msg = confirmKill, s, ""
+		return m, nil
+	case "avatar":
+		m.mode, m.target, m.msg, m.pick = pickAvatar, s, "", 0
 		return m, nil
 	case "restart":
 		m.msg = fg(cMuted, " restarting "+s.Name+"…")
@@ -650,6 +677,10 @@ func (m Model) View() string {
 	}
 	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right)
 	switch { // the footer is always the last line
+	case m.mode == pickAvatar:
+		k := m.cfg.First
+		out = overlay(out, avatarList(m.target, m.pick), m.w)
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+k("down")+"/"+k("up")+" move · "+k("jump")+" bind · "+k("quit")+" cancel")
 	case m.passThrough():
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · "+m.cfg.First("leave_preview")+" back to the cards")
 	case m.pvFocus: // locked out: the target is gone, keys are being swallowed

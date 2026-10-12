@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
 )
 
@@ -245,5 +247,74 @@ func TestCorruptAvatarsShownNotFatal(t *testing.T) {
 	}
 	if p.Sessions()[0].AvatarID == "" {
 		t.Error("sessions still get hash-default avatars")
+	}
+}
+
+// Avatars follow the session's name (its ID only when it has none): state file > config > default.
+func TestAvatarsByName(t *testing.T) {
+	dir := t.TempDir()
+	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
+	b.Set("orch", "bot-01")
+	p := &Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-06",
+		AvatarBind: map[string]string{"orch": "bot-02", "dev": "bot-03", "id-3": "bot-04"},
+		Show: func() ([]ccmux.Session, error) {
+			return []ccmux.Session{{ID: "id-1", Summary: "orch"}, {ID: "id-2", Summary: "dev"}, {ID: "id-3"}, {ID: "id-4", Project: "proj"}}, nil
+		}}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	ss := p.Sessions()
+	for id, want := range map[string]string{"id-1": "bot-01", "id-2": "bot-03", "id-3": "bot-04", "id-4": "bot-06"} {
+		if got := byID(t, ss, id).AvatarID; got != want {
+			t.Errorf("%s: %s, want %s", id, got, want)
+		}
+	}
+	// the board binds: file written by name, the sessions show it without waiting for a poll
+	if err := p.SetAvatar(byID(t, ss, "id-2"), "bot-05"); err != nil {
+		t.Fatal(err)
+	}
+	if got := byID(t, p.Sessions(), "id-2").AvatarID; got != "bot-05" || byID(t, ss, "id-2").AvatarID != "bot-03" {
+		t.Errorf("after SetAvatar: %s; the slice handed out before must not change", got)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "avatars.json")); !strings.Contains(string(data), `"dev": "bot-05"`) {
+		t.Errorf("avatars.json: %s", data)
+	}
+	p.SetAvatar(byID(t, ss, "id-3"), "bot-02")
+	if data, _ := os.ReadFile(filepath.Join(dir, "avatars.json")); !strings.Contains(string(data), `"id-3": "bot-02"`) {
+		t.Errorf("no name: bound by ID: %s", data)
+	}
+}
+
+// A corrupt avatars.json is never overwritten by a binding: the user may still fix it.
+func TestSetAvatarKeepsCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	path := filepath.Join(dir, "agmux", "avatars.json")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	os.WriteFile(path, []byte("{oops"), 0o644)
+	p, _ := NewPoller()
+	if err := p.SetAvatar(Session{ID: "a", Name: "n"}, "bot-01"); err == nil || !strings.Contains(err.Error(), "avatars.json") {
+		t.Errorf("err %v", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "{oops" {
+		t.Errorf("file changed: %s", data)
+	}
+}
+
+// SetAvatar waits for a poll in flight, or that poll's sessions (built with the old binding) would land after it.
+func TestSetAvatarWaitsForPoll(t *testing.T) {
+	b, _ := avatar.LoadBindings(filepath.Join(t.TempDir(), "avatars.json"))
+	p := &Poller{Avatars: b}
+	p.refreshMu.Lock()
+	done := make(chan error)
+	go func() { done <- p.SetAvatar(Session{ID: "a", Name: "n"}, "bot-01") }()
+	select {
+	case <-done:
+		t.Fatal("SetAvatar ran during a poll")
+	case <-time.After(50 * time.Millisecond):
+	}
+	p.refreshMu.Unlock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

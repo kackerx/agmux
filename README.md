@@ -37,6 +37,7 @@ agmux avatars   # 打印全部头像
 | `r` | 重启会话 |
 | `x` | 杀掉会话（按 `y` 确认） |
 | `d` | 用 ccmux review 看改动 |
+| `a` | 给这个会话换头像：`j`/`k` 选，`enter` 绑定，`esc` 取消 |
 | `q` / `esc` | 退出（预览获焦时先按 `tab` 回到卡片） |
 
 没有 tmux pane 的后台会话不能跳转和发送，底栏对应键会变暗。
@@ -89,6 +90,13 @@ leave_preview = ["ctrl+]"]
 [colors]        # #rrggbb 或 ANSI 0–255
 working = "#ffb86c"
 focus = "#ff8ebe"
+
+[avatars]
+default = "hash"                    # 没绑定的会话：hash = 按名字固定挑一个；或写某个头像 id（agmux avatars 看全部）
+[avatars.bind]
+"sqlmux-orchestrator" = "bot-03"    # 键是会话名
 ```
+
+头像按**会话名**绑定（没有名字的会话才按 session ID），重启、交接后名字不变就还是那个头像。看板里按 `a` 选的写在 `$XDG_STATE_HOME/agmux/avatars.json`，优先于配置文件。
 
 未知的键、动作、颜色，键名写错，或同一个键绑了两个动作：启动时报一行错误（文件、哪一项、原因）并退出。

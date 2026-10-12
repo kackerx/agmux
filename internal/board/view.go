@@ -400,8 +400,47 @@ func footerFor(c *config.Config) []footerKey {
 		{k("jump") + " jump", true}, {k("fold") + " fold", false}, {k("preview") + " preview", false},
 		{k("focus_preview") + " focus preview", true}, {k("reply") + " reply", true}, {k("handoff") + " handoff", true},
 		{k("restart") + " restart", false}, {k("kill") + " kill", false}, {k("review") + " review", false},
-		{k("quit") + " quit", false},
+		{k("avatar") + " avatar", false}, {k("quit") + " quit", false},
 	}
+}
+
+// avatarList is the avatar picker for s: two rows per sprite with its ID and name beside;
+// ▸ marks the cursor, the focus color the sprite s wears now.
+func avatarList(s store.Session, pick int) []string {
+	name := s.Name
+	if name == "" {
+		name = s.ID
+	}
+	rows := []string{fg(cMuted, "avatar for ") + fg(cName, name), ""}
+	for i, sp := range avatar.Sprites {
+		face := strings.Split(avatar.Render(sp, s.AgentType, avatar.Normal, 0), "\n")
+		mark, label := "  ", sp.ID+"  "+sp.Name
+		if i == pick {
+			mark = "▸ "
+		}
+		if sp.ID == s.AvatarID {
+			label = fg(cFocus, label)
+		}
+		rows = append(rows, mark+face[0]+"  "+label, "  "+face[1])
+	}
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cFocus).Padding(0, 1).Render(strings.Join(rows, "\n"))
+	return strings.Split(box, "\n")
+}
+
+// overlay draws box centered over screen (w columns), the screen showing on both sides.
+func overlay(screen string, box []string, w int) string {
+	lines := strings.Split(screen, "\n")
+	bw := min(ansi.StringWidth(box[0]), w)
+	x, y := (w-bw)/2, max((len(lines)-len(box))/2, 0)
+	for i, b := range box {
+		if y+i >= len(lines) {
+			break
+		}
+		l := lines[y+i]
+		// resets: an SGR left open where a line is cut must not color the box, nor the box the rest
+		lines[y+i] = pad(ansi.Truncate(l, x, ""), x) + "\x1b[0m" + ansi.Truncate(b, bw, "") + "\x1b[0m" + ansi.TruncateLeft(l, x+bw, "")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // footer is ccmux's key line; keys that need a tmux pane go dark for background sessions.

@@ -76,6 +76,12 @@ func TestParseErrors(t *testing.T) {
 		{"[colors]\nworking = \"256\"\n", `"256" is neither`},
 		{"[colors]\nworking = \"red\"\n", `"red" is neither`},
 		{"[colors]\npink = \"#ffffff\"\n", "cfg: colors.pink: unknown color"},
+		{"[avatars]\ndefault = \"bot-99\"\n", `cfg: avatars.default: "bot-99" is neither hash nor a sprite id (bot-01, `},
+		{"[avatars.bind]\n\"sql mux\" = \"Clawd\"\n", `cfg: avatars.bind."sql mux": "Clawd" is not a sprite id`},
+		{"[avatars]\nbind = \"x\"\n", "cfg: avatars.bind: must be a table, [avatars.bind]"},
+		{"keys = 3\n", "cfg: keys: must be a table, [keys]"},
+		{"colors = \"x\"\n", "cfg: colors: must be a table"},
+		{"[avatars]\nsize = 2\n", "cfg: avatars.size: unknown setting"},
 	} {
 		_, err := Parse("cfg", []byte(c.toml))
 		if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), "\n") {
@@ -98,12 +104,25 @@ func TestValidKey(t *testing.T) {
 
 // What `agmux config` prints parses back to the same config.
 func TestStringRoundTrip(t *testing.T) {
-	c, _ := Parse("cfg", []byte("[keys]\ndown = [\"n\", \"down\"]\n[colors]\nfocus = \"#010203\"\n"))
+	c, _ := Parse("cfg", []byte("[keys]\ndown = [\"n\", \"down\"]\n[colors]\nfocus = \"#010203\"\n[avatars]\ndefault = \"bot-02\"\n[avatars.bind]\n\"a b\" = \"bot-03\"\nc = \"bot-04\"\n"))
 	back, err := Parse("cfg", []byte(c.String()))
-	if err != nil || !reflect.DeepEqual(back.Keys, c.Keys) || !reflect.DeepEqual(back.Colors, c.Colors) {
+	if err != nil || !reflect.DeepEqual(back, c) {
 		t.Errorf("round trip: %v\n%s", err, c.String())
 	}
 	if !strings.HasPrefix(Default().String(), "[keys]\nup = [\"k\", \"up\"]\ndown = [\"j\", \"down\"]\n") {
 		t.Errorf("printed in action order:\n%s", Default().String())
+	}
+}
+
+func TestAvatars(t *testing.T) {
+	if d := Default(); d.AvatarDefault != "hash" || len(d.AvatarBind) != 0 {
+		t.Errorf("default: %q %v", d.AvatarDefault, d.AvatarBind)
+	}
+	c, err := Parse("cfg", []byte("[avatars]\ndefault = \"hash\"\n[avatars.bind]\nsqlmux-orchestrator = \"bot-03\"\n"))
+	if err != nil || c.AvatarDefault != "hash" || c.AvatarBind["sqlmux-orchestrator"] != "bot-03" {
+		t.Errorf("%v %q %v", err, c.AvatarDefault, c.AvatarBind)
+	}
+	if c, err := Parse("cfg", []byte("[avatars]\ndefault = \"bot-06\"\nbind = { x = \"bot-01\" }\n")); err != nil || c.AvatarDefault != "bot-06" || c.AvatarBind["x"] != "bot-01" {
+		t.Errorf("a sprite as default: %v", err)
 	}
 }

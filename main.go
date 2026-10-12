@@ -117,6 +117,7 @@ func runBoard() error {
 	if err != nil {
 		return err
 	}
+	p.AvatarBind, p.AvatarDefault = cfg.AvatarBind, cfg.AvatarDefault
 	if err := p.Refresh(); err != nil {
 		return err
 	}

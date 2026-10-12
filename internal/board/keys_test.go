@@ -3,8 +3,11 @@ package board
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -16,14 +19,16 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/kackerx/agmux/internal/avatar"
+	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
 
 type staticSrc []store.Session
 
-func (s staticSrc) Sessions() []store.Session { return s }
-func (s staticSrc) Err() error                { return nil }
+func (s staticSrc) Sessions() []store.Session           { return s }
+func (s staticSrc) Err() error                          { return nil }
+func (staticSrc) SetAvatar(store.Session, string) error { return nil }
 
 type fakeRunner struct {
 	mu       sync.Mutex // forwarded keys call Tmux from the serial worker
@@ -237,8 +242,9 @@ func TestMouse(t *testing.T) {
 
 type mutSrc struct{ ss []store.Session }
 
-func (s *mutSrc) Sessions() []store.Session { return s.ss }
-func (s *mutSrc) Err() error                { return nil }
+func (s *mutSrc) Sessions() []store.Session           { return s.ss }
+func (s *mutSrc) Err() error                          { return nil }
+func (*mutSrc) SetAvatar(store.Session, string) error { return nil }
 
 // The x / s prompts act on the session they named, never on whatever focus falls back to.
 func TestPromptTargetIsPinned(t *testing.T) {
@@ -1455,5 +1461,124 @@ func TestConfiguredColors(t *testing.T) {
 	}
 	if f := ansi.Strip(footer(false, 300)); !strings.HasPrefix(f, " n/k h/l move · enter jump") {
 		t.Errorf("footer from the key bindings: %q", f)
+	}
+}
+
+// a: the avatar list over the focused card; j/k move, enter binds by name (ID without one) into
+// avatars.json and the card shows it at once, esc / q cancel without writing; nothing else acts.
+func TestAvatarPicker(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "avatars.json")
+	b, _ := avatar.LoadBindings(path)
+	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-04", Show: func() ([]ccmux.Session, error) {
+		return []ccmux.Session{{ID: "a1", Summary: "one", CWD: "/a", TmuxPane: "%1", Status: "idle"}, {ID: "a2", CWD: "/a", Status: "idle"}}, nil
+	}}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	av := func(id string) string {
+		for _, s := range p.Sessions() {
+			if s.ID == id {
+				return s.AvatarID
+			}
+		}
+		return ""
+	}
+	r := &fakeRunner{}
+	m := New(p, r)
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	m, _ = press(t, tm.(Model), "j", "a") // a1 "one" (a2 has no name and sorts first)
+	if !strings.Contains(ansi.Strip(m.View()), "avatar for one") {
+		t.Fatalf("list not open:\n%s", ansi.Strip(m.View()))
+	}
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	for _, sp := range avatar.Sprites {
+		found := false
+		for _, l := range lines {
+			if strings.Contains(l, sp.ID+"  "+sp.Name) {
+				found = true
+				if strings.Contains(l, "▸") != (sp.ID == "bot-01") {
+					t.Errorf("cursor starts on the first sprite: %q", l)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s missing from the list", sp.ID)
+		}
+	}
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	if v := m.View(); !strings.Contains(v, fg(cFocus, "bot-04  Boo")) || strings.Contains(v, fg(cFocus, "bot-01  Clawd")) {
+		t.Error("the sprite the card wears now is in the focus color, only it")
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "j/k move · enter bind · q cancel") {
+		t.Errorf("footer %q", last)
+	}
+	m, quit := press(t, m, "x", "f", "p", "i", "H", "r", "d", "j", "j", "enter")
+	if quit || m.mode != browsing || m.preview || m.folded["/a"] || len(r.calls) != 0 {
+		t.Fatalf("keys acted while the list was open: mode %v preview %v folded %v calls %q", m.mode, m.preview, m.folded, r.calls)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "one wears Sprout") {
+		t.Error("the bind is confirmed on the message line")
+	}
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "bot-03"`) {
+		t.Errorf("avatars.json: %s", data)
+	}
+	if strings.Contains(ansi.Strip(m.View()), "avatar for") || av("a1") != "bot-03" {
+		t.Errorf("list closed and card shows bot-03: %v", p.Sessions())
+	}
+	for _, cancel := range []string{"esc", "q"} {
+		m, quit = press(t, m, "a", "j", cancel)
+		if quit || m.mode != browsing || av("a1") != "bot-03" {
+			t.Errorf("%s cancels, keeps the board: quit %v mode %v", cancel, quit, m.mode)
+		}
+	}
+	if m, _ = press(t, m, "a", "k", "k", "k", "k", "enter"); av("a1") != "bot-01" {
+		t.Error("k stops at the first sprite")
+	}
+	if m, _ = press(t, m, "a", "j", "j", "j", "j", "j", "j", "j", "enter"); av("a1") != "bot-06" {
+		t.Error("j stops at the last sprite")
+	}
+	m, _ = press(t, m, "k", "a", "j", "enter") // a2: no name
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"a2": "bot-02"`) || !strings.Contains(ansi.Strip(m.View()), "bound to session id (name missing)") {
+		t.Errorf("no name: by ID, said so: %s", data)
+	}
+	// pass-through: a goes to the pane
+	r.calls = nil
+	m, _ = press(t, m, "j", "i", "a")
+	if m.mode != browsing || !slices.ContainsFunc(r.calls, func(c []string) bool {
+		return reflect.DeepEqual(c, []string{"tmux", "send-keys", "-t", "%1", "-l", "--", "a"})
+	}) {
+		t.Errorf("a in pass-through: mode %v calls %q", m.mode, r.calls)
+	}
+}
+
+// The box sits centered, the screen still showing left and right of it.
+func TestOverlay(t *testing.T) {
+	got := ansi.Strip(overlay("abcdefghij\n0123456789\nklmnopqrst", []string{"XX", "YY"}, 10))
+	if got != "abcdXXghij\n0123YY6789\nklmnopqrst" {
+		t.Errorf("%q", got)
+	}
+	if got := ansi.Strip(overlay("abc", []string{"XXXXX"}, 3)); got != "XXX" {
+		t.Errorf("a box wider than the screen is cut: %q", got)
+	}
+	if !strings.Contains(ansi.Strip(footer(false, 300)), "a avatar · q quit") {
+		t.Errorf("footer: %s", ansi.Strip(footer(false, 300)))
+	}
+}
+
+type failAvatarSrc struct{ staticSrc }
+
+func (failAvatarSrc) SetAvatar(store.Session, string) error {
+	return errors.New("avatars.json: not valid JSON\nsecond line")
+}
+
+// A binding that can't be written says why, on one line; the list closes.
+func TestAvatarBindError(t *testing.T) {
+	m := New(failAvatarSrc{sessions}, &fakeRunner{})
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 200, Height: 50})
+	m, _ = press(t, tm.(Model), "a", "enter")
+	if v := ansi.Strip(m.View()); m.mode != browsing || !strings.Contains(v, "avatars.json: not valid JSON") || strings.Contains(v, "second line") || strings.Contains(v, "wears") {
+		t.Errorf("mode %v\n%s", m.mode, v)
 	}
 }

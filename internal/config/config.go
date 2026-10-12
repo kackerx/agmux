@@ -1,26 +1,29 @@
-// Package config reads ~/.config/agmux/config.toml: key bindings and colors on top of defaults.
+// Package config reads ~/.config/agmux/config.toml: key bindings, colors and avatars on top of defaults.
 package config
 
 import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/xdg"
 )
 
 // Actions, in the order `agmux config` prints them.
 var Actions = []string{
 	"up", "down", "left", "right", "jump", "fold", "preview", "focus_preview", "leave_preview",
-	"reply", "handoff", "search", "flash", "restart", "kill", "review", "quit", "confirm",
+	"reply", "handoff", "search", "flash", "restart", "kill", "review", "avatar", "quit", "confirm",
 }
 
 var defaultKeys = map[string][]string{
@@ -28,7 +31,7 @@ var defaultKeys = map[string][]string{
 	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"ctrl+]"},
 	// search / flash are T19 / T20
 	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "flash": {"s"},
-	"restart": {"r"}, "kill": {"x"}, "review": {"d"},
+	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"},
 	"quit": {"q", "esc"}, "confirm": {"y"},
 }
 
@@ -49,11 +52,14 @@ type Config struct {
 	Path   string
 	Keys   map[string][]string // action → key names (bubbletea's, "space" for the space bar)
 	Colors map[string]string   // name → "#rrggbb" or an ANSI index "0".."255"
+
+	AvatarDefault string            // [avatars] default: "hash" or a sprite ID
+	AvatarBind    map[string]string // [avatars.bind]: session name → sprite ID
 }
 
 // Default is the configuration with no file.
 func Default() *Config {
-	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}}
+	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, AvatarDefault: "hash", AvatarBind: map[string]string{}}
 	for k, v := range defaultKeys {
 		c.Keys[k] = v
 	}
@@ -96,16 +102,26 @@ var colorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 // keys) and checks it. Every error is one line naming the file, the setting and the reason.
 func Parse(path string, data []byte) (*Config, error) {
 	var raw struct {
-		Keys   map[string][]string `toml:"keys"`
-		Colors map[string]string   `toml:"colors"`
+		Keys    map[string][]string `toml:"keys"`
+		Colors  map[string]string   `toml:"colors"`
+		Avatars struct {
+			Default string            `toml:"default"`
+			Bind    map[string]string `toml:"bind"`
+		} `toml:"avatars"`
 	}
 	md, err := toml.Decode(string(data), &raw)
 	if err != nil {
 		msg, _, _ := strings.Cut(err.Error(), "\n")
 		return nil, fmt.Errorf("%s: %s", path, msg)
 	}
+	// toml decodes a non-table into a map as nothing at all, which would silently drop the setting
+	for _, sec := range [][]string{{"keys"}, {"colors"}, {"avatars", "bind"}} {
+		if md.IsDefined(sec...) && md.Type(sec...) != "Hash" {
+			return nil, fmt.Errorf("%s: %s: must be a table, [%[2]s]", path, strings.Join(sec, "."))
+		}
+	}
 	if u := md.Undecoded(); len(u) > 0 {
-		return nil, fmt.Errorf("%s: %s: unknown setting (sections are [keys] and [colors])", path, u[0])
+		return nil, fmt.Errorf("%s: %s: unknown setting (sections are [keys], [colors], [avatars] and [avatars.bind])", path, u[0])
 	}
 	c := Default()
 	c.Path = path
@@ -131,6 +147,18 @@ func Parse(path string, data []byte) (*Config, error) {
 			return nil, fmt.Errorf("%s: colors.%s: %q is neither #rrggbb nor an ANSI color 0-255", path, name, v)
 		}
 		c.Colors[name] = v
+	}
+	if d := raw.Avatars.Default; d != "" {
+		if d != "hash" && !isSprite(d) {
+			return nil, fmt.Errorf("%s: avatars.default: %q is neither hash nor a sprite id (%s; see agmux avatars)", path, d, spriteIDs())
+		}
+		c.AvatarDefault = d
+	}
+	for name, id := range raw.Avatars.Bind {
+		if !isSprite(id) {
+			return nil, fmt.Errorf("%s: avatars.bind.%q: %q is not a sprite id (%s; see agmux avatars)", path, name, id, spriteIDs())
+		}
+		c.AvatarBind[name] = id
 	}
 	seen := map[string]string{}
 	for _, action := range Actions {
@@ -173,7 +201,22 @@ func (c *Config) String() string {
 	for _, n := range Colors {
 		fmt.Fprintf(&b, "%s = %q\n", n, c.Colors[n])
 	}
+	fmt.Fprintf(&b, "\n[avatars]\ndefault = %q\n\n[avatars.bind]\n", c.AvatarDefault)
+	names := slices.Sorted(maps.Keys(c.AvatarBind))
+	for _, n := range names {
+		fmt.Fprintf(&b, "%q = %q\n", n, c.AvatarBind[n])
+	}
 	return b.String()
+}
+
+func isSprite(id string) bool { _, ok := avatar.ByID(id); return ok }
+
+func spriteIDs() string {
+	ids := make([]string, len(avatar.Sprites))
+	for i, s := range avatar.Sprites {
+		ids[i] = s.ID
+	}
+	return strings.Join(ids, ", ")
 }
 
 // norm spells a configured key the way bubbletea's KeyMsg.String() does.

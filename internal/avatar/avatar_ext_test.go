@@ -157,17 +157,17 @@ func TestExtFallbackAndHash(t *testing.T) {
 	}
 	empty, _ := avatar.LoadBindings(filepath.Join(t.TempDir(), "none.json"))
 	for _, s := range []string{"s1", "s3"} {
-		if got, want := avatar.For(b, s), avatar.For(empty, s); got.ID != want.ID {
+		if got, want := avatar.For(b, nil, "hash", s), avatar.For(empty, nil, "hash", s); got.ID != want.ID {
 			t.Errorf("%s bound to a nonexistent id: got %s, want hash default %s", s, got.ID, want.ID)
 		}
 	}
-	if got := avatar.For(b, "s2"); got.ID != "bot-04" {
+	if got := avatar.For(b, nil, "hash", "s2"); got.ID != "bot-04" {
 		t.Errorf("bound id ignored: %s", got.ID)
 	}
 	count := map[string]int{}
 	for i := 0; i < 600; i++ {
 		id := fmt.Sprintf("%08x-%04x-4000-8000-%012x", i*2654435761, i, i*40503)
-		a, c := avatar.For(empty, id), avatar.For(empty, id)
+		a, c := avatar.For(empty, nil, "hash", id), avatar.For(empty, nil, "hash", id)
 		if a.ID != c.ID {
 			t.Fatalf("hash default not stable for %s", id)
 		}
