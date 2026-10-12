@@ -58,7 +58,21 @@ func TestFixture(t *testing.T) {
 	if s.Name != "rename-flag" || s.GroupKey != s.CWD || s.GroupKey == "" || s.PendingTool != "Bash" || s.LastActivity.IsZero() {
 		t.Errorf("summary set: %+v", s)
 	}
+	for id, want := range map[string]string{
+		"6a31a6fb":                             "handoff written, queued for a new session (synthetic)",       // background
+		"19762a85-00ce-418f-a684-7199165e02bd": "← sqlmux-code-reviewer: review notes for batch 1, synthetic", // cross-session
+		"bd8201ec-e255-4d0d-ba88-7413f3c10329": `Background command "go test ./..." completed (exit code 0)`,  // task-notification
+		"7e2064fc-b00d-4193-a851-cf7d611ee468": "the database restarted, retry",
+		"9a27a0c4-e45c-4d99-84bf-382d88a19da6": "", // lastPrompt null
+	} {
+		if got := byID(t, ss, id).Detail; got != want {
+			t.Errorf("%s Detail = %q, want %q", id, got, want)
+		}
+	}
 	for _, s := range ss {
+		if s.Done {
+			t.Errorf("%s: Done with attentionState null", s.ID)
+		}
 		if s.ContextPct != -1 {
 			t.Errorf("%s: ContextPct=%d with no HUD file, want -1", s.ID, s.ContextPct)
 		}
@@ -155,5 +169,34 @@ func TestModelCache(t *testing.T) {
 	p.Refresh()
 	if m := p.Sessions()[0].Model; m != "claude-opus-5-5" {
 		t.Fatalf("assistant scrolled out of the tail: got %q, want the cached model", m)
+	}
+}
+
+func TestPromptLine(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"plain\nsecond", "plain"},
+		{"\n  \n  indented first  \nx", "indented first"},
+		{"make <leader> work", "make  work"},
+		{"tab\there\x1b[31mred", "tab here [31mred"},
+		{"Another Claude session sent a message:\n<cross-session-message from=\"uds:/s\" from-name=\"dev\" from-mode=\"bypass\">\n\nbody first\nbody 2\n</cross-session-message>", "← dev: body first"},
+		{"<cross-session-message from=\"uds:/s\">one-liner</cross-session-message>", "← ?: one-liner"},
+		{"<task-notification>\n<task-id>t</task-id>\n<summary>done it</summary>\n</task-notification>", "done it"},
+		{"", ""},
+	} {
+		if got := promptLine(c.in); got != c.want {
+			t.Errorf("promptLine(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestDone(t *testing.T) {
+	raw := []ccmux.Session{
+		{ID: "a", Status: "idle", AttentionState: []byte(`{"kind":"stop"}`)},
+		{ID: "b", Status: "working", AttentionState: []byte(`"x"`)},
+		{ID: "c", Status: "idle", AttentionState: []byte(`null`)},
+	}
+	ss := poller(t, raw).Sessions()
+	if !ss[0].Done || ss[1].Done || ss[2].Done {
+		t.Errorf("Done = %v %v %v, want true false false", ss[0].Done, ss[1].Done, ss[2].Done)
 	}
 }

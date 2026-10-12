@@ -218,11 +218,22 @@ func (b *FileBindings) Set(sessionID, id string) error {
 	return os.Rename(tmp, b.Path)
 }
 
+// ByID finds a sprite by its ID.
+func ByID(id string) (Sprite, bool) {
+	for _, s := range Sprites {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return Sprite{}, false
+}
+
 // For returns the session's bound sprite, or a stable hash-picked default.
+// A nil b means no bindings.
 func For(b Bindings, sessionID string) Sprite {
-	if id, ok := b.Get(sessionID); ok {
-		for _, s := range Sprites {
-			if s.ID == id {
+	if b != nil {
+		if id, ok := b.Get(sessionID); ok {
+			if s, ok := ByID(id); ok {
 				return s
 			}
 		}

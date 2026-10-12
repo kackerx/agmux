@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/xdg"
 )
@@ -46,7 +47,8 @@ const PollInterval = 2 * time.Second
 // Poller is the in-memory Store.
 type Poller struct {
 	Show     func() ([]ccmux.Session, error)
-	StateDir string // where HUD files <nativeSessionId>.json live
+	StateDir string          // where HUD files <nativeSessionId>.json live
+	Avatars  avatar.Bindings // nil = hash defaults only
 
 	refreshMu sync.Mutex        // serializes Refresh; guards models
 	models    map[string]string // session ID → last model found in its jsonl
@@ -61,7 +63,9 @@ func NewPoller() (*Poller, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Poller{Show: ccmux.Show, StateDir: dir}, nil
+	// ponytail: a corrupt avatars.json silently falls back to hash defaults; S1 never writes it, so nothing is lost.
+	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
+	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b}, nil
 }
 
 func (p *Poller) Sessions() []Session {
@@ -114,7 +118,7 @@ func (p *Poller) Run(ctx context.Context) {
 
 func (p *Poller) convert(r ccmux.Session) Session {
 	s := Session{
-		ID: r.ID, Name: r.Summary, AgentType: r.AgentType, CWD: r.CWD, Branch: r.GitBranch,
+		ID: r.ID, Name: firstLine(r.Summary), AgentType: r.AgentType, CWD: r.CWD, Branch: r.GitBranch,
 		Status: r.Status, Attention: r.AttentionType, PendingTool: r.PendingTool, TmuxPane: r.TmuxPane,
 		ContextPct: -1, Subagents: r.Subagents, LastActivity: r.LastActivityAt,
 	}
@@ -128,6 +132,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		s.Detail = promptLine(r.LastPrompt)
 	}
 	s.GroupKey = groupKey(s)
+	s.AvatarID = avatar.For(p.Avatars, s.ID).ID
 	if r.NativeSessionID != "" {
 		s.ContextPct = hudContextPct(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
 	}
