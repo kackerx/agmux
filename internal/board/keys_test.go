@@ -76,6 +76,8 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEsc}
 	case "ctrl+c":
 		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
 	case "right":
@@ -702,5 +704,126 @@ func TestPreviewRefreshesOnFrame(t *testing.T) {
 	runAll(cmd)
 	if len(r.calls) != before {
 		t.Errorf("no captures with the preview closed: %q", r.calls[before:])
+	}
+}
+
+func TestSendKeysArgs(t *testing.T) {
+	for _, c := range []struct {
+		k    tea.KeyMsg
+		want []string // after "send-keys -t %1"
+	}{
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("你好 world")}, []string{"-l", "--", "你好 world"}},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("-x\nmore"), Paste: true}, []string{"-l", "--", "-x\nmore"}},
+		{tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")}, []string{"-l", "--", " "}},
+		{tea.KeyMsg{Type: tea.KeyEnter}, []string{"Enter"}},
+		{tea.KeyMsg{Type: tea.KeyEsc}, []string{"Escape"}},
+		{tea.KeyMsg{Type: tea.KeyCtrlC}, []string{"C-c"}},
+		{tea.KeyMsg{Type: tea.KeyCtrlX}, []string{"C-x"}},
+		{tea.KeyMsg{Type: tea.KeyUp}, []string{"Up"}},
+		{tea.KeyMsg{Type: tea.KeyLeft}, []string{"Left"}},
+		{tea.KeyMsg{Type: tea.KeyShiftTab}, []string{"BTab"}},
+		{tea.KeyMsg{Type: tea.KeyBackspace}, []string{"BSpace"}},
+		{tea.KeyMsg{Type: tea.KeyDelete}, []string{"DC"}},
+		{tea.KeyMsg{Type: tea.KeyPgUp}, []string{"PPage"}},
+		{tea.KeyMsg{Type: tea.KeyF5}, []string{"F5"}},
+		{tea.KeyMsg{Type: tea.KeyCtrlLeft}, []string{"C-Left"}},
+		{tea.KeyMsg{Type: tea.KeyCtrlShiftUp}, []string{"C-S-Up"}},
+		{tea.KeyMsg{Type: tea.KeyUp, Alt: true}, []string{"M-Up"}},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x"), Alt: true}, []string{"M-x"}},
+		{tea.KeyMsg{Type: tea.KeyCtrlAt}, []string{"C-Space"}},
+	} {
+		got := sendKeysArgs("%1", c.k)
+		if want := append([]string{"send-keys", "-t", "%1"}, c.want...); !reflect.DeepEqual(got, want) {
+			t.Errorf("%q: %q, want %q", c.k.String(), got, want)
+		}
+	}
+}
+
+// tab hands the keys to the previewed pane: everything but tab is forwarded, ctrl+c and q included,
+// each followed by a capture; tab gives them back.
+func TestPreviewPassThrough(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "tab") // preview closed: tab does nothing
+	if m.pvFocus {
+		t.Fatal("tab with the preview closed")
+	}
+	m, _ = press(t, m, "P", "tab")
+	if !m.pvFocus {
+		t.Fatal("tab should focus the preview")
+	}
+	v := m.View()
+	focusEsc, _, _ := strings.Cut(fg(cFocus, "╭"), "╭")
+	if !strings.Contains(v, focusEsc+"╭") || !strings.HasSuffix(ansi.Strip(v), "按键直通 pane · tab 回到卡片") {
+		t.Error("focused preview: #ff8ebe border and the pass-through footer")
+	}
+	r.calls = nil
+	m.scroll = 6
+	m, quit := press(t, m, "你好 world", "enter", "ctrl+c", "q", "esc")
+	if quit {
+		t.Fatal("ctrl+c / q / esc go to the pane while it has the keys")
+	}
+	capture := []string{"tmux", "capture-pane", "-p", "-e", "-t", "%1", "-S", "-44"}
+	var want [][]string
+	for _, k := range [][]string{{"-l", "--", "你好 world"}, {"Enter"}, {"C-c"}, {"-l", "--", "q"}, {"Escape"}} {
+		want = append(want, append([]string{"tmux", "send-keys", "-t", "%1"}, k...), capture)
+	}
+	if !reflect.DeepEqual(r.calls, want) {
+		t.Errorf("forwarded:\n %q\nwant\n %q", r.calls, want)
+	}
+	if m.scroll != 0 {
+		t.Error("a forwarded key scrolls the preview back to the bottom")
+	}
+	m, quit = press(t, m, "tab", "q")
+	if m.pvFocus || !quit {
+		t.Error("tab gives the keys back to the board, then q quits")
+	}
+
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "P", "j", "tab") // a2: no pane
+	if m.pvFocus {
+		t.Error("no pane, nothing to type into")
+	}
+}
+
+func TestPreviewWheelAndClicks(t *testing.T) {
+	r := &fakeRunner{}
+	m, _ := press(t, wide(r, 232, 50), "P")
+	m.capturing = false
+	wheel := func(m Model, x int, b tea.MouseButton) (Model, tea.Cmd) {
+		tm, cmd := m.Update(tea.MouseMsg{X: x, Y: 10, Action: tea.MouseActionPress, Button: b})
+		return tm.(Model), cmd
+	}
+	m, cmd := wheel(m, 200, tea.MouseButtonWheelUp)
+	if m.scroll != 3 || cmd == nil {
+		t.Fatalf("wheel up over the preview: scroll %d", m.scroll)
+	}
+	if pm := cmd().(previewMsg); r.calls[len(r.calls)-1][7] != "-47" {
+		t.Errorf("scrolled capture asks for 44+3 lines: %q (%v)", r.calls[len(r.calls)-1], pm.pane)
+	}
+	var text strings.Builder
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&text, "line %d\n", i)
+	}
+	tm, _ := m.Update(previewMsg{pane: "%1", text: text.String()})
+	m = tm.(Model)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "line 97") || strings.Contains(v, "line 98") || !strings.Contains(v, "line 54") {
+		t.Error("scrolled 3 back: lines 54..97 show")
+	}
+	m.capturing = false
+	m, _ = wheel(m, 200, tea.MouseButtonWheelDown)
+	m.capturing = false
+	m, _ = wheel(m, 200, tea.MouseButtonWheelDown)
+	if m.scroll != 0 {
+		t.Errorf("wheel down stops at the bottom: %d", m.scroll)
+	}
+	if m, _ = wheel(m, 10, tea.MouseButtonWheelUp); m.scroll != 0 {
+		t.Error("the wheel over the cards doesn't scroll the preview")
+	}
+	tm, _ = m.Update(tea.MouseMsg{X: 200, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if m = tm.(Model); !m.pvFocus {
+		t.Error("a click in the preview gives it the keys")
+	}
+	tm, _ = m.Update(tea.MouseMsg{X: 50, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if m = tm.(Model); m.pvFocus || m.focus != "b1" {
+		t.Errorf("a click on a card takes the keys back: pvFocus=%v focus=%s", m.pvFocus, m.focus)
 	}
 }

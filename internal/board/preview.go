@@ -49,7 +49,7 @@ func (m *Model) capture() tea.Cmd {
 		return nil
 	}
 	m.capturing = true
-	r, pane, n := m.run, s.TmuxPane, m.previewLinesN()
+	r, pane, n := m.run, s.TmuxPane, m.previewLinesN()+m.scroll
 	return func() tea.Msg {
 		out, err := r.Tmux("capture-pane", "-p", "-e", "-t", pane, "-S", "-"+strconv.Itoa(n))
 		return previewMsg{pane, out, err}
@@ -62,7 +62,7 @@ func (m *Model) capture() tea.Cmd {
 //	╭──────────────────────────────╮
 //	│ …the pane's last lines…      │
 //	╰──────────────────────────────╯
-func previewLines(s store.Session, ok bool, pv previewMsg, w, h int) []string {
+func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focused bool) []string {
 	inner := w - 1 - 4 // one column of gap from the cards, then "│ " … " │"
 	title := ""
 	var content []string
@@ -80,20 +80,25 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h int) []string {
 		case pv.err != nil:
 			content = []string{fg(cRed, firstLine(pv.err.Error()))}
 		default:
-			content = tail(pv.text, h-3)
+			content = tail(pv.text, h-3+scroll) // scroll lines back: drop that many from the bottom
+			content = content[:max(len(content)-scroll, min(len(content), h-3))]
 		}
 	}
 	out := []string{pad(ansi.Truncate(" "+title, w, "…"), w)}
-	out = append(out, " "+fg(cDim, "╭"+strings.Repeat("─", inner+2)+"╮"))
+	border := cDim
+	if focused { // keys go to the pane
+		border = cFocus
+	}
+	out = append(out, " "+fg(border, "╭"+strings.Repeat("─", inner+2)+"╮"))
 	for i := range max(h-3, 0) {
 		l := ""
 		if i < len(content) {
 			l = ansi.Truncate(content[i], inner, "")
 		}
 		// the reset keeps the pane's own colors from bleeding into the border
-		out = append(out, " "+fg(cDim, "│")+" "+pad(l, inner)+"\x1b[0m "+fg(cDim, "│"))
+		out = append(out, " "+fg(border, "│")+" "+pad(l, inner)+"\x1b[0m "+fg(border, "│"))
 	}
-	out = append(out, " "+fg(cDim, "╰"+strings.Repeat("─", inner+2)+"╯"))
+	out = append(out, " "+fg(border, "╰"+strings.Repeat("─", inner+2)+"╯"))
 	return out[:h]
 }
 
@@ -104,4 +109,60 @@ func tail(text string, n int) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines[max(len(lines)-n, 0):]
+}
+
+// tmuxKeyNames maps bubbletea's key names to tmux's send-keys names.
+var tmuxKeyNames = map[string]string{
+	"up": "Up", "down": "Down", "left": "Left", "right": "Right", "enter": "Enter", "esc": "Escape",
+	"backspace": "BSpace", "delete": "DC", "insert": "IC", "home": "Home", "end": "End",
+	"pgup": "PPage", "pgdown": "NPage", "tab": "Tab", "@": "Space",
+	"f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5", "f6": "F6", "f7": "F7", "f8": "F8", "f9": "F9",
+	"f10": "F10", "f11": "F11", "f12": "F12", "f13": "F13", "f14": "F14", "f15": "F15", "f16": "F16",
+	"f17": "F17", "f18": "F18", "f19": "F19", "f20": "F20",
+}
+
+// sendKeysArgs turns a key into tmux send-keys arguments for pane: text goes literally (-l --),
+// everything else by tmux key name with C- / M- / S- for ctrl / alt / shift. nil = no equivalent.
+func sendKeysArgs(pane string, k tea.KeyMsg) []string {
+	if (k.Type == tea.KeyRunes || k.Type == tea.KeySpace) && (!k.Alt || len(k.Runes) != 1) {
+		return []string{"send-keys", "-t", pane, "-l", "--", string(k.Runes)}
+	}
+	name := k.String()
+	if name == "shift+tab" {
+		return []string{"send-keys", "-t", pane, "BTab"}
+	}
+	mods := ""
+	for _, m := range [][2]string{{"alt+", "M-"}, {"ctrl+", "C-"}, {"shift+", "S-"}} {
+		if rest, ok := strings.CutPrefix(name, m[0]); ok {
+			mods, name = mods+m[1], rest
+		}
+	}
+	if n, ok := tmuxKeyNames[name]; ok {
+		name = n
+	} else if len([]rune(name)) != 1 {
+		return nil
+	}
+	return []string{"send-keys", "-t", pane, mods + name}
+}
+
+// maxScroll bounds how far back the wheel scrolls the preview.
+const maxScroll = 2000
+
+// forward sends k to the focused pane and recaptures right after, in the same command, so the
+// capture can't come back before the key arrived.
+func (m *Model) forward(k tea.KeyMsg) tea.Cmd {
+	_, _, s, ok := m.current()
+	args := sendKeysArgs(s.TmuxPane, k)
+	if !ok || s.TmuxPane == "" || args == nil {
+		return nil
+	}
+	m.scroll, m.capturing = 0, true
+	r, pane, n := m.run, s.TmuxPane, m.previewLinesN()
+	return func() tea.Msg {
+		if _, err := r.Tmux(args...); err != nil {
+			return previewMsg{pane: pane, err: err}
+		}
+		out, err := r.Tmux("capture-pane", "-p", "-e", "-t", pane, "-S", "-"+strconv.Itoa(n))
+		return previewMsg{pane, out, err}
+	}
 }

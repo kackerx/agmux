@@ -76,6 +76,8 @@ type Model struct {
 	preview   bool       // P: show the focused pane on the right
 	pv        previewMsg // the latest capture
 	capturing bool       // a capture is in flight; don't stack them
+	pvFocus   bool       // tab: keys go to the previewed pane
+	scroll    int        // lines the preview is scrolled back with the wheel
 }
 
 func New(src Source, run Runner) Model {
@@ -190,6 +192,19 @@ func (m Model) alive(id string) bool {
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// the preview has the keys: everything but tab goes to the pane, ctrl+c included
+	// (Claude Code interrupts with it); quitting means tab back first
+	if m.pvFocus && m.previewOn() {
+		if _, _, s, ok := m.current(); ok && s.TmuxPane != "" {
+			if k.Type == tea.KeyTab {
+				m.pvFocus = false
+				return m, nil
+			}
+			cmd := m.forward(k)
+			return m, cmd
+		}
+	}
+	m.pvFocus = false
 	if k.Type == tea.KeyCtrlC {
 		return m, tea.Quit
 	}
@@ -258,6 +273,11 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	switch k.String() {
+	case "tab":
+		if m.previewOn() && ok && s.TmuxPane != "" {
+			m.pvFocus, m.msg = true, ""
+		}
+		return m, nil
 	case "P":
 		if m.w < previewMinTerm {
 			return m.say(cMuted, "终端不足 100 列，开不了预览"), nil
@@ -487,8 +507,26 @@ func (m Model) kill(s store.Session) (tea.Model, tea.Cmd) {
 	return m, m.ccmux("已杀掉 "+s.Name, "kill", s.ID)
 }
 
-// mouse: click a card to focus it, click the focused card again to jump to it.
+// mouse: click a card to focus it, click the focused card again to jump to it. Over the preview
+// the wheel scrolls it back locally and a click gives it the keys.
 func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.previewOn() && e.X >= m.cardsW() && e.Action == tea.MouseActionPress && m.mode == browsing {
+		switch e.Button {
+		case tea.MouseButtonWheelUp:
+			m.scroll = min(m.scroll+3, maxScroll)
+		case tea.MouseButtonWheelDown:
+			m.scroll = max(m.scroll-3, 0)
+		case tea.MouseButtonLeft:
+			if _, _, s, ok := m.current(); ok && s.TmuxPane != "" {
+				m.pvFocus = true
+			}
+			return m, nil
+		default:
+			return m, nil
+		}
+		cmd := m.capture()
+		return m, cmd
+	}
 	if m.mode != browsing || e.Action != tea.MouseActionPress || e.Button != tea.MouseButtonLeft || e.Y < 1 || e.Y > m.h-3 {
 		return m, nil
 	}
@@ -498,6 +536,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 	y := e.Y - 1 + off // row 0 is the top bar
 	for _, r := range rects {
 		if e.X >= r.x && e.X < r.x+r.w && y >= r.y && y < r.y+r.h {
+			m.pvFocus = false
 			if r.id != m.focus {
 				m.focus, m.msg = r.id, ""
 				return m, nil
@@ -541,8 +580,11 @@ func (m Model) View() string {
 	_, _, focused, ok := m.current()
 	var right []string
 	if m.previewOn() {
-		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1))
+		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.pvFocus)
 	}
 	out, _, _ := view(m.src.Sessions(), m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.folded, m.cardsW(), right)
+	if m.pvFocus && m.previewOn() { // the footer is always the last line
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " 按键直通 pane · tab 回到卡片")
+	}
 	return out
 }
