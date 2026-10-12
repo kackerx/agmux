@@ -28,7 +28,7 @@ var Actions = []string{
 
 var defaultKeys = map[string][]string{
 	"up": {"k", "up"}, "down": {"j", "down"}, "left": {"h", "left"}, "right": {"l", "right"},
-	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"ctrl+]"},
+	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"tab"},
 	// search / flash are T19 / T20
 	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "flash": {"s"},
 	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"},

@@ -115,6 +115,8 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlC}
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyMsg{Type: tea.KeyShiftTab}
 	case "ctrl+]":
 		return tea.KeyMsg{Type: tea.KeyCtrlCloseBracket}
 	case "down":
@@ -862,32 +864,29 @@ func TestSendKeysArgs(t *testing.T) {
 	}
 }
 
-// tab hands the keys to the previewed pane: everything but tab is forwarded, ctrl+c and q included,
-// each followed by a capture; tab gives them back.
+// tab opens the preview if it is closed and hands it the keys: everything but tab is forwarded,
+// ctrl+c, q and shift+tab included, each followed by a capture; tab gives them back and the
+// preview stays.
 func TestPreviewPassThrough(t *testing.T) {
 	r := &fakeRunner{}
-	m, _ := press(t, wide(r, 232, 50), "tab") // preview closed: tab does nothing
-	if m.pvFocus {
-		t.Fatal("tab with the preview closed")
-	}
-	m, _ = press(t, m, "p", "tab")
-	if !m.pvFocus {
-		t.Fatal("tab should focus the preview")
+	m, _ := press(t, wide(r, 232, 50), "tab") // preview closed: tab opens it and goes in
+	if !m.pvFocus || !m.previewOn() {
+		t.Fatal("tab with the preview closed opens it and focuses it")
 	}
 	v := m.View()
 	focusEsc, _, _ := strings.Cut(fg(cFocus, "╭"), "╭")
-	if !strings.Contains(v, focusEsc+"╭") || !strings.HasSuffix(ansi.Strip(v), "keys go to the pane · ctrl+] back to the cards") {
+	if !strings.Contains(v, focusEsc+"╭") || !strings.HasSuffix(ansi.Strip(v), "keys go to the pane · tab back to the cards") {
 		t.Error("focused preview: #ff8ebe border and the pass-through footer")
 	}
 	r.calls = nil
 	m.scroll = 6
-	m, quit := press(t, m, "你好 world", "enter", "ctrl+c", "q", "esc", "tab")
+	m, quit := press(t, m, "你好 world", "enter", "ctrl+c", "q", "esc", "shift+tab", "ctrl+]")
 	if quit || !m.pvFocus {
-		t.Fatal("ctrl+c / q / esc / tab go to the pane while it has the keys")
+		t.Fatal("ctrl+c / q / esc / shift+tab / ctrl+] go to the pane while it has the keys")
 	}
 	capture := []string{"tmux", "capture-pane", "-p", "-e", "-t", "%1", "-S", "-44"}
 	var want [][]string
-	for _, k := range [][]string{{"-l", "--", "你好 world"}, {"Enter"}, {"C-c"}, {"-l", "--", "q"}, {"Escape"}, {"Tab"}} {
+	for _, k := range [][]string{{"-l", "--", "你好 world"}, {"Enter"}, {"C-c"}, {"-l", "--", "q"}, {"Escape"}, {"BTab"}, {"C-]"}} {
 		want = append(want, append([]string{"tmux", "send-keys", "-t", "%1"}, k...), capture)
 	}
 	if !reflect.DeepEqual(r.calls, want) {
@@ -896,14 +895,24 @@ func TestPreviewPassThrough(t *testing.T) {
 	if m.scroll != 0 {
 		t.Error("a forwarded key scrolls the preview back to the bottom")
 	}
-	m, quit = press(t, m, "ctrl+]", "q")
-	if m.pvFocus || !quit {
-		t.Error("ctrl+] gives the keys back to the board, then q quits")
+	m, _ = press(t, m, "tab")
+	if m.pvFocus || !m.previewOn() || strings.Contains(ansi.Strip(m.View()), "keys go to the pane") {
+		t.Error("tab gives the keys back to the board; the preview stays open")
+	}
+	if m, quit = press(t, m, "q"); !quit {
+		t.Error("then q quits")
+	}
+	if m, _ = press(t, wide(&fakeRunner{}, 232, 50), "tab", "tab", "p"); m.preview || m.pvFocus {
+		t.Error("p closes the preview")
+	}
+	m, _ = press(t, wide(&fakeRunner{}, 99, 40), "tab")
+	if m.preview || m.pvFocus || !strings.Contains(ansi.Strip(m.View()), "at least 100 columns") {
+		t.Error("tab on a narrow terminal says why it can't open the preview")
 	}
 
-	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "p", "j", "tab") // a2: no pane
-	if m.pvFocus {
-		t.Error("no pane, nothing to type into")
+	m, _ = press(t, wide(&fakeRunner{}, 232, 50), "j", "tab") // a2: no pane
+	if m.pvFocus || m.preview {
+		t.Error("no pane, nothing to type into: tab doesn't even open the preview")
 	}
 }
 
@@ -1194,11 +1203,11 @@ func TestPassThroughLock(t *testing.T) {
 			}
 		}
 		r.mu.Unlock()
-		if quit || !strings.Contains(ansi.Strip(m.View()), "session is gone · ctrl+] back to the cards") {
+		if quit || !strings.Contains(ansi.Strip(m.View()), "session is gone · tab back to the cards") {
 			t.Errorf("%s: locked out with a red footer (quit=%v)", c.name, quit)
 		}
-		if m, _ = press(t, m, "ctrl+]"); m.pvFocus {
-			t.Errorf("%s: ctrl+] takes the keys back", c.name)
+		if m, _ = press(t, m, "tab"); m.pvFocus {
+			t.Errorf("%s: tab takes the keys back", c.name)
 		}
 		if _, quit = press(t, m, "q"); !quit {
 			t.Errorf("%s: then the board has the keys again", c.name)
@@ -1220,7 +1229,7 @@ func TestLockedOutEsc(t *testing.T) {
 }
 
 // The preview shows whoever has the focus: once the focus is off the session pass-through was
-// entered on, keys go nowhere (locked out) until ctrl+] / esc.
+// entered on, keys go nowhere (locked out) until tab / esc.
 func TestForwardGoesToLockedPane(t *testing.T) {
 	r := &fakeRunner{}
 	m, _ := press(t, wide(r, 232, 50), "i") // locked on a1 / %1
@@ -1266,8 +1275,8 @@ func TestLockedOutAfterTargetReappears(t *testing.T) {
 	if m.focus == m.pvID || m.passThrough() || len(sentKeys(r)) != 0 || !strings.Contains(ansi.Strip(v), "session is gone") {
 		t.Errorf("focus %s pvID %s, keys → %q", m.focus, m.pvID, sentKeys(r))
 	}
-	if m, _ = press(t, m, "ctrl+]"); m.pvFocus {
-		t.Error("ctrl+] takes the keys back")
+	if m, _ = press(t, m, "tab"); m.pvFocus {
+		t.Error("tab takes the keys back")
 	}
 }
 
@@ -2410,7 +2419,7 @@ func TestMidTruncKeepsHighlight(t *testing.T) {
 // spec: in flash, mouse clicks and the wheel are swallowed (cards and preview alike)
 func TestFlashSwallowsMouse(t *testing.T) {
 	m := wide(&fakeRunner{}, 232, 50)
-	m, _ = press(t, m, "p", "ctrl+]")
+	m, _ = press(t, m, "tab", "tab") // preview open, keys back on the board
 	m.pvLines, m.capturing = 100, false
 	m, _ = press(t, m, "s")
 	before := m
@@ -2631,5 +2640,23 @@ func TestSearchNoMatchEscKeepsFocus(t *testing.T) {
 	m = typeKeys(t, m, "qqq")
 	if m, _ = press(t, m, "enter", "esc"); m.focus != "a2" || m.query != "" {
 		t.Errorf("focus %q query %q", m.focus, m.query)
+	}
+}
+
+// leave_preview can be put back on ctrl+] (the old default): then tab is just a key for the pane.
+func TestLeavePreviewRebound(t *testing.T) {
+	r := &fakeRunner{}
+	m := withConfig(t, "[keys]\nleave_preview = [\"ctrl+]\"]\n")
+	m.run = r
+	m, _ = press(t, m, "tab")
+	if !m.pvFocus || !strings.Contains(ansi.Strip(m.View()), "ctrl+] back to the cards") {
+		t.Fatalf("tab goes in; footer names ctrl+]")
+	}
+	r.reset()
+	if m, _ = press(t, m, "tab"); !m.pvFocus || !slices.ContainsFunc(r.calls, func(c []string) bool { return c[len(c)-1] == "Tab" }) {
+		t.Errorf("tab goes to the pane: %q", r.calls)
+	}
+	if m, _ = press(t, m, "ctrl+]"); m.pvFocus || !m.previewOn() {
+		t.Error("ctrl+] leaves, the preview stays")
 	}
 }

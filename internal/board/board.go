@@ -327,7 +327,7 @@ func (m *Model) lock(s store.Session) {
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// the preview has the keys: everything but leave_preview's keys (ctrl+]) goes to the locked
+	// the preview has the keys: everything but leave_preview's keys (tab) goes to the locked
 	// pane, tab and ctrl+c included (Claude Code completes and interrupts with them)
 	if m.pvFocus {
 		if m.cfg.Is("leave_preview", k.String()) || !m.passThrough() && k.Type == tea.KeyEsc {
@@ -486,11 +486,6 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		rects = slices.DeleteFunc(rects, func(r rect) bool { return r.y < off || r.y >= off+bodyH })
 		m.mode, m.labels, m.msg = flashing, flashLabels(rects, m.focus, m.cardsW()), ""
 		return m, nil
-	case "focus_preview":
-		if m.previewOn() && ok && s.TmuxPane != "" {
-			m.lock(s)
-		}
-		return m, nil
 	case "preview":
 		if m.w < previewMinTerm && !m.preview { // too narrow to open; an open one still closes
 			return m.say(cMuted, "the preview needs a terminal at least 100 columns wide"), nil
@@ -522,7 +517,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 	switch action {
 	case "handoff":
 		return m.send(s, "/handoff", "sent /handoff → "+s.Name)
-	case "reply": // open the preview if needed and give it the keys (preview + focus_preview)
+	case "focus_preview", "reply": // open the preview if needed and give it the keys; typing is the reply
 		if s.TmuxPane == "" {
 			return m, nil // msgLine already shows noPane
 		}

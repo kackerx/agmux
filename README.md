@@ -33,14 +33,14 @@ agmux avatars   # 打印全部头像
 | `s` | 定位：每张卡左上角出现一个字母，按它焦点就跳过去（离当前焦点近的卡字母更顺手）；`esc` 取消 |
 | `f` | 折叠 / 展开焦点所在的组 |
 | `p` | 开关右侧预览（终端至少 100 列） |
-| `tab` | 进入预览；在预览里时除 `ctrl+]` 外所有按键都发给那个 pane（含 `tab`、`ctrl-c`），`ctrl+]` 回到卡片，滚轮往回翻 |
-| `i` | 回复：开预览并把按键交给这个会话（等于 `p` + `tab`），之后打的字直接进它的 pane；`ctrl+]` 回到卡片 |
+| `tab` | 打开预览（没开的话）并进入；在预览里时除 `tab` 外所有按键都发给那个 pane（含 `ctrl-c`、`shift+tab`），再按 `tab` 回到卡片（预览留着，`p` 才关它），滚轮往回翻。直通里 `tab` 到不了 pane，要补全请在真终端里按 |
+| `i` | 回复：开预览并把按键交给这个会话（等于 `p` + `tab`），之后打的字直接进它的 pane；`tab` 回到卡片 |
 | `H` | 发 `/handoff` |
 | `r` | 重启会话 |
 | `x` | 杀掉会话（按 `y` 确认） |
 | `d` | 用 ccmux review 看改动 |
 | `a` | 给这个会话换头像：`j`/`k` 选，`enter` 绑定，`esc` 取消 |
-| `q` / `esc` | 退出（预览获焦时先按 `ctrl+]` 回到卡片；保留着 `/` 过滤时 `esc` 先清空过滤） |
+| `q` / `esc` | 退出（预览获焦时先按 `tab` 回到卡片；保留着 `/` 过滤时 `esc` 先清空过滤） |
 
 没有 tmux pane 的后台会话不能跳转和发送，底栏对应键会变暗。
 
@@ -87,7 +87,7 @@ agmux setup --write   # 改 ~/.claude/settings.json 的 statusLine.command，原
 ```toml
 [keys]          # 动作 = 一个或多个键名（j、ctrl+k、enter、tab、shift+tab、esc、space、f5…）
 down = ["n", "down"]
-leave_preview = ["ctrl+]"]
+leave_preview = ["tab"]       # 默认和 focus_preview 同一个键（进出都是 tab）；想让 tab 也能到 pane 里，就改成 ["ctrl+]"]
 
 [colors]        # #rrggbb 或 ANSI 0–255
 working = "#ffb86c"

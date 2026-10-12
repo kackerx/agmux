@@ -162,8 +162,8 @@ func TestExplicitBindingWins(t *testing.T) {
 
 // A board action taking confirm's / leave_preview's default key leaves them theirs.
 func TestModalKeepsDefaults(t *testing.T) {
-	c, err := Parse("cfg", []byte("[keys]\nhandoff = [\"y\"]\nreply = [\"ctrl+]\"]\n"))
-	if err != nil || !c.Is("confirm", "y") || !c.Is("leave_preview", "ctrl+]") || c.KeyMap()["y"] != "handoff" {
+	c, err := Parse("cfg", []byte("[keys]\nhandoff = [\"y\"]\nreply = [\"tab\"]\n"))
+	if err != nil || !c.Is("confirm", "y") || !c.Is("leave_preview", "tab") || c.KeyMap()["y"] != "handoff" || c.KeyMap()["tab"] != "reply" {
 		t.Errorf("%v %v %v", err, c.Keys["confirm"], c.Keys["leave_preview"])
 	}
 }
