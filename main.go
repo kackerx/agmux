@@ -9,6 +9,7 @@ import (
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/board"
+	"github.com/kackerx/agmux/internal/statusline"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -18,9 +19,21 @@ commands:
   board   full-screen session board (open it in a tmux popup)
   show    print sessions one per line: id, name, group, status, model, context%
   avatars print every avatar sprite
+  statusline [-- <command>]
+          Claude Code status line wrapper: saves the payload for the board, runs <command>
+  setup [--write]
+          point ~/.claude/settings.json's statusLine.command at agmux statusline (dry run without --write)
 `
 
 func main() {
+	if len(os.Args) >= 2 { // the commands that take arguments
+		switch os.Args[1] {
+		case "statusline":
+			os.Exit(statusline.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+		case "setup":
+			os.Exit(statusline.Setup(os.Args[2:], os.Stdout, os.Stderr))
+		}
+	}
 	if len(os.Args) != 2 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)

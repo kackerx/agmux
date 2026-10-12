@@ -77,23 +77,47 @@ func TestHUD(t *testing.T) {
 	p := &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir()}
 	hud := filepath.Join(p.StateDir, raw[0].NativeSessionID+".json")
 	for _, c := range []struct {
-		body string
-		want int
+		body  string
+		want  int
+		model string
 	}{
 		// rate_limits first: an implementation grabbing the first used_percentage gets 99
-		{`{"rate_limits":{"five_hour":{"used_percentage":99}},"context_window":{"used_percentage":41.6,"remaining_percentage":58.4}}`, 41},
-		{`{"context_window":{"used_percentage":29.6}}`, 29}, // truncated, like claude-hud
-		{`{"context_window":{"used_percentage":0}}`, 0},
-		{`{"context_window":{"used_percentage":null}}`, -1},
-		{`{"context_window":`, -1}, // half-written: treat as missing
+		{`{"rate_limits":{"five_hour":{"used_percentage":99}},"model":{"display_name":"Opus 5.5"},"context_window":{"used_percentage":41.6,"remaining_percentage":58.4}}`, 41, "Opus 5.5"},
+		{`{"context_window":{"used_percentage":29.6}}`, 29, ""}, // truncated, like claude-hud
+		{`{"context_window":{"used_percentage":0}}`, 0, ""},
+		{`{"context_window":{"used_percentage":null},"model":{"display_name":"Sonnet 5.5"}}`, -1, "Sonnet 5.5"},
+		{`{"context_window":`, -1, ""}, // half-written: treat as missing
 	} {
 		if err := os.WriteFile(hud, []byte(c.body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		p.Refresh()
-		if got := p.Sessions()[0].ContextPct; got != c.want {
-			t.Errorf("%s: ContextPct=%d want %d", c.body, got, c.want)
+		if s := p.Sessions()[0]; s.ContextPct != c.want || s.Model != c.model {
+			t.Errorf("%s: ContextPct=%d Model=%q, want %d %q", c.body, s.ContextPct, s.Model, c.want, c.model)
 		}
+	}
+}
+
+// The status line's model name wins over the transcript's model ID; without it the ID stays.
+func TestHUDModelBeatsJSONL(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "s.jsonl")
+	if err := os.WriteFile(log, []byte(`{"type":"assistant","message":{"model":"claude-opus-5-5"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Poller{Show: func() ([]ccmux.Session, error) {
+		return []ccmux.Session{{ID: "a", NativeSessionID: "n1", LogPath: log}}, nil
+	}, StateDir: dir}
+	p.Refresh()
+	if m := p.Sessions()[0].Model; m != "claude-opus-5-5" {
+		t.Fatalf("no HUD file: %q", m)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "n1.json"), []byte(`{"model":{"display_name":"Opus 5.5 (1M context)"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.Refresh()
+	if m := p.Sessions()[0].Model; m != "Opus 5.5 (1M context)" {
+		t.Errorf("with HUD: %q", m)
 	}
 }
 

@@ -140,8 +140,9 @@ func (p *Poller) convert(r ccmux.Session) Session {
 	s.Done = s.Status == "idle" && r.AttentionState != ""
 	s.GroupKey = groupKey(s)
 	s.AvatarID = avatar.For(p.Avatars, s.ID).ID
+	hudModel := ""
 	if r.NativeSessionID != "" {
-		s.ContextPct = hudContextPct(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
+		s.ContextPct, hudModel = readHUD(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
 	}
 	if r.LogPath != "" {
 		s.Model = lastModel(r.LogPath)
@@ -155,26 +156,37 @@ func (p *Poller) convert(r ccmux.Session) Session {
 	} else {
 		p.models[s.ID] = s.Model
 	}
+	if hudModel != "" { // Claude Code's own name for it beats the jsonl model ID
+		s.Model = hudModel
+	}
 	return s
 }
 
-// hudContextPct reads context_window.used_percentage from a claude-hud payload.
-// Missing or unparsable file = unknown (-1), never an error. Truncated like claude-hud (29.6 → 29).
-// ponytail: model / effort are not read until a real payload confirms their field names.
-func hudContextPct(path string) int {
+// readHUD reads what `agmux statusline` saved from Claude Code's status line payload:
+// context_window.used_percentage (truncated like claude-hud, 29.6 → 29) and model.display_name.
+// Missing or unparsable file = unknown (-1, ""), never an error.
+// ponytail: effort is not read until a real payload confirms its field name.
+func readHUD(path string) (pct int, model string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return -1
+		return -1, ""
 	}
 	var hud struct {
 		ContextWindow struct {
 			UsedPercentage *float64 `json:"used_percentage"`
 		} `json:"context_window"`
+		Model struct {
+			DisplayName string `json:"display_name"`
+		} `json:"model"`
 	}
-	if json.Unmarshal(data, &hud) != nil || hud.ContextWindow.UsedPercentage == nil {
-		return -1
+	if json.Unmarshal(data, &hud) != nil {
+		return -1, ""
 	}
-	return int(*hud.ContextWindow.UsedPercentage)
+	pct = -1
+	if hud.ContextWindow.UsedPercentage != nil {
+		pct = int(*hud.ContextWindow.UsedPercentage)
+	}
+	return pct, hud.Model.DisplayName
 }
 
 const tailBytes = 64 << 10
