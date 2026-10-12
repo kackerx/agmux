@@ -9,8 +9,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/xdg"
@@ -21,6 +24,8 @@ type Subagent = ccmux.Subagent
 type Session struct {
 	ID, Name, AgentType, CWD, GroupKey, Branch string
 	Status, Attention, PendingTool, TmuxPane   string
+	Done                                       bool   // idle with attentionState set: ccmux shows "done"
+	Detail                                     string // card line 3: backgroundDetail or one line of lastPrompt
 	Model, Effort                              string
 	ContextPct                                 int // <0 = unknown
 	Subagents                                  []Subagent
@@ -116,6 +121,12 @@ func (p *Poller) convert(r ccmux.Session) Session {
 	if s.Name == "" {
 		s.Name = r.Project
 	}
+	s.Done = s.Status == "idle" && len(r.AttentionState) > 0 && string(r.AttentionState) != "null"
+	if r.TrackingMode == "background" {
+		s.Detail = firstLine(r.BackgroundDetail)
+	} else {
+		s.Detail = promptLine(r.LastPrompt)
+	}
 	s.GroupKey = groupKey(s)
 	if r.NativeSessionID != "" {
 		s.ContextPct = hudContextPct(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
@@ -133,6 +144,45 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		p.models[s.ID] = s.Model
 	}
 	return s
+}
+
+var (
+	crossSessionRe = regexp.MustCompile(`<cross-session-message\b([^>]*)>`)
+	fromNameRe     = regexp.MustCompile(`\bfrom-name="([^"]*)"`)
+	summaryRe      = regexp.MustCompile(`(?s)<task-notification>.*?<summary>(.*?)</summary>`)
+	tagRe          = regexp.MustCompile(`<[^>]*>`)
+)
+
+// promptLine picks the one line of lastPrompt worth showing on a card.
+func promptLine(p string) string {
+	if m := crossSessionRe.FindStringSubmatchIndex(p); m != nil {
+		from := "?"
+		if n := fromNameRe.FindStringSubmatch(p[m[2]:m[3]]); n != nil {
+			from = n[1]
+		}
+		return "← " + from + ": " + firstLine(tagRe.ReplaceAllString(p[m[1]:], ""))
+	}
+	if m := summaryRe.FindStringSubmatch(p); m != nil {
+		return firstLine(m[1])
+	}
+	return firstLine(tagRe.ReplaceAllString(p, ""))
+}
+
+// firstLine is the first non-blank line, with control characters (tabs, escapes) dropped
+// so text from other programs can't break the card layout.
+func firstLine(s string) string {
+	for l := range strings.Lines(s) {
+		l = strings.TrimSpace(strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return ' '
+			}
+			return r
+		}, l))
+		if l != "" {
+			return l
+		}
+	}
+	return ""
 }
 
 // hudContextPct reads context_window.used_percentage from a claude-hud payload.
