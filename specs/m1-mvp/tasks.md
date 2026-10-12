@@ -31,22 +31,22 @@
 
 ## 验收改版 T5–T6（用户 2026-10-12 验收意见）
 
-### T5 卡片改版（dbaa3cd + 34a64c1；修复 55bef6a 复审中 / 回归中）
+### T5 卡片改版（通过 @6a7bcb0）
 - 列最小宽 56 → 40；头像 6×6 → **6×4**（6 列 × 2 行，6 个 sprite 重画，色带保留；第二轮验收从 4×4 改回 6 宽）；上下文条 10 格 → 6 格，和头像同宽对齐；名字前加 agent 图标（claude U+EC82 / codex U+EC81 / 其它 U+EC20，色带同色）。
 - 边框色跟状态走（working 橙 / done 绿 / idle 暗灰 / 需要处理 红），焦点 = #ff8ebe 粗线边框（第二轮验收：同色粗线看不出焦点）。
 - 行内重排：第 1 行 图标+名 · 状态 · 时间；第 2 行 分支 · 模型·effort；第 3 行 上下文条+百分比 · ⚇ agents · ⚙ shell。去掉 prompt 行，删掉 promptLine / Detail 及其测试和 fixture 字段。
 - 验收：TestColumns 改成 {113→2, 81→1, 82→2, 232→5×44, 200→4×48}；`agmux avatars` 每块 2 行每行 6 格；卡片单测覆盖三行字段与让位顺序；`tmux -L` 232×50 真机 5 列（后被 T8 改成上限 4 列）。
 
-### T6 `agmux statusline` + `agmux setup`（d703685；修复 55bef6a 复审中 / 回归中）
+### T6 `agmux statusline` + `agmux setup`（通过 @6a7bcb0）
 - 按 design.md「数据源 B」做。statusline：echo 一份假 payload 进去，文件落盘且原命令的 stdout 原样出来、退出码透传；写目录不可写时仍透传。setup：对临时 HOME 下的 settings.json 三种情况（无 statusLine / 有 X / 已是 agmux）打印正确，`--write` 后 JSON 其它键原样、有 .bak。
 - 验收：store 读到 `model.display_name` 显示在卡片；effort 字段等用户跑 `agmux setup --write` 后抓到真实 payload 再接（dev 不能改用户的 settings.json）。
 
-### T7 固定排序 + 折叠分组（c6dd6df；修复 55bef6a 复审中 / 回归中；用户 2026-10-12 第二轮验收意见）
+### T7 固定排序 + 折叠分组（通过 @6a7bcb0）
 - 组按 cwd 字典序、组内按名字字典序（同名按 id），和 `ccmux show --json` 的数组顺序无关。
 - `f` 折叠 / 展开焦点所在的组；收起只剩 `▸ ~/路径 (n)` 标题行，标题可获焦点，再按 f 或 enter 展开；状态只在本次运行内。底栏加 `f 折叠`。
 - 验收：单测把 fixture 数组打乱两种顺序喂进去，渲染结果逐字节相同；折叠后该组卡片不渲染、标题变 ▸、其它组位置不变；黑盒：`-L agmux-test` 里连续 3 次轮询（假 ccmux 每次输出不同顺序）capture-pane 一致；按 f 后标题变 ▸、再按 f 恢复。
 
-### T8 最多 4 列 + 去掉百分比数字（99ba7b2 + 55bef6a，复审中 / 回归中）
+### T8 最多 4 列 + 去掉百分比数字（通过 @6a7bcb0）
 - 列数上限 4：n = min(4, floor((W+2)/42))；232 → 4×56。上下文条后面不再显示百分比数字，未知时也不显示 `--`，只剩 6 格全暗。
 - 验收：TestColumns 加 232→4×56、300→4×73；卡片第 3 行无数字；黑盒 232×50 为 4 列。
 

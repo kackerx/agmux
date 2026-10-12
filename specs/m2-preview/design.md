@@ -22,6 +22,7 @@
 - 鼠标滚轮在预览区：直接转成 `send-keys` 的 `Up`/`Down`？不——改成本地滚动：按 `-S -(N+offset)` 抓更早的行；任何转发的按键把 offset 归零。
 
 ## switch / send 迁到 tmux
+- agmux 调 `tmux` 只按 PATH 找，不写绝对路径，不加 `-L` / `-S`：靠继承的 `$TMUX` 连到自己所在的 server（popup 里就是用户的 server）。测试里把假 tmux 放 PATH、或把 `$TMUX` 指到 `-L agmux-test` 的 socket，调用就不会漏到真 server。
 - enter 跳转：`tmux switch-client -t <pane>`（在 popup 里和 `ccmux switch` 行为一致，开工第一件事实测）。
 - `s` 发送、`H` 交接：`tmux send-keys -t <pane> -l -- <text>` 再 `tmux send-keys -t <pane> Enter`。
 - `r` restart、`d` review、`x` kill 仍走 ccmux（restart 要 resume 逻辑、review 要 hunk、kill 要杀 agent 进程而不只是 pane）。
