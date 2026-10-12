@@ -67,7 +67,7 @@ class Defaults(Base):
         r = subprocess.run([BIN, "config", "--path"], env=env, capture_output=True, text=True, timeout=10)
         self.assertEqual(r.stdout.strip(), str(self.env.home / ".config" / "agmux" / "config.toml"), r.stderr)
 
-    def test_s_no_longer_opens_the_passthrough(self):  # T17: reply moved to i; s is reserved for the T20 flash (no action yet)
+    def test_s_no_longer_opens_the_passthrough(self):  # T17: reply moved to i; s is the T20 flash: it must not enter the pass-through or call anything
         t = self.board(); t.keys("s"); time.sleep(0.6)
         self.assertNotIn("keys go to the pane", last_text_row(t.snap()))
         self.assertTrue(t.alive()); self.assertEqual(self.env.actions(), [], "s does nothing: no ccmux / tmux call")
@@ -156,6 +156,44 @@ class KeysReview(Base):
         t.keys("M-Space"); time.sleep(0.5); self.assertIn("▾ ~/work/alpha (3)", t.text())
 
 
+class NoKeyLeft(Base):
+    """c1b8fcb: a default action whose only default key was taken by the user's own binding is simply unbound (no error); only the user writing an empty list is an error."""
+
+    def test_down_x_leaves_kill_unbound(self):
+        self.write('[keys]\ndown = ["x"]\n')
+        r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("# kill: no key (another action took its default)", r.stdout); self.assertNotIn("kill = ", r.stdout)
+        t = self.board(); bar = last_text_row(t.snap())
+        self.assertNotIn("x kill", bar, bar)
+        t.keys("x"); time.sleep(0.3)  # moves down now
+        t.keys("y"); time.sleep(0.5)
+        self.assertEqual(self.env.actions(), [], "x is not kill: no confirm prompt, y has nothing to confirm")
+        self.assertEqual(self.jump_target(t), ["switch", "a2"], "x moved the focus down one card")
+
+    def test_the_dump_with_a_commented_action_loads_again_and_is_stable(self):
+        self.write('[keys]\ndown = ["x"]\n')
+        out = self.cli("config").stdout; self.write(out)
+        r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr); self.assertEqual(r.stdout, out, "pasting the dump back changes nothing")
+        t = self.board(); self.assertNotIn("x kill", last_text_row(t.snap()))
+
+    def test_user_written_empty_list_is_still_an_error(self):
+        self.write('[keys]\nkill = []\n')
+        for args in (["config"], ["board"]):
+            r = self.cli(*args); self.assertEqual(r.returncode, 1); self.assertIn("keys.kill: needs at least one key", r.stderr)
+
+    def test_fold_a_starts_and_avatar_has_no_key(self):
+        self.write('[keys]\nfold = ["a"]\n')
+        r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("# avatar: no key (another action took its default)", r.stdout); self.assertIn('fold = ["a"]', r.stdout)
+        self.write(r.stdout); self.assertEqual(self.cli("config").stdout, r.stdout)
+        t = self.board(); bar = last_text_row(t.snap()); self.assertIn("a fold", bar); self.assertNotIn("a avatar", bar)
+        t.keys("a"); time.sleep(0.4); self.assertIn("▸ ~/work/alpha (3)", t.text(), "a folds the group now"); self.assertNotIn("avatar for", t.text())
+
+    def test_two_explicit_bindings_of_x_are_still_an_error(self):
+        self.write('[keys]\nflash = ["x"]\nkill = ["x"]\n')
+        r = self.cli("config"); self.assertEqual(r.returncode, 1); self.assertIn('"x" is already bound to flash', r.stderr)
+
+
 class Colours(Base):
     def test_working_border_colour(self):
         self.write('[colors]\nworking = "#123456"\n')
@@ -182,7 +220,6 @@ class Colours(Base):
 class Errors(Base):
     CASES = {
         "duplicate": ('[keys]\nquit = ["j"]\ndown = ["j"]\n', "keys.quit", '"j" is already bound to down'),  # both are the user's own: that is the only conflict left
-        "default key left with nothing": ('[keys]\ndown = ["x"]\n', "keys.kill", 'no key left after "x" was taken by down; bind one'),  # x was kill's only default: the user's binding wins, kill has to be rebound
         "ctrl+c": ('[keys]\nquit = ["ctrl+c"]\n', "keys.quit", "ctrl+c can't be bound (it always quits)"),
         "ctrl+c on another action": ('[keys]\nfold = ["ctrl+c"]\n', "keys.fold", "ctrl+c can't be bound"),
         "ctrl+i is tab": ('[keys]\nfold = ["ctrl+i"]\n', "keys.fold", 'write "tab"'),
@@ -275,10 +312,12 @@ class PreviewKeys(PreviewBase):
         self.assertIn("pj-fallback", self.pv()[0], "n moved focus a1 -> a2 (pj-fallback); the preview title names the focused session")
         self.assertIn("n/k h/l move", last_text_row(self.t.snap()))
 
-    def test_s_does_not_enter_the_passthrough_but_i_does(self):
+    def test_s_starts_the_flash_not_the_passthrough_and_i_enters_it(self):  # since T20 s is the global jump; reply (pass-through) is i
         self.press("n", "n", "p"); self.assertTrue(wait(lambda: self.pv() is not None, 4))
         self.press("s"); time.sleep(0.5)
-        self.assertFalse(self.focused(), "s is the T20 flash key now: it must not give the keys to the pane"); self.assertEqual(self.cat(), "", "and s is not typed into the pane")
+        self.assertIn("jump: press a label", last_text_row(self.t.snap()), "s starts the flash")
+        self.assertFalse(self.focused(), "s does not give the keys to the pane"); self.assertEqual(self.cat(), "", "and s is not typed into the pane")
+        self.t.esc(); time.sleep(0.4); self.assertNotIn("jump:", last_text_row(self.t.snap()))
         self.press("i"); self.assertTrue(wait(self.focused, 3), self.t.text())
 
     def test_only_the_configured_leave_key_is_intercepted(self):

@@ -30,7 +30,9 @@ def overlay(snap):
         c = row.find(m.group(1))
         top = "".join(x[0] for x in row.cells[c - 8:c - 2]); bottom = "".join(x[0] for x in snap[i + 1].cells[c - 8:c - 2])
         rows.append(dict(id=m.group(1), name=m.group(2), sprite=(top, bottom), marker="▸" in row.text, current=row.cells[c][1] == C_FOCUS))
-    return dict(title="avatar for " + name, rows=rows, cols=(title.find("avatar for"), title.find("avatar for") + 26))
+    c0 = title.find("avatar for"); c1 = c0 + disp_width("avatar for " + name)
+    left = max(i for i in range(c0) if title.cells[i][0] == "│"); right = min(i for i in range(c1, len(title.cells)) if title.cells[i][0] == "│")
+    return dict(title="avatar for " + name, rows=rows, cols=(c0, c0 + 26), box=(left, right))
 
 
 class Base(unittest.TestCase):
@@ -237,6 +239,82 @@ class Picker(Base):
         t.keys("A"); self.assertTrue(wait(lambda: overlay(t.snap()), 3), t.text())
 
 
+class Review(Base):
+    """T18 review (c1b8fcb): the file is the source of truth: merged on write, followed on change, never clobbered."""
+
+    def pick(self, t, want):
+        self.open_picker(t); self.move_to(t, want); t.keys("Enter"); time.sleep(0.8)
+
+    def test_a_hand_edit_made_while_the_board_runs_survives_the_next_binding(self):
+        t = self.board(); self.to_a2(t)
+        self.env.avatars_json({"echo-long": "bot-06"})  # edited by hand / another board, a moment ago
+        self.pick(t, "bot-03")
+        self.assertEqual(json.loads(self.json.read_text()), {"echo-long": "bot-06", "pj-fallback": "bot-03"}, "both entries are in the file")
+
+    def test_a_read_only_state_directory_reports_and_changes_nothing(self):
+        d = self.env.state / "agmux"; d.mkdir(exist_ok=True); self.env.avatars_json({"echo-long": "bot-06"})
+        d.chmod(0o555); self.addCleanup(lambda: d.chmod(0o755))
+        before = self.json.read_bytes()
+        t = self.board(); self.to_a2(t); cur = self.id_of(t, "a2")
+        self.open_picker(t); self.move_to(t, next(i for i in UNIQUE if i not in cur)); t.keys("Enter"); time.sleep(0.8)
+        self.assertTrue(t.alive()); self.assertEqual(self.json.read_bytes(), before, "the file is untouched"); self.assertEqual([p.name for p in d.iterdir() if p.name.startswith("avatars") and p.name != "avatars.json"], [], "no temp file left behind")
+        red = [r.text.strip() for r in t.snap()[-3:] if any(is_red(c[1]) for c in r.cells if c[0].strip())]
+        self.assertTrue(red, f"an error shows in the message row:\n{t.text()[-300:]}")
+        self.assertEqual(self.id_of(t, "a2"), cur, "the card keeps its avatar: nothing was saved")
+        t.close(); t2 = self.board(); self.to_a2(t2); self.assertEqual(self.id_of(t2, "a2"), cur, "and a restart shows the same")
+
+    def test_a_null_file_is_an_empty_binding_set(self):
+        self.json.parent.mkdir(exist_ok=True); self.json.write_text("null")
+        t = self.board(); self.to_a2(t); cur = self.id_of(t, "a2")
+        self.open_picker(t); want = next(i for i in UNIQUE if i not in cur); self.move_to(t, want); t.keys("Enter"); time.sleep(0.8)
+        self.assertTrue(t.alive(), t.text()); self.assertEqual(json.loads(self.json.read_text()), {"pj-fallback": want}); self.assertEqual(self.id_of(t, "a2"), (want,))
+
+    def test_the_picker_keeps_every_row_the_terminal_width_with_wide_characters_under_it(self):
+        S = json.loads((self.env.fake / "show.json").read_text())
+        for i, s in enumerate(S):  # every card name is double-width, so the picker's left AND right edge land on wide characters at some widths
+            s["summary"] = "会话测试名字" * 3 + str(i)
+        self.env.write_show(S)
+        bad = []
+        for w in range(96, 106):
+            t = Term(self.env, w=w, h=30, extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t.close)
+            self.assertTrue(wait(lambda: len(find_cards(t.snap())) >= 2, 8), t.text())
+            before = t.snap(); t.keys("a"); ov = wait(lambda: overlay(t.snap()), 3); self.assertTrue(ov, t.text())
+            after = t.snap(); x0, x1 = ov["box"][0] - 2, ov["box"][1] + 3  # a wide character cut by the picker's edge may turn into a space: allow one cell of slack
+            strip = lambda cells: "".join(c[0] for c in cells if c[0] not in "▀▄█")
+            for i, (b, a) in enumerate(zip(before, after)):
+                if len(a.cells) > w:
+                    bad.append((w, i, "row wider than the terminal", len(a.cells)))
+                if i < 29 and b.text.strip():  # (the last row is the footer: it changes with the picker)
+                    if strip(a.cells[:x0]) != strip(b.cells[:x0]):
+                        bad.append((w, i, "left of the picker changed", strip(b.cells[:x0]), strip(a.cells[:x0])))
+                    if len(b.cells) > x1 and strip(a.cells[x1:]) != strip(b.cells[x1:]):
+                        bad.append((w, i, "right of the picker changed", strip(b.cells[x1:]), strip(a.cells[x1:])))
+            t.close()
+        self.assertEqual(bad, [], "the picker is drawn over wide characters without moving anything outside it")
+
+    def test_a_on_a_folded_group_title_says_so(self):
+        t = self.board(); t.keys("f"); time.sleep(0.4)
+        t.keys("a"); time.sleep(0.5)
+        self.assertIsNone(overlay(t.snap()), "no picker"); self.assertIn("fold a group? pick a card first", t.text()); self.assertFalse(self.json.exists())
+        self.assertTrue(t.alive())
+
+    def test_another_process_changing_the_file_is_followed_within_two_seconds(self):
+        t = self.board(); base = self.id_of(t, "a2"); want = next(i for i in UNIQUE if i not in base)
+        t0 = time.time(); self.env.avatars_json({"pj-fallback": want})
+        self.assertTrue(wait(lambda: self.id_of(t, "a2") == (want,), 3.5), "the card follows the file without a restart")
+        self.assertLess(time.time() - t0, 3.0, "at the next poll")
+        other = next(i for i in UNIQUE if i not in (want,) + base)
+        self.env.avatars_json({"pj-fallback": other}); self.assertTrue(wait(lambda: self.id_of(t, "a2") == (other,), 3.5))
+
+    def test_a_broken_file_keeps_the_bindings_and_fixing_it_needs_no_restart(self):
+        self.env.avatars_json({"pj-fallback": "bot-03"}); t = self.board(); self.assertEqual(self.id_of(t, "a2"), ("bot-03",))
+        self.json.write_text("{broken")
+        self.assertTrue(wait(lambda: "not valid JSON" in t.text(), 4), t.text()[-300:]); self.assertEqual(self.id_of(t, "a2"), ("bot-03",), "the last good bindings stay in use")
+        self.env.avatars_json({"pj-fallback": "bot-05"})
+        self.assertTrue(wait(lambda: self.id_of(t, "a2") == ("bot-05",), 4), "repairing the file is enough")
+        self.assertTrue(wait(lambda: "not valid JSON" not in t.text(), 3), "and the error message is gone")
+
+
 class Bindings(Base):
     def test_old_session_id_keys_are_not_migrated(self):
         cur = self.board(); base = self.id_of(cur, "a2"); cur.close()
@@ -300,7 +378,6 @@ class ConfigErrors(Base):
         "bind value not a string": ('[avatars.bind]\nx = 3\n', "avatars.bind.x", ""),
         "avatars not a table": ('avatars = 3\n', "avatars", ""),
         "keys not a table": ('keys = 3\n', "keys", "must be a table"),
-        "avatar key taken": ('[keys]\navatar = ["x"]\n', "keys.kill", 'no key left after "x" was taken by avatar'),  # T17 review: the explicit binding wins
     }
 
     def test_each_error_is_one_line_exit_1_for_board_and_config(self):
@@ -314,6 +391,11 @@ class ConfigErrors(Base):
                     self.assertEqual(len(lines), 1, r.stderr)
                     self.assertTrue(lines[0].startswith("agmux: " + str(self.conf)), lines[0])
                     self.assertIn(setting, lines[0]); self.assertIn(why, lines[0]); self.assertEqual(r.stdout, "")
+
+    def test_avatar_key_taken_by_another_explicit_binding_leaves_kill_unbound(self):  # T17 rule (c1b8fcb): defaults yield to the user's own bindings
+        self.config('[keys]\navatar = ["x"]\n')
+        r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr); self.assertIn("# kill: no key", r.stdout); self.assertIn('avatar = ["x"]', r.stdout)
+        t = self.board(); bar = last_text_row(t.snap()); self.assertIn("x avatar", bar); self.assertNotIn("x kill", bar)
 
     def test_the_message_for_an_unknown_sprite_lists_the_valid_ones(self):
         self.config('[avatars]\ndefault = "bot-99"\n')
