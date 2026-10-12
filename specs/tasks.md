@@ -10,7 +10,7 @@
 - `internal/store`：Store 接口 + 内存实现，每 2s 轮询；合并 HUD 文件（存在才读）和 jsonl 模型兜底（末尾 64KB 倒序找）。
 - 验收：`testdata/show.json`（真机抓一份）喂进去，单测断言名字回退、GroupKey、ContextPct 未知 = -1；`agmux show` 在真机打印出 ≥1 行。
 
-### T2 头像（修复 e42ca00 复审中）
+### T2 头像（审查通过 @336732a；测试中）
 - 6 个 6×6 像素 sprite（含 agentType 色带），带 ID / Name；半块字符渲染成 6 列 × 3 行；hash 默认分配；`avatars.json` 绑定读写。
 - 眼睛三态（扫动 / 闪红 / 变暗）。
 - `agmux avatars` 输出：每个 sprite 一块，首行 `<id>  <name>`，接着 3 行渲染结果，块之间空一行。
@@ -22,7 +22,7 @@
 - 列数算法：gap=2，n = floor((W+gap)/(56+gap))，n<1 取 1；colW = floor((W-gap*(n-1))/n)，余数留在右边空着。边界：113 列 → 1 列，114 列 → 2 列。
 - 验收：单测用固定宽度（113 / 114 / 120 / 200 列）断言列数（1 / 2 / 2 / 3）；`tmux -L agmux-test` 开 200×50 跑 `agmux board`，capture-pane 里能看到卡片边框和会话名。
 
-### T4 交互（修复 d9db19a 复审中 / 测试中）
+### T4 交互（复审通过 @336732a；测试中）
 - 先在 `tmux -L agmux-test` popup 里实测 bubbletea 能否收到鼠标事件，不能就只留键盘并记到 design.md。
 - `x` 确认：按 `y` 执行，其它任意键取消；`s` 输入：enter 发送，esc 或空文本取消。
 - 键位和鼠标照 design.md；`ccmux` 子命令通过一个可替换的 runner 接口 exec（测试里换成记录命令的假 runner）。
