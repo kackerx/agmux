@@ -59,8 +59,8 @@ func grab(r Runner, pane string, n int) previewMsg {
 	}
 	head, text, _ := strings.Cut(out, "\n")
 	f := strings.Fields(head)
-	if len(f) != 5 { // not the info line: all of it is the screen
-		return previewMsg{pane: pane, text: out}
+	if len(f) != 5 { // an info line we can't read (an older tmux without cursor_shape): no cursor, but it's no screen either
+		return previewMsg{pane: pane, text: text}
 	}
 	x, ex := strconv.Atoi(f[0])
 	y, ey := strconv.Atoi(f[1])
@@ -113,11 +113,16 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 		case pv.err != nil:
 			content = []string{fg(cRed, firstLine(pv.err.Error()))}
 		default:
-			n := max(h-3, 0)                  // rows inside the box; none on a tiny terminal
-			content = tail(pv.text, n+scroll) // scroll lines back: drop that many from the bottom
-			content = content[:max(len(content)-scroll, min(len(content), n))]
+			n := max(h-3, 0) // rows inside the box; none on a tiny terminal
+			keep := 0
 			if pv.cur != nil && scroll == 0 { // a scrolled-back view isn't where the cursor is
-				curRow = pv.cur.row - (len(tail(pv.text, 1<<30)) - len(content))
+				keep = pv.cur.row + 1 // the blank rows down to the cursor's are part of the screen
+			}
+			lines := trimTail(pv.text, keep)
+			content = lines[min(max(len(lines)-(n+scroll), 0), len(lines)):] // scroll lines back: drop that many from the bottom
+			content = content[:max(len(content)-scroll, min(len(content), n))]
+			if keep > 0 {
+				curRow = pv.cur.row - (len(lines) - len(content))
 			}
 		}
 	}
@@ -158,13 +163,38 @@ func paintCursor(l string, c *cursor) string {
 	return put(l, c.col, style.Render(cell))
 }
 
-// tail is the last n lines of a capture, without the blank rows below the cursor.
-func tail(text string, n int) []string {
-	lines := strings.Split(strings.ReplaceAll(text, "\t", "    "), "\n")
-	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
+// trimTail is the lines of a capture without the blank rows at its end, but at least keep lines
+// (a cursor waiting on a blank row below the text is on the screen).
+func trimTail(text string, keep int) []string {
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		lines[i] = expandTabs(l)
+	}
+	for len(lines) > keep && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
 		lines = lines[:len(lines)-1]
 	}
+	return lines
+}
+
+// tail is the last n lines of a capture, without the blank rows below the cursor.
+func tail(text string, n int) []string {
+	lines := trimTail(text, 0)
 	return lines[min(max(len(lines)-n, 0), len(lines)):] // n < 0 on a tiny terminal: nothing
+}
+
+// expandTabs turns a tab into spaces up to the next multiple of 8 columns, as a terminal does.
+func expandTabs(l string) string {
+	if !strings.Contains(l, "\t") {
+		return l
+	}
+	var b strings.Builder
+	for i, seg := range strings.Split(l, "\t") {
+		if i > 0 {
+			b.WriteString(strings.Repeat(" ", 8-ansi.StringWidth(b.String())%8))
+		}
+		b.WriteString(seg)
+	}
+	return b.String()
 }
 
 // tmuxKeyNames maps bubbletea's key names to tmux's send-keys names.

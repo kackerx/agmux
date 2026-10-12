@@ -2995,7 +2995,9 @@ func TestGrabCursor(t *testing.T) {
 		{"block shape", "3 0 1 block 6\n" + screen, &cursor{row: 4, col: 3}, screen},
 		{"hidden (civis, copy-mode)", "3 0 0 block 6\n" + screen, nil, screen},
 		{"no history", "2 1 1 default 4\nab\ncd\nef\ngh\n", &cursor{row: 1, col: 2}, "ab\ncd\nef\ngh\n"},
-		{"not an info line: all screen", "plain\ncapture\n", nil, "plain\ncapture\n"},
+		{"an info line it can't read: no cursor, not screen either", "plain\ncapture\n", nil, "capture\n"},
+		{"older tmux without cursor_shape", "3 1 1  2\nabc\ndef\n", nil, "abc\ndef\n"},
+		{"empty info line", "\nabc\n", nil, "abc\n"},
 		{"numbers that aren't", "x y 1 bar 6\n" + screen, nil, screen},
 		{"no height", "1 1 1 bar 0\n" + screen, nil, screen},
 	} {
@@ -3322,5 +3324,63 @@ func TestFlashTwoHitsOneCardKeepLabels(t *testing.T) {
 	tm, _ := m.Update(frameMsg{})
 	if after := labelsOf(tm.(Model)); after != before {
 		t.Errorf("labels moved: %s → %s", before, after)
+	}
+}
+
+// A program waiting on an empty line below a full screen of output (seq 1 20; sleep): the cursor is
+// on a blank row the trailing-blank trim would cut, and the content fills the box. The blank rows
+// down to the cursor's are kept, so the box loses its top line and the cursor is on its last row.
+func TestPreviewCursorOnBlankRowOfFullBox(t *testing.T) {
+	trueColor(t)
+	var b strings.Builder
+	for i := range 30 {
+		fmt.Fprintf(&b, "line%02d\n", i)
+	}
+	b.WriteString("\n") // row 30: empty, the cursor is here
+	box := cursorBox(previewMsg{pane: "%1", text: b.String(), cur: &cursor{row: 30, col: 0}}, 0)
+	last := box[len(box)-2] // the box's last row
+	if !strings.Contains(last, "\x1b[7m") || !strings.Contains(ansi.Strip(box[len(box)-3]), "line29") {
+		t.Errorf("last rows %q / %q", ansi.Strip(box[len(box)-3]), ansi.Strip(last))
+	}
+	if !strings.Contains(ansi.Strip(box[2]), "line22") { // 9 rows: line22…line29 and the cursor's blank row
+		t.Errorf("top row %q", ansi.Strip(box[2]))
+	}
+	// without a cursor the blank rows are cut as ever
+	plain := cursorBox(previewMsg{pane: "%1", text: b.String()}, 0)
+	if !strings.Contains(ansi.Strip(plain[len(plain)-2]), "line29") {
+		t.Errorf("no cursor: %q", ansi.Strip(plain[len(plain)-2]))
+	}
+	// and scrolled back the cursor isn't drawn, blank row or not
+	for _, l := range cursorBox(previewMsg{pane: "%1", text: b.String(), cur: &cursor{row: 30, col: 0}}, 3) {
+		if strings.Contains(l, "\x1b[7m") {
+			t.Error("drawn while scrolled")
+		}
+	}
+}
+
+// A tab goes to the next multiple of 8 columns, as in the pane: the cursor on the b is on the b.
+func TestPreviewCursorAfterTab(t *testing.T) {
+	trueColor(t)
+	box := cursorBox(previewMsg{pane: "%1", text: "a\tb\n", cur: &cursor{row: 0, col: 8}}, 0)
+	if !strings.Contains(noResets(box[2]), "\x1b[7mb") {
+		t.Errorf("%q", ansi.Strip(box[2]))
+	}
+	for in, want := range map[string]string{"a\tb": "a       b", "abcdefgh\tx": "abcdefgh        x", "\tx": "        x", "a\tb\tc": "a       b       c"} {
+		if got := expandTabs(in); got != want {
+			t.Errorf("%q → %q, want %q", in, got, want)
+		}
+	}
+	if got := expandTabs("\x1b[31mab\x1b[0m\tx"); ansi.Strip(got) != "ab      x" {
+		t.Errorf("escapes take no columns: %q", got)
+	}
+}
+
+// The color of text after the cursor cell carries on.
+func TestPreviewCursorKeepsColorAfter(t *testing.T) {
+	trueColor(t)
+	box := cursorBox(previewMsg{pane: "%1", text: "\x1b[31mredtext\x1b[0m\n", cur: &cursor{row: 0, col: 2}}, 0)
+	after := box[2][strings.Index(box[2], "\x1b[7m"):]
+	if j := strings.Index(after, "text"); j < 0 || !strings.Contains(after[:j], "31") {
+		t.Errorf("text after the cursor lost its red: %q", after)
 	}
 }
