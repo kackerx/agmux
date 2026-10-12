@@ -4,7 +4,7 @@
 
 ## 文案
 - 所有界面文字改英文：底栏键位提示、消息行（no pane / no tmux client / review failed…）、确认提示、`--help`。状态词本来就是英文。README 保持中文。
-- 底栏默认：`j/k h/l move · enter jump · f fold · p preview · tab focus preview · s reply · H handoff · r restart · x kill · d review · a avatar · q quit`。
+- 底栏默认：`j/k h/l move · enter jump · f fold · p preview · tab focus preview · s reply · H handoff · r restart · x kill · d review · a avatar · q quit`（直通时：`keys go to the pane · ctrl+] back to the cards`）。
 
 ## 配置文件
 - 路径 `~/.config/agmux/config.toml`【用户定】（设了 `$XDG_CONFIG_HOME` 就是 `$XDG_CONFIG_HOME/agmux/config.toml`，默认值等价），没有就全用默认值。TOML 用 `github.com/BurntSushi/toml`。
@@ -16,13 +16,13 @@
   up = ["k", "up"]         down = ["j", "down"]
   left = ["h", "left"]     right = ["l", "right"]
   jump = ["enter"]         fold = ["f"]
-  preview = ["p"]          focus_preview = ["tab"]
+  preview = ["p"]          focus_preview = ["tab"]   leave_preview = ["ctrl+]"]
   reply = ["s"]            handoff = ["H"]
   restart = ["r"]          kill = ["x"]
   review = ["d"]           avatar = ["a"]
   quit = ["q", "esc"]      confirm = ["y"]
   ```
-  同一个键绑到两个动作 → 配置错误。预览获焦时只有 `focus_preview` 的键被拦截，其它全部直通（和 M2 一样）。底栏提示按配置渲染（每个动作显示第一个键名）。
+  同一个键绑到两个动作 → 配置错误。预览获焦时只有 `leave_preview` 的键被拦截，其它全部直通（和 M2 一样）。底栏提示按配置渲染（每个动作显示第一个键名）。
 - 颜色 `[colors]`：值是 `#rrggbb` 或 ANSI 0–255 的数字字符串。
   ```toml
   [colors]

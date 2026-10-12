@@ -19,10 +19,16 @@
 
 ## 按键直通（回复）
 - `s` = 打开预览（没开就开）并切焦点进预览，直接打字就是回复；原来的一行输入提示去掉（`H` 交接仍是直接 send-keys，不进预览）。
-- `tab` 在卡片区和预览之间切焦点；预览获焦时边框变 #ff8ebe，底栏换成提示「按键直通 pane · tab 回到卡片」。
+- `tab` 从卡片区进入预览；**离开用 `ctrl+]`**（审查指出 tab 是 Claude Code 的补全键，直通里要用；M3 配置项 `focus_preview` / `leave_preview`）。预览获焦时边框变 #ff8ebe，底栏换成「keys go to the pane · ctrl+] back to the cards」。
+- 直通目标锁定：进入直通时记下会话 ID 和 pane；每个按键转发前核对焦点仍是它、它还活着、pane 没变（用记下的 ID 比，不用 m.focus——轮询会把焦点退回第一张卡）。不满足就退出直通、吞掉这一键、消息行 "session is gone, back to the cards"；底栏 / 边框 / 按键分发共用同一个「直通有效」判断，不会出现屏幕显示直通而按键被当看板命令的情况。
+- 粘贴（bubbletea 的 Paste）走 `tmux load-buffer -b agmux -`（stdin 喂内容）+ `paste-buffer -p -d -b agmux -t <pane>`，保留 bracketed paste，多行不会被逐行提交（ccmux 发 prompt 也这么做）；单行打字仍 `send-keys -l --`。
+- tmux 把以 `;` 结尾的参数当命令分隔符（3.7c，`-l --` 之后也是）：文本末尾每个 `;` 去掉并追加一个 `\;` 参数；alt+; 发 `M-\;`。
+- 键名：tmux 只有 F1–F12，F13 以上忽略；ctrl+@ 单独处理成 `C-Space`，不在表里映射 `@`。
+- 转发失败：消息行显示错误（和 ccmux/tmux 命令出错的约定一致），不只在预览框里。
+- 抓屏也走转发队列，避免按键前发起的定时抓屏晚于转发后的抓屏回来。
 - 预览获焦时，除 `tab` 外**所有**按键原样转给 pane：可打印字符和粘贴用 `tmux send-keys -t <pane> -l -- <text>`，enter / esc / 方向键 / ctrl-x / backspace 等按 tmux 的键名 `tmux send-keys -t <pane> <Key>`（和 ccmux 的做法一致）。这样 Claude Code 的 vim 模式、斜杠命令、shift+tab 都照常工作。
 - 转发后立刻抓一次屏，不等 500ms。
-- 鼠标滚轮在预览区：直接转成 `send-keys` 的 `Up`/`Down`？不——改成本地滚动：按 `-S -(N+offset)` 抓更早的行；任何转发的按键把 offset 归零。
+- 鼠标滚轮在预览区：本地滚动，每格 3 行，按 `-S -(N+offset)` 抓更早的行；offset 上限 = 抓到的行数 − 可见行数（到顶就停，不空转累加）；任何转发的按键、换卡片都把 offset 归零。点击预览区只认正文区域（标题行 / 底栏不算）。
 
 ## switch / send 迁到 tmux
 - agmux 调 `tmux` 只按 PATH 找，不写绝对路径，不加 `-L` / `-S`：靠继承的 `$TMUX` 连到自己所在的 server（popup 里就是用户的 server）。测试里把假 tmux 放 PATH、或把 `$TMUX` 指到 `-L agmux-test` 的 socket，调用就不会漏到真 server。
