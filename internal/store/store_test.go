@@ -69,10 +69,14 @@ func TestFixture(t *testing.T) {
 			t.Errorf("%s Detail = %q, want %q", id, got, want)
 		}
 	}
+	// real captures: idle + unread = done; idle + unread + a working subagent = working · agents
+	if s := byID(t, ss, "bd8201ec-e255-4d0d-ba88-7413f3c10329"); !s.Done || s.Status != "idle" {
+		t.Errorf("sqlmux-test-engineer: done=%v status=%s, want done", s.Done, s.Status)
+	}
+	if s := byID(t, ss, "c8cbecee-e813-4fe4-b7ed-b971ef4878bc"); s.Done || s.Status != "working" || !s.AgentsWorking {
+		t.Errorf("agmux-orchestrator: done=%v status=%s agents=%v, want working · agents", s.Done, s.Status, s.AgentsWorking)
+	}
 	for _, s := range ss {
-		if s.Done {
-			t.Errorf("%s: Done with attentionState null", s.ID)
-		}
 		if s.ContextPct != -1 {
 			t.Errorf("%s: ContextPct=%d with no HUD file, want -1", s.ID, s.ContextPct)
 		}
@@ -173,12 +177,20 @@ func TestModelCache(t *testing.T) {
 }
 
 func TestPromptLine(t *testing.T) {
+	xs := func(body string) string {
+		return "Another Claude session sent a message:\n<cross-session-message from=\"uds:/s\" from-name=\"dev\" from-mode=\"bypass\">\n" +
+			body + "\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user."
+	}
 	for _, c := range []struct{ in, want string }{
 		{"plain\nsecond", "plain"},
 		{"\n  \n  indented first  \nx", "indented first"},
-		{"make <leader> work", "make  work"},
+		{"make <leader> work", "make <leader> work"},
+		{"impl Vec<T> for a < b", "impl Vec<T> for a < b"},
+		{"<command-message>handoff</command-message>\n<command-name>/handoff</command-name>", "handoff"},
+		{`see <b class="x">this</b> now`, "see this now"},
 		{"tab\there\x1b[31mred", "tab here [31mred"},
-		{"Another Claude session sent a message:\n<cross-session-message from=\"uds:/s\" from-name=\"dev\" from-mode=\"bypass\">\n\nbody first\nbody 2\n</cross-session-message>", "← dev: body first"},
+		{xs("\nbody first\nbody 2"), "← dev: body first"},
+		{xs(""), "← dev:"}, // empty body: never the trailing boilerplate
 		{"<cross-session-message from=\"uds:/s\">one-liner</cross-session-message>", "← ?: one-liner"},
 		{"<task-notification>\n<task-id>t</task-id>\n<summary>done it</summary>\n</task-notification>", "done it"},
 		{"", ""},
@@ -189,15 +201,37 @@ func TestPromptLine(t *testing.T) {
 	}
 }
 
-func TestDone(t *testing.T) {
+// Effective status follows ccmux 1.4.3 getEffectiveStatus.
+func TestEffectiveStatus(t *testing.T) {
+	sub := func(st string) []ccmux.Subagent { return []ccmux.Subagent{{AgentID: "x", Status: st}} }
 	raw := []ccmux.Session{
-		{ID: "a", Status: "idle", AttentionState: []byte(`{"kind":"stop"}`)},
-		{ID: "b", Status: "working", AttentionState: []byte(`"x"`)},
-		{ID: "c", Status: "idle", AttentionState: []byte(`null`)},
+		{ID: "done-unread", Status: "idle", AttentionState: "unread"},
+		{ID: "done-read", Status: "idle", AttentionState: "read"},
+		{ID: "idle", Status: "idle"},
+		{ID: "idle+agent working", Status: "idle", AttentionState: "unread", Subagents: sub("working")},
+		{ID: "idle+agent waiting", Status: "idle", Subagents: sub("waiting")},
+		{ID: "idle+agent finished", Status: "idle", AttentionState: "unread", Subagents: sub("idle")},
+		{ID: "working+agent", Status: "working", Subagents: sub("working")},
+		{ID: "waiting", Status: "waiting", AttentionState: "unread"},
 	}
-	ss := poller(t, raw).Sessions()
-	if !ss[0].Done || ss[1].Done || ss[2].Done {
-		t.Errorf("Done = %v %v %v, want true false false", ss[0].Done, ss[1].Done, ss[2].Done)
+	want := map[string]struct {
+		status       string
+		agents, done bool
+	}{
+		"done-unread":         {"idle", false, true},
+		"done-read":           {"idle", false, true},
+		"idle":                {"idle", false, false},
+		"idle+agent working":  {"working", true, false},
+		"idle+agent waiting":  {"working", true, false},
+		"idle+agent finished": {"idle", false, true},
+		"working+agent":       {"working", false, false},
+		"waiting":             {"waiting", false, false},
+	}
+	for _, s := range poller(t, raw).Sessions() {
+		w := want[s.ID]
+		if s.Status != w.status || s.AgentsWorking != w.agents || s.Done != w.done {
+			t.Errorf("%s: status %s agents %v done %v, want %s %v %v", s.ID, s.Status, s.AgentsWorking, s.Done, w.status, w.agents, w.done)
+		}
 	}
 }
 

@@ -25,20 +25,21 @@ const (
 // Colors: ANSI slots match claude-hud's segments, so they follow the terminal theme like the HUD does;
 // hex values are ccmux's picker palette and claude-hud's context bar.
 var (
-	cName    = lipgloss.Color("5")  // claude-hud session name (35)
-	cModel   = lipgloss.Color("14") // hud model segment
-	cEffort  = lipgloss.Color("13")
-	cDir     = lipgloss.Color("11") // hud directory icon
-	cBranch  = lipgloss.Color("12") // hud git segment
-	cMuted   = lipgloss.Color("#6272a4")
-	cWorking = lipgloss.Color("#ffb86c")
-	cDone    = lipgloss.Color("#50fa7b")
-	cRed     = lipgloss.Color("#ff6188")
-	cDim     = lipgloss.Color("#585b70")
-	cGreen   = lipgloss.Color("#a6e3a1")
-	cYellow  = lipgloss.Color("#f9e2af")
-	cFocus   = lipgloss.Color("#f8f8f2")
-	cOff     = lipgloss.Color("#3b3d4d") // disabled footer keys (ccmux's separator color)
+	cName       = lipgloss.Color("5")  // claude-hud session name (35)
+	cModel      = lipgloss.Color("14") // hud model segment
+	cEffort     = lipgloss.Color("13")
+	cDir        = lipgloss.Color("11") // hud directory icon
+	cBranch     = lipgloss.Color("12") // hud git segment
+	cMuted      = lipgloss.Color("#6272a4")
+	cWorking    = lipgloss.Color("#ffb86c")
+	cDone       = lipgloss.Color("#50fa7b")
+	cRed        = lipgloss.Color("#ff6188")
+	cAlertFocus = lipgloss.Color("#ffb3c4") // focused card that needs attention: red, but brighter
+	cDim        = lipgloss.Color("#585b70")
+	cGreen      = lipgloss.Color("#a6e3a1")
+	cYellow     = lipgloss.Color("#f9e2af")
+	cFocus      = lipgloss.Color("#f8f8f2")
+	cOff        = lipgloss.Color("#3b3d4d") // disabled footer keys (ccmux's separator color)
 )
 
 func fg(c lipgloss.Color, s string) string { return lipgloss.NewStyle().Foreground(c).Render(s) }
@@ -157,7 +158,7 @@ func card(s store.Session, w, h int, focused bool, frame int, now time.Time) str
 	alert := s.Attention != "" || s.Status == "waiting"
 	switch {
 	case alert && focused:
-		border = lipgloss.Color("#ffb3c4")
+		border = cAlertFocus
 	case alert:
 		border = cRed
 	case focused:
@@ -211,7 +212,7 @@ func line2(s store.Session, w int) string {
 		st = fg(cWorking, "⏵ working")
 		if s.PendingTool != "" {
 			st += fg(cMuted, " · "+s.PendingTool)
-		} else if len(s.Subagents) > 0 {
+		} else if s.AgentsWorking {
 			st += fg(cMuted, " · agents")
 		}
 	case s.Status == "waiting":
@@ -348,6 +349,7 @@ func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, 
 		vis = append(vis, "")
 	}
 	out := append([]string{top}, vis...)
-	out = append(out, ansi.Truncate(msg, w, "…"), footer(noPane, w))
+	// ccmux stderr is often multi-line; one line keeps the screen exactly h tall
+	out = append(out, ansi.Truncate(firstLine(msg), w, "…"), footer(noPane, w))
 	return strings.Join(out, "\n"), rects, off
 }

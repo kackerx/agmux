@@ -15,26 +15,26 @@ import (
 // Session is one entry of `ccmux show --json`, only the fields agmux reads.
 // JSON nulls decode to "" / zero time.
 type Session struct {
-	ID               string          `json:"id"`
-	Summary          string          `json:"summary"`
-	Project          string          `json:"project"`
-	AgentType        string          `json:"agentType"`
-	CWD              string          `json:"cwd"`
-	MainRepoRoot     string          `json:"mainRepoRoot"`
-	GitBranch        string          `json:"gitBranch"`
-	Status           string          `json:"status"`
-	AttentionType    string          `json:"attentionType"`
-	AttentionState   json.RawMessage `json:"attentionState"` // only null seen so far; shape unknown, so kept raw
-	LastPrompt       string          `json:"lastPrompt"`
-	PendingTool      string          `json:"pendingTool"`
-	TmuxPane         string          `json:"tmuxPane"`
-	TrackingMode     string          `json:"trackingMode"`
-	Subagents        []Subagent      `json:"subagents"`
-	NativeSessionID  string          `json:"nativeSessionId"`
-	LogPath          string          `json:"logPath"`
-	LastActivityAt   time.Time       `json:"lastActivityAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
-	BackgroundDetail string          `json:"backgroundDetail"`
+	ID               string     `json:"id"`
+	Summary          string     `json:"summary"`
+	Project          string     `json:"project"`
+	AgentType        string     `json:"agentType"`
+	CWD              string     `json:"cwd"`
+	MainRepoRoot     string     `json:"mainRepoRoot"`
+	GitBranch        string     `json:"gitBranch"`
+	Status           string     `json:"status"`
+	AttentionType    string     `json:"attentionType"`
+	AttentionState   string     `json:"attentionState"` // "unread" / "read" / null
+	LastPrompt       string     `json:"lastPrompt"`
+	PendingTool      string     `json:"pendingTool"`
+	TmuxPane         string     `json:"tmuxPane"`
+	TrackingMode     string     `json:"trackingMode"`
+	Subagents        []Subagent `json:"subagents"`
+	NativeSessionID  string     `json:"nativeSessionId"`
+	LogPath          string     `json:"logPath"`
+	LastActivityAt   time.Time  `json:"lastActivityAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+	BackgroundDetail string     `json:"backgroundDetail"`
 }
 
 type Subagent struct {

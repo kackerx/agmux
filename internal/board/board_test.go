@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
+	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/store"
 )
@@ -103,33 +104,101 @@ func TestScrollKeepsFocusVisible(t *testing.T) {
 
 func TestCardStatus(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
-	base := store.Session{ID: "a", Name: "n", Status: "working", PendingTool: "Bash", ContextPct: -1}
+	base := store.Session{ID: "a", Name: "n", AgentType: "claude", AvatarID: "bot-01", ContextPct: -1}
 	cases := []struct {
-		name string
-		mod  func(*store.Session)
-		want string
+		name  string
+		mod   func(*store.Session)
+		head  string         // status text, exactly as colored
+		color lipgloss.Color // its color
+		tail  string         // what follows it (plain)
+		mood  avatar.Mood
+		alert bool
 	}{
-		{"working tool", func(s *store.Session) {}, "⏵ working · Bash"},
-		{"working agents", func(s *store.Session) { s.PendingTool = ""; s.Subagents = make([]ccmux.Subagent, 2) }, "⏵ working · agents  ⚇ 2 agents"},
-		{"idle", func(s *store.Session) { s.Status = "idle" }, "⏸ idle"},
-		{"done", func(s *store.Session) { s.Status = "idle"; s.Done = true }, "● done"},
-		{"waiting", func(s *store.Session) { s.Status = "waiting" }, "⏳ waiting"},
+		{"waiting", func(s *store.Session) { s.Status = "waiting" }, "⏳ waiting", cRed, "", avatar.Alert, true},
+		{"attention", func(s *store.Session) { s.Status = "idle"; s.Attention = "permission" }, "⏸ idle", cMuted, "", avatar.Alert, true},
+		{"attention beats working", func(s *store.Session) { s.Status = "working"; s.Attention = "permission" }, "⏵ working", cWorking, "", avatar.Alert, true},
+		{"working + tool", func(s *store.Session) {
+			s.Status = "working"
+			s.PendingTool = "Bash"
+			s.Subagents = make([]ccmux.Subagent, 1)
+		}, "⏵ working", cWorking, " · Bash  ⚇ 1 agent", avatar.Scan, false},
+		{"raw working + agents: no 'agents'", func(s *store.Session) { s.Status = "working"; s.Subagents = make([]ccmux.Subagent, 2) }, "⏵ working", cWorking, "  ⚇ 2 agents", avatar.Scan, false},
+		{"working because of agents", func(s *store.Session) {
+			s.Status = "working"
+			s.AgentsWorking = true
+			s.Subagents = make([]ccmux.Subagent, 1)
+		}, "⏵ working", cWorking, " · agents  ⚇ 1 agent", avatar.Scan, false},
+		{"done", func(s *store.Session) { s.Status = "idle"; s.Done = true }, "● done", cDone, "", avatar.Normal, false},
+		{"idle", func(s *store.Session) { s.Status = "idle" }, "⏸ idle", cMuted, "", avatar.Dim, false},
 	}
+	sp, _ := avatar.ByID("bot-01")
 	for _, c := range cases {
 		s := base
 		c.mod(&s)
-		if got := ansi.Strip(line2(s, 60)); !strings.HasPrefix(got, c.want) {
-			t.Errorf("%s: %q", c.name, got)
+		l2 := line2(s, 60)
+		if !strings.Contains(l2, fg(c.color, c.head)) || !strings.HasPrefix(ansi.Strip(l2), c.head+c.tail+" ") {
+			t.Errorf("%s: line 2 %q, want %q in %s then %q", c.name, ansi.Strip(l2), c.head, c.color, c.tail)
+		}
+		for f := range 2 { // moods differ on different frames: Alert on even, Scan on odd
+			cd := card(s, 60, 5, false, f, now)
+			for i, l := range strings.Split(avatar.Render(sp, "claude", c.mood, f), "\n") {
+				if !strings.Contains(cd, l) {
+					t.Errorf("%s frame %d: eyes line %d are not mood %d", c.name, f, i, c.mood)
+				}
+			}
+		}
+		border := map[[2]bool]lipgloss.Color{{false, false}: cDim, {false, true}: cFocus, {true, false}: cRed, {true, true}: cAlertFocus} // [alert, focused]
+		for _, focused := range []bool{false, true} {
+			want, _, _ := strings.Cut(fg(border[[2]bool{c.alert, focused}], "╭"), "╭")
+			if !strings.Contains(card(s, 60, 5, focused, 0, now), want+"╭") {
+				t.Errorf("%s focused=%v: border color wrong", c.name, focused)
+			}
 		}
 	}
-	red := "38;2;255;97;136m╭"
-	if !strings.Contains(card(store.Session{Status: "waiting"}, 60, 5, false, 0, now), red) ||
-		!strings.Contains(card(store.Session{Status: "idle", Attention: "permission"}, 60, 5, false, 0, now), red) ||
-		strings.Contains(card(store.Session{Status: "idle"}, 60, 5, false, 0, now), red) {
-		t.Error("border must be red exactly when attentionType is set or status is waiting")
+}
+
+func TestCardLines(t *testing.T) {
+	s := store.Session{Name: "qa-acceptance-pap-be-dev", Branch: "feature/qa-acceptance-pap", LastActivity: now.Add(-3 * time.Minute), ContextPct: -1}
+	for _, c := range []struct {
+		w            int
+		branch       string // "" = must not show
+		branchCutOff bool
+	}{{60, "⑂ feature/qa-acceptance-pap", false}, {40, "⑂ feat", true}, {30, "", false}} {
+		l := ansi.Strip(line1(s, c.w, now))
+		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, s.Name+" ") || !strings.HasSuffix(l, " 3m") {
+			t.Errorf("w=%d line 1 %q: want full name first, 3m last, width %d", c.w, l, c.w)
+		}
+		switch {
+		case c.branch == "" && strings.Contains(l, "⑂"):
+			t.Errorf("w=%d: branch should give way: %q", c.w, l)
+		case c.branch != "" && (!strings.Contains(l, c.branch) || strings.Contains(l, "…") != c.branchCutOff):
+			t.Errorf("w=%d: want %q (cut=%v) in %q", c.w, c.branch, c.branchCutOff, l)
+		}
 	}
-	if card(base, 60, 5, true, 0, now) == card(base, 60, 5, false, 0, now) {
-		t.Error("focused card must look different")
+
+	for _, c := range []struct {
+		model, effort, want string
+	}{{"claude-opus-5-5", "high", "Opus 5.5 · high"}, {"claude-opus-5-5", "", "Opus 5.5"}, {"", "high", ""}} {
+		l := ansi.Strip(line3(store.Session{Detail: "hello", Model: c.model, Effort: c.effort}, 50))
+		if ansi.StringWidth(l) != 50 || !strings.HasPrefix(l, "󰭻 hello") || !strings.HasSuffix(l, " "+c.want) || (c.want == "" && strings.TrimSpace(l) != "󰭻 hello") {
+			t.Errorf("line 3 %q: want %q flush right", l, c.want)
+		}
+	}
+
+	for n, want := range map[int]string{0: "", 1: "⚙ 1 shell ", 2: "⚙ 2 shells"} {
+		l := ansi.Strip(line2(store.Session{Status: "idle", Shells: n, ContextPct: -1}, 60))
+		if (want == "") == strings.Contains(l, "⚙") || !strings.Contains(l, want) {
+			t.Errorf("Shells=%d: %q, want %q", n, l, want)
+		}
+	}
+}
+
+func TestMultilineMessage(t *testing.T) {
+	ss := fixture(t)
+	out, _, _ := view(ss, 120, 30, "", 0, now, "ccmux kill x: boom\n  at stack\n  at more", false)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 30 || !strings.HasPrefix(ansi.Strip(lines[0]), " agmux") || !strings.Contains(out, "boom") || strings.Contains(out, "at stack") {
+		t.Errorf("multi-line message: %d lines (want 30), top bar %q", len(lines), ansi.Strip(lines[0]))
 	}
 }
 
