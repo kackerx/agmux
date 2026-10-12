@@ -1,0 +1,181 @@
+// Package store holds the sessions agmux shows: ccmux polled every 2s,
+// merged with the HUD state file and the jsonl model fallback.
+package store
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"math"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/kackerx/agmux/internal/ccmux"
+	"github.com/kackerx/agmux/internal/xdg"
+)
+
+type Subagent = ccmux.Subagent
+
+type Session struct {
+	ID, Name, AgentType, CWD, GroupKey, Branch string
+	Status, Attention, PendingTool, TmuxPane   string
+	Model, Effort                              string
+	ContextPct                                 int // <0 = unknown
+	Subagents                                  []Subagent
+	Shells                                     int // always 0 in S1
+	AvatarID                                   string
+	LastActivity                               time.Time
+}
+
+type Store interface {
+	Sessions() []Session
+}
+
+// groupKey decides which column a session lands in; change only this to regroup.
+func groupKey(s Session) string { return s.CWD }
+
+const PollInterval = 2 * time.Second
+
+// Poller is the in-memory Store.
+type Poller struct {
+	Show     func() ([]ccmux.Session, error)
+	StateDir string // where HUD files <nativeSessionId>.json live
+
+	mu       sync.Mutex
+	sessions []Session
+	err      error
+}
+
+func NewPoller() *Poller {
+	return &Poller{Show: ccmux.Show, StateDir: xdg.StateDir()}
+}
+
+func (p *Poller) Sessions() []Session {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.sessions
+}
+
+// Err is the last poll's error; the previous sessions are kept when it fails.
+func (p *Poller) Err() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.err
+}
+
+// Refresh polls ccmux once.
+func (p *Poller) Refresh() error {
+	raw, err := p.Show()
+	var ss []Session
+	if err == nil {
+		ss = make([]Session, len(raw))
+		for i, r := range raw {
+			ss[i] = p.convert(r)
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.err = err
+	if err == nil {
+		p.sessions = ss
+	}
+	return err
+}
+
+// Run refreshes every PollInterval until ctx is done.
+func (p *Poller) Run(ctx context.Context) {
+	t := time.NewTicker(PollInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			p.Refresh()
+		}
+	}
+}
+
+func (p *Poller) convert(r ccmux.Session) Session {
+	s := Session{
+		ID: r.ID, Name: r.Summary, AgentType: r.AgentType, CWD: r.CWD, Branch: r.GitBranch,
+		Status: r.Status, Attention: r.AttentionType, PendingTool: r.PendingTool, TmuxPane: r.TmuxPane,
+		ContextPct: -1, Subagents: r.Subagents, LastActivity: r.LastActivityAt,
+	}
+	if s.Name == "" {
+		s.Name = r.Project
+	}
+	s.GroupKey = groupKey(s)
+	if r.NativeSessionID != "" {
+		s.ContextPct = hudContextPct(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
+	}
+	if r.LogPath != "" {
+		s.Model = lastModel(r.LogPath)
+	}
+	return s
+}
+
+// hudContextPct reads context_window.used_percentage from a claude-hud payload.
+// Missing or unparsable file = unknown (-1), never an error.
+// ponytail: model / effort / session_name are not read until a real payload confirms their names.
+func hudContextPct(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return -1
+	}
+	var hud struct {
+		ContextWindow struct {
+			UsedPercentage *float64 `json:"used_percentage"`
+		} `json:"context_window"`
+	}
+	if json.Unmarshal(data, &hud) != nil || hud.ContextWindow.UsedPercentage == nil {
+		return -1
+	}
+	return int(math.Round(*hud.ContextWindow.UsedPercentage))
+}
+
+const tailBytes = 64 << 10
+
+// lastModel returns message.model of the last assistant entry in the final
+// 64KB of a jsonl transcript (files reach 16MB, so never read it whole).
+// ponytail: an assistant line longer than 64KB is missed; widen tailBytes if models show blank.
+func lastModel(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	off := max(fi.Size()-tailBytes, 0)
+	buf, err := io.ReadAll(io.NewSectionReader(f, off, fi.Size()-off))
+	if err != nil {
+		return ""
+	}
+	lines := bytes.Split(buf, []byte("\n"))
+	if off > 0 {
+		lines = lines[1:] // first line is cut mid-way
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !bytes.Contains(lines[i], []byte(`"type":"assistant"`)) {
+			continue
+		}
+		var e struct {
+			Type    string `json:"type"`
+			Message struct {
+				Model string `json:"model"`
+			} `json:"message"`
+		}
+		// the substring can also appear inside tool output; check the real top-level type.
+		// "<synthetic>" marks Claude Code's locally made messages (API errors etc.), not a model.
+		if json.Unmarshal(lines[i], &e) == nil && e.Type == "assistant" && e.Message.Model != "" && e.Message.Model != "<synthetic>" {
+			return e.Message.Model
+		}
+	}
+	return ""
+}
