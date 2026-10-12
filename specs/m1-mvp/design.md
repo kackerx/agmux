@@ -28,7 +28,7 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 不从 jsonl 推算上下文百分比（各模型窗口大小不同，算不准）；B 没接上时百分比显示 `--`，进度条全空。
 
 ## 头像
-- `internal/avatar`：一组手绘 sprite，**4 像素宽 × 4 像素高**（半块字符渲染成 4 列 × 2 行；M1 的 6×6 版用户嫌喧宾夺主，M1 验收改版改小），每个有 `ID`（如 `bot-01`）和 `Name`。6 个，像素风。底边一行像素是 agentType 色带（claude #ffb86c、codex #50fa7b、其它 #6272a4）。
+- `internal/avatar`：一组手绘 sprite，**6 像素宽 × 4 像素高**（半块字符渲染成 6 列 × 2 行；第二轮验收：4×4 太小，且要和上下文条同宽；M1 的 6×6 版用户嫌喧宾夺主，M1 验收改版改小），每个有 `ID`（如 `bot-01`）和 `Name`。6 个，像素风。底边一行像素是 agentType 色带（claude #ffb86c、codex #50fa7b、其它 #6272a4）。
 - agent 图标放在名字前面，和色带同色：claude  U+EC82（nf-cod-claude）、codex  U+EC81（nf-cod-openai）、其它  U+EC20（nf-cod-robot）。Nerd Fonts 3.5 起才有前两个，用户的 Maple Mono NF CN 已核实有。
 - 分配：`Bindings` 接口 `Get(sessionID) (id string, ok bool)` / `Set(sessionID, id)`，M1 实现存 `$XDG_STATE_HOME/agmux/avatars.json`；没绑定时按会话 ID 的 hash 取模默认分配。M1 不做选头像 UI。
 - 眼睛表达状态，优先级从高到低：需要处理（`attentionType` 非空或 status waiting）闪红 → working 扫动 → done 正常 → idle 变暗。
@@ -52,17 +52,17 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 - 卡片 = 列宽 × 5 行（边框 2 + 正文 3），圆角边框（44 列示例）：
 ```
 ╭──────────────────────────────────────────╮
-│ ▄▀▀▄   mods-tmux            ⏸ idle  2h │   头像 4×4（4 列 × 2 行）· agent 图标 · 名（洋红）· 状态 · 上次活动相对时间
-│ ▀▄▄▀  ⑂ master              Opus 5.5·hi │   分支（橙红，可截断）· 模型（青）·effort（紫），靠右
-│ ■■■■□□□□□□ 41%     ⚇ 2 agents  ⚙ 1 shell │   上下文条顶在头像下面 · 子 agent 数 · 后台 shell 数
+│ ▄▀▀▀▀▄   mods-tmux          ⏸ idle  2h │   头像 6×4（6 列 × 2 行）· agent 图标 · 名（洋红）· 状态 · 上次活动相对时间
+│ ▀▄▄▄▄▀  ⑂ master            Opus 5.5·hi │   分支（橙红，可截断）· 模型（青）·effort（紫），靠右
+│ ■■■□□□ 41%         ⚇ 2 agents  ⚙ 1 shell │   上下文条 6 格顶在头像下面 · 子 agent 数 · 后台 shell 数
 ╰──────────────────────────────────────────╯
 ```
 - 窄时让位顺序：先截分支，再截名字；状态和时间永远在。
 - 字段颜色和用户的 claude-hud 段一一对应：名洋红、模型青、effort 紫、目录黄、分支橙红。
-- 状态，照 ccmux 1.4.3 的 `getEffectiveStatus` 换算后再显示：原始 idle 且有子 agent 在 working / waiting → `⏵ working · agents`（不算 done，眼睛扫动）；原始 working → `⏵ working`，有 pendingTool 接 pendingTool，不接 agents；`⏸ idle` 蓝灰；`● done` 绿 = 原始 idle、无子 agent 在跑、`attentionState` 非空（"unread" 或 "read" 都算，ccmux 同样）；`⏳ waiting` 红 = status waiting（含 plan_approval，不像 ccmux 那样用青色）。**边框色 = 状态色**（working 橙、done 绿、idle 暗灰 #585b70、需要处理 / waiting 红）。焦点卡片保持状态色、换成粗线边框（lipgloss ThickBorder），不再用白色盖掉状态色。不单独拎出需要处理的会话。
+- 状态，照 ccmux 1.4.3 的 `getEffectiveStatus` 换算后再显示：原始 idle 且有子 agent 在 working / waiting → `⏵ working · agents`（不算 done，眼睛扫动）；原始 working → `⏵ working`，有 pendingTool 接 pendingTool，不接 agents；`⏸ idle` 蓝灰；`● done` 绿 = 原始 idle、无子 agent 在跑、`attentionState` 非空（"unread" 或 "read" 都算，ccmux 同样）；`⏳ waiting` 红 = status waiting（含 plan_approval，不像 ccmux 那样用青色）。**边框色 = 状态色**（working 橙、done 绿、idle 暗灰 #585b70、需要处理 / waiting 红）。焦点卡片边框换成 **#ff8ebe** 粗线（lipgloss ThickBorder），盖掉状态色——第二轮验收：只换粗线看不出焦点在哪。不单独拎出需要处理的会话。
 - 换算放在 store 里做一次，view 只读结果。
 - 底栏或消息行的错误只取第一行（ccmux 的 stderr 常是多行），总行数永远等于终端高度。
-- 上下文条：■（U+25A0）10 格，空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 10 格全暗 + `--`。格数四舍五入（29% → 3 格，数字仍显示截断后的 29）。
+- 上下文条：■（U+25A0）**6 格**，和头像同宽、顶在头像正下方；百分比数字跟在后面。空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 10 格全暗 + `--`。格数四舍五入到 6 格（29% → 2 格，数字仍显示截断后的 29）。
 - 最近 prompt 那一行 M1 验收改版去掉（初版曾有，用户嫌挤；`lastPrompt` / `backgroundDetail` 的取行代码一并删，M2 的预览窗口另起）。
 - 子 agent / shell 为 0 时该段不显示。
 - PR 号（`branchPRs`）M1 不显示：真机全是 null / []，看到真实元素再接。
