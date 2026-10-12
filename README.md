@@ -57,7 +57,11 @@ tmux set-environment -h -t "$target" AGMUX_CLIENT "$(tmux display -p "#{client_n
 
 - 要 `-h`：普通 session 变量会被之后新开的 pane 继承成进程环境变量，而进程环境优先，就会用到过时的 client。
 - 要双引号：这行通常写在 `run-shell '…'` 里，单引号会让整个绑定语法错。
-- 从另一个浮窗跳过来的分支不能用 `#{client_name}`（那是浮窗内部的 client），要把当前浮窗 session 隐藏环境里的值抄过去。
+- 从另一个浮窗跳过来的分支不能用 `#{client_name}`（那是浮窗内部的 client），要把当前浮窗 session 隐藏环境里的值抄过去：
+
+  ```sh
+  tmux set-environment -h -t "$target" AGMUX_CLIENT "$(tmux show-environment -h -t "$current" AGMUX_CLIENT | cut -d= -f2-)"
+  ```
 - agmux 只认还 attach 着、且不在看板自己 session 里的 client；不符合就当没设，按最近活动猜。
 
 只有拿到了 `AGMUX_CLIENT`（进程环境或 session 环境），跳转后 agmux 才会把浮窗里的那个 client detach 掉、浮窗随之关闭；拿不到就只切换，浮窗留着。
