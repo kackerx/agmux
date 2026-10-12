@@ -37,32 +37,43 @@ type Session struct {
 - 角色、通信边、Postgres 持久化：S1 不加字段，但 `Session` 和 `Store` 是以后唯一要改的地方。
 - `Store` 接口：`Sessions() []Session`，S1 实现 = 轮询 A + 合并 B/C 的内存实现。
 
-## 头像
-- `internal/avatar`：一组手绘 sprite（8 像素宽 × 6 像素高 = 8 列 × 3 行），每个有 `ID`（如 `bot-01`）和 `Name`。S1 先画 6 个，像素风，参考 Claude Code 吉祥物。
+## 头像【定 6×6】
+- `internal/avatar`：一组手绘 sprite，6 像素宽 × 6 像素高（半块字符渲染成 6 列 × 3 行，接近正方形），每个有 `ID`（如 `bot-01`）和 `Name`。S1 先画 6 个，像素风，参考 Claude Code 吉祥物。底边一条色带按 agentType 区分（claude 橙、codex 绿、其它灰）。
 - 分配：`Bindings` 接口 `Get(sessionID) (id string, ok bool)` / `Set(sessionID, id)`，S1 实现存 `$XDG_STATE_HOME/agmux/avatars.json`；没绑定时按会话 ID 的 hash 取模默认分配。S1 不做选头像 UI。
 - 眼睛表达状态：working 时每帧左右扫动；需要处理（`attentionType` 非空）时闪红；idle 时变暗。
 
-## 布局与卡片
-- 列 = GroupKey（cwd）。列宽固定 44 列（卡片 42 + 边距）；按终端宽度算每行能放几列，放不下折到下一行，不横向滚动。列标题是 cwd 的最后一段（~ 开头的短路径）。
-- 卡片 42 列 × 6 行，圆角边框，颜色与 claude-hud 一致（段分隔 ` | ` 灰 #585b70，Nerd Font 图标）：
+## 布局与卡片【定】
 ```
-╭────────────────────────────────────────╮
-│ ▀▄▀▄▀▄▀▄ qa-acceptance-pap-be-dev ● 1m │   名字（洋红）· 状态点 · 上次活动相对时间
-│ ▄▀▄▀▄▀▄▀  ⏵ working · Bash  ■■■■□□□□ 41% │   状态 + pendingTool · 上下文条
-│ ▀▄▀▄▀▄▀▄  ⑂ feature/qa-acc…  Opus·high │   分支 · 模型·effort
-│  cc       ⚙ 1 shell ⚇ 2 agents [⇄ 交接] │   agentType 缩写 · shell 数 · subagent 数 · 交接按钮
-╰────────────────────────────────────────╯
+ agmux · 13 sessions                                                          ← 顶栏：总数（右侧预留给 5h 限额，S1 不显示）
+ ▾ ~/.config (2)               ▾ ~/ProjectsFolder/…/rename-flag (3)    ▾ ~/proj/shopcart-dsl (1)
+ ╭─ card ─╮                    ╭─ card ─╮                              ╭─ card ─╮
+ ╭─ card ─╮                    ╭─ card ─╮
+                               ╭─ card ─╮
+ ▾ ~/proj/sqlmux (5)           ▾ ~/proj/sqlmux-e2e (1)
+ …
+ j/k 卡片 · h/l 跨列 · enter 跳转 · H 交接 · s 发送 · r 重启 · x 杀 · d review · q 退出   ← 底栏，ccmux 同款
 ```
+- 列 = GroupKey（cwd）。列最小宽 56，列数 = 终端宽度能放几个 56（含 2 列间距），各列均分撑满；放不下的组折到下一行，不横向滚动。组内卡片竖排。
+- 列标题沿用 ccmux：`▾ ~/缩写路径 (n)`，黄色（HUD 目录段同色），超宽时中间用 … 截断。
+- 卡片 = 列宽 × 5 行（边框 2 + 正文 3），圆角边框：
+```
+╭──────────────────────────────────────────────────────────╮
+│ ▄▀▀▀▀▄  qa-acceptance-pap-be-dev    ⑂ feature/qa-acc…  1m │   名（洋红）· 分支（橙红，可截断）· 上次活动相对时间
+│ █▀██▀█  ⏵ working · Bash   ⚇ 2 agents ⚙ 1 shell  ■■■■□□□□□□ 41% │   状态 · 子 agent 数 · 后台 shell 数 · 上下文条
+│ ▀▄▄▄▄▀  󰭻 把 T3 的折行修了…              Opus 5.5 · high │   最近 prompt / backgroundDetail（灰，截断）· 模型（青）· effort（紫）
+╰──────────────────────────────────────────────────────────╯
+```
+- 字段颜色和 ~/.config/bin/claude-hud 的段一一对应：名洋红、模型青、effort 紫、目录黄、分支橙红。
+- 状态：`⏵ working` 橙、`⏸ idle` 蓝灰、`● done` 绿（ccmux 配色）；`attentionType` 非空时整张卡边框红。焦点卡片边框变亮。不单独拎出需要处理的会话。
 - 上下文条：■（U+25A0）10 格，空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 10 格全暗 + `--`。
-- 状态色（点 + 边框）：working 绿、idle 暗灰、需要处理（attentionType 非空）红且边框变红。不单独拎出需要处理的会话。
-- 超长文本按列宽截断加 …。
-- 名字取 `summary`，null 时取 `project`。
+- 第 3 行左边：`lastPrompt`，background 模式用 `backgroundDetail`；只取第一行、去掉 `<cross-session-message …>` 这类标签后截断。子 agent / shell 为 0 时该段不显示。PR 号（`branchPRs`）有则放在分支后面。
+- 卡片里不画按钮；所有操作走底栏键位。鼠标：点卡片 = 选中，再点 = 跳转。
 - 紧凑变体（3 行，给 S2 sidebar）：S1 不实现，但卡片渲染函数接受「高度」参数预留。
 
 ## 交互
 - 焦点卡片边框高亮；方向键 / hjkl 移动（j/k 列内，h/l 跨列），鼠标点卡片 = 选中。
 - enter 或双击 / 单击已选中的卡片：`ccmux switch <id>` 然后退出 TUI（popup 关掉才能看到目标 pane）。
-- `H` 或点 `[⇄ 交接]`：`ccmux send <id> /handoff`（agent 正在 working 时会排到下一轮，这是 ccmux 的行为）。
+- `H`：`ccmux send <id> /handoff`（agent 正在 working 时会排到下一轮，这是 ccmux 的行为）。
 - `r` = `ccmux restart <id>`，`x` = `ccmux kill <id>`（先 y/n 确认），`d` = `ccmux review <id>`，`s` = 提示输入一行后 `ccmux send <id> <text>`。
 - `q` / esc 退出。`ccmux` 子命令的 stderr 显示在底栏一行，不弹窗。
 - `tmuxPane` 为 null（background）的会话：switch / send 置灰，底栏提示。
