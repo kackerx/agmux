@@ -19,6 +19,12 @@ Claude Code 只在刷新状态栏时把带 `context_window.used_percentage` 的 
 - `agmux statusline [-- <原命令> [args…]]`：读完 stdin，原子写（tmp + rename）到 `$XDG_STATE_HOME/agmux/<session_id>.json`（session_id 取 payload 的 `session_id`，就是 ccmux 的 nativeSessionId），再把同一份 payload 喂给原命令的 stdin，透传它的 stdout 和退出码；没给原命令就什么都不输出、退出 0。写文件失败不影响透传（状态栏不能因为 agmux 挂掉）。
 - `agmux setup`：读 `~/.claude/settings.json` 的 `statusLine.command`，打印改动前后；`--write` 才真改（先备份到 `settings.json.bak`）：`X` → `agmux statusline -- X`；没有 statusLine 就设成 `agmux statusline`；已经是 agmux statusline 则不动。只改这一个键，其它内容原样保留。
 - agmux 读文件：`context_window.used_percentage`（`rate_limits` 下也有同名字段，别取错）、`model.display_name`、effort。百分比**截断**取整（29.6 → 29）。effort 的字段名要拿第一份真实 payload 核实，在那之前不读；model.display_name 同样先核实。
+- 细则：
+  - 原命令是 Claude Code 的 `statusLine.command`，本身是 shell 字符串。`agmux statusline -- X` 只认 `--` 后**一个**参数（多个就按空格拼起来），用 `sh -c X` 跑；setup 改写时把 X 用单引号包起来（内部 `'` 按 `'\''` 转义），这样管道、`$HOME` 这些都留给 agmux 里的那层 sh。
+  - stdin 不是 JSON 或没有 `session_id`：不写文件，照样透传，退出码跟原命令（没原命令则 0）。
+  - 原命令起不来：文件照写，stderr 一行 `agmux statusline: <错误>`，退出 127。
+  - `agmux setup` 输出固定三行：`statusLine.command:` / `  before: <原值，无则 (none)>` / `  after:  <新值>`，然后一行 `dry run: add --write to apply` 或 `written (backup: <路径>)`；已经是 agmux statusline 时输出 `already set: <值>` 退出 0。
+  - `--write`：settings.json 不存在 → 新建只含 statusLine 的文件；JSON 损坏或没写权限 → stderr 报错、退出 1、原文件不动。
 - 解析失败的文件按不存在处理；background 会话和非 Claude 的 agent 没有状态栏，永远 `--`。文件 S1 不清理。
 ### C. jsonl 兜底（只取模型）
 文件可达 16MB，不能整读：从末尾读最后 64KB，倒序找最后一条 `"type":"assistant"`，取 `message.model`。
