@@ -20,7 +20,10 @@
 ## 按键直通（回复）
 - `s` = 打开预览（没开就开）并切焦点进预览，直接打字就是回复；原来的一行输入提示去掉（`H` 交接仍是直接 send-keys，不进预览）。
 - `tab` 从卡片区进入预览；**离开用 `ctrl+]`**（审查指出 tab 是 Claude Code 的补全键，直通里要用；M3 配置项 `focus_preview` / `leave_preview`）。预览获焦时边框变 #ff8ebe，底栏换成「keys go to the pane · ctrl+] back to the cards」。
-- 直通目标锁定：进入直通时记下会话 ID 和 pane；每个按键转发前核对焦点仍是它、它还活着、pane 没变（用记下的 ID 比，不用 m.focus——轮询会把焦点退回第一张卡）。不满足就进入「锁定失效」态：**之后所有按键都吞掉**（不只是那一键——连发的文字会被拆成多条消息，还给看板就变成 r/x/d/f 命令），直到用户按 `ctrl+]` 或 esc 回到卡片；底栏红字 "session is gone · ctrl+] back to the cards"，预览边框恢复普通色；底栏 / 边框 / 按键分发共用同一个「直通有效」判断，不会出现屏幕显示直通而按键被当看板命令的情况。
+- 直通目标锁定：进入直通时记下会话 ID 和 pane；每个按键转发前核对三件事都成立：**当前焦点卡 == 记下的会话 ID**（轮询把焦点退回第一张卡、或会话挪进折叠组时，焦点就不再是它）、它还活着、pane 没变。目标 = 记下的 ID/pane，不是 m.focus；但 m.focus 偏离了记下的 ID 同样算失效——预览显示谁，键就只能发给谁。不满足就进入「锁定失效」态：**之后所有按键都吞掉**（不只是那一键——连发的文字会被拆成多条消息，还给看板就变成 r/x/d/f 命令），直到用户按 `ctrl+]` 或 esc 回到卡片；底栏红字 "session is gone · ctrl+] back to the cards"，预览边框恢复普通色；底栏 / 边框 / 按键分发共用同一个「直通有效」判断，不会出现屏幕显示直通而按键被当看板命令的情况。
+- 空粘贴（Runes 为空）直接忽略，不调 tmux；`paste-buffer` 出错时补 `delete-buffer -b agmux`，不让旧文本留在 buffer 里被下一次粘进别的 pane。
+- 终端缩到 100 列以下导致预览关闭时，直通直接退出（回卡片，消息行 "preview closed: terminal too narrow"），不显示 "session is gone"。
+- 轮询导致焦点换卡时 scroll 同样归零。
 - 粘贴（bubbletea 的 Paste）走 `tmux load-buffer -b agmux -`（stdin 喂内容）+ `paste-buffer -p -d -b agmux -t <pane>`，保留 bracketed paste，多行不会被逐行提交（ccmux 发 prompt 也这么做）；单行打字仍 `send-keys -l --`。
 - tmux 把以 `;` 结尾的参数当命令分隔符（3.7c，`-l --` 之后也是）：文本末尾每个 `;` 去掉并追加一个 `\;` 参数；alt+; 发 `M-\;`。
 - 键名：tmux 只有 F1–F12，F13 以上忽略；ctrl+@ 单独处理成 `C-Space`，不在表里映射 `@`。
