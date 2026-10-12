@@ -542,10 +542,14 @@ const flashAlphabet = "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM"
 // its label is pressed; label is "" when there are no letters left for it.
 type flashMatch struct {
 	id      string
+	title   bool // in a group's path (its card's own hit, if any, is another match)
 	y, x, w int
 	text    string // the hit as drawn
 	label   string
 }
+
+// key tells a match from the others of the same card.
+func (f flashMatch) key() string { return fmt.Sprintf("%s/%v", f.id, f.title) }
 
 // cluster is a grapheme as drawn: its text, the column it starts at in its string, its width.
 type cluster struct {
@@ -588,7 +592,7 @@ func findAll(cs []cluster, pat []rune) []int {
 // the focused card first. A label is never the character after any hit (not only the ones taken),
 // or typing on would be taken for pressing it. off and bodyH are the window onto the body;
 // rects are the cards and folded titles as laid out for width cardsW.
-func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW int, now time.Time) []flashMatch {
+func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW int, now time.Time, prev []flashMatch) []flashMatch {
 	p := []rune(pat)
 	for i, r := range p {
 		p[i] = unicode.ToLower(r)
@@ -603,7 +607,7 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 	var ms []flashMatch
 	skip := map[rune]bool{}
 	found := false
-	scan := func(text string, x0, y int, id string) {
+	scan := func(text string, x0, y int, id string, title bool) {
 		if y < 0 || y >= bodyH {
 			return
 		}
@@ -619,7 +623,7 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 			}
 			found = true
 			last := cs[i+len(p)-1]
-			ms = append(ms, flashMatch{id: id, y: y, x: x0 + cs[i].x, w: last.x + last.w - cs[i].x, text: joinClusters(cs[i : i+len(p)])})
+			ms = append(ms, flashMatch{id: id, title: title, y: y, x: x0 + cs[i].x, w: last.x + last.w - cs[i].x, text: joinClusters(cs[i : i+len(p)])})
 		}
 	}
 	icon := ansi.StringWidth("\ue725 ")
@@ -627,7 +631,7 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 		count := fmt.Sprintf(" (%d)", len(g.sessions))
 		if hr, ok := at[headerID(g.key)]; ok { // folded: the title is the target
 			found = false
-			scan(midTrunc(tildePath(g.key), hr.w-2-len(count)), hr.x+2, hr.y-off, hr.id)
+			scan(midTrunc(tildePath(g.key), hr.w-2-len(count)), hr.x+2, hr.y-off, hr.id, true)
 			continue
 		}
 		for i, s := range g.sessions {
@@ -637,7 +641,7 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 			}
 			if i == 0 { // an open group's title: the first card is where it goes
 				found = false
-				scan(midTrunc(tildePath(g.key), r.w-2-len(count)), r.x+2, r.y-1-off, s.ID)
+				scan(midTrunc(tildePath(g.key), r.w-2-len(count)), r.x+2, r.y-1-off, s.ID, true)
 			}
 			tw := r.w - 4 - avatar.Width - 2
 			x0, y := r.x+2+avatar.Width+2, r.y-off
@@ -646,9 +650,9 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 			if t := relTime(s.LastActivity, now); t != "" {
 				rw = ansi.StringWidth(t) + 1
 			}
-			scan(ansi.Truncate(s.Name, max(tw-rw, 0), "…"), x0, y+1, s.ID)
+			scan(ansi.Truncate(s.Name, max(tw-rw, 0), "…"), x0, y+1, s.ID, false)
 			if s.Branch != "" {
-				scan(strings.TrimPrefix(ansi.Truncate("\ue725 "+s.Branch, tw, "…"), "\ue725 "), x0+icon, y+2, s.ID)
+				scan(strings.TrimPrefix(ansi.Truncate("\ue725 "+s.Branch, tw, "…"), "\ue725 "), x0+icon, y+2, s.ID, false)
 			}
 		}
 	}
@@ -663,15 +667,27 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 		}
 		return a.x - b.x
 	})
-	var labels []string
+	// a hit that was labelled before keeps its label if it may still have it (the cards moved or
+	// went, the pattern didn't): what was drawn is what stays pressable
+	used := map[string]bool{}
+	was := map[string]string{}
+	for _, p := range prev {
+		was[p.key()] = p.label
+	}
+	for i := range ms {
+		if l := was[ms[i].key()]; l != "" && !skip[unicode.ToLower([]rune(l)[0])] && !used[l] {
+			ms[i].label, used[l] = l, true
+		}
+	}
+	var free []string
 	for _, r := range flashAlphabet {
-		if !skip[unicode.ToLower(r)] {
-			labels = append(labels, string(r))
+		if l := string(r); !skip[unicode.ToLower(r)] && !used[l] {
+			free = append(free, l)
 		}
 	}
 	for i := range ms {
-		if i < len(labels) {
-			ms[i].label = labels[i]
+		if ms[i].label == "" && len(free) > 0 {
+			ms[i].label, free = free[0], free[1:]
 		}
 	}
 	return ms

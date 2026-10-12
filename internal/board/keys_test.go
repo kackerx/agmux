@@ -3197,3 +3197,130 @@ func TestBorderColor(t *testing.T) {
 		t.Error("the alert avatar keeps its mood")
 	}
 }
+
+// A poll moves the cards under a flash in progress: the hits are drawn where the cards are now, with the
+// labels they had, and pressing a label goes to the card it is drawn on.
+func TestFlashFollowsPoll(t *testing.T) {
+	trueColor(t)
+	src := &mutSrc{ss: slices.Clone([]store.Session(flashSrc))}
+	m := typed(t, psized(src, 232, 50), "sb")
+	h, _ := hitOf(m, "b1")
+	label := h.label
+	// a card that sorts before Bravo in its group pushes it down five rows
+	src.ss = append(src.ss, store.Session{ID: "b0", Name: "Aaa", GroupKey: "/h", CWD: "/h", ContextPct: -1, TmuxPane: "%9"})
+	plain := m
+	plain.mode = browsing
+	pl := strings.Split(ansi.Strip(plain.View()), "\n")
+	row := slices.IndexFunc(pl, func(l string) bool { return strings.Contains(l, "Bravo") })
+	if row == h.y+1 {
+		t.Fatalf("the poll moved nothing")
+	}
+	// drawn without waiting for a frame: the highlight and label are on Bravo's new row, none on the old
+	v := strings.Split(m.View(), "\n")
+	at := ansi.StringWidth(pl[row][:strings.Index(pl[row], "Bravo")]) // its column, not its byte
+	if !strings.Contains(v[row], matched("B")) || ansi.Cut(ansi.Strip(v[row]), at+1, at+2) != label {
+		t.Errorf("Bravo's row %d: %q", row, ansi.Strip(v[row]))
+	}
+	if strings.Contains(v[1+h.y], matched("B")) || strings.Contains(v[1+h.y], flashLabel(label)) {
+		t.Errorf("the old row %d still has them: %q", 1+h.y, ansi.Strip(v[1+h.y]))
+	}
+	// the next frame keeps what was read, and the label still names Bravo
+	tm, _ := m.Update(frameMsg{})
+	m = tm.(Model)
+	onScreen(t, m)
+	if h2, ok := hitOf(m, "b1"); !ok || h2.label != label || h2.y == h.y {
+		t.Errorf("after the frame: %+v (was %+v)", h2, h)
+	}
+	if m, _ = press(t, m, label); m.mode != browsing || m.focus != "b1" {
+		t.Errorf("the label goes to the card it is drawn on: focus %s mode %v", m.focus, m.mode)
+	}
+}
+
+// A label stays with its card unless a poll brings a card whose next character is that very letter:
+// then it is given another, and no two hits share one.
+func TestFlashLabelsFollowCards(t *testing.T) {
+	src := &mutSrc{ss: []store.Session(namesSrc("xq", "xw"))}
+	m := typed(t, psized(src, 232, 50), "sx")
+	if got := labelsOf(m); got != "n00=a n01=s" {
+		t.Fatalf("labels %q", got)
+	}
+	src.ss = append(slices.Clone(src.ss), store.Session{ID: "n02", Name: "xa", GroupKey: "/g", CWD: "/g", ContextPct: -1, TmuxPane: "%1"})
+	tm, _ := m.Update(frameMsg{})
+	m = tm.(Model)
+	seen := map[string]bool{}
+	for _, h := range m.flash.ms {
+		if h.label == "a" || h.label == "q" || h.label == "w" || seen[h.label] || h.label == "" {
+			t.Errorf("label %q: %s", h.label, labelsOf(m))
+		}
+		seen[h.label] = true
+	}
+	if h, _ := hitOf(m, "n01"); h.label != "s" { // untouched: it keeps its label
+		t.Errorf("n01 lost its label: %s", labelsOf(m))
+	}
+}
+
+// Real cards carry a time at the right of the name line, which narrows the name: a character cut off by
+// that must not be found.
+func TestFlashNameCutByTime(t *testing.T) {
+	m0 := psized(staticSrc{{ID: "x", Name: "a", GroupKey: "/g", CWD: "/g", ContextPct: -1}}, 60, 30)
+	now := m0.now()
+	act := now.Add(-3 * time.Hour)
+	_, colW := columns(m0.cardsW())
+	tw := colW - 4 - avatar.Width - 2
+	W := tw - (ansi.StringWidth(relTime(act, now)) + 1)
+	name := strings.Repeat("a", W-1) + "zzzzzzzz" // z starts right where the cut puts its ellipsis
+	m := psized(staticSrc{{ID: "x", Name: name, GroupKey: "/g", CWD: "/g", ContextPct: -1, LastActivity: act}}, 60, 30)
+	m = typed(t, m, "sz")
+	onScreen(t, m)
+	if len(m.flash.ms) != 0 {
+		t.Errorf("z is past the cut, yet hits %+v", m.flash.ms)
+	}
+}
+
+// An open group's title after a card that had a hit is searched too.
+func TestFlashOpenTitleAfterHit(t *testing.T) {
+	src := staticSrc{
+		{ID: "q1", Name: "qq", GroupKey: "/g1", CWD: "/g1", ContextPct: -1},
+		{ID: "z1", Name: "zz", GroupKey: "/q2", CWD: "/q2", ContextPct: -1},
+	}
+	m := typed(t, psized(src, 60, 40), "sq") // 60 columns: one column, /g1 above /q2
+	if _, ok := hitOf(m, "z1"); !ok {
+		t.Errorf("/q2's title holds q: hits %+v", m.flash.ms)
+	}
+}
+
+// The window starts one line below an open group's title: that title is off screen, no hit.
+func TestFlashTitleJustAbove(t *testing.T) {
+	var ss []store.Session
+	for i := range 10 {
+		ss = append(ss, store.Session{ID: fmt.Sprintf("x%02d", i), Name: fmt.Sprintf("n%02d", i), GroupKey: "/g", CWD: "/g", TmuxPane: "%1", Status: "idle", ContextPct: -1})
+	}
+	m := psized(staticSrc(ss), 60, 53) // bodyH 50; focus x09 → off 1: /g's title is line -1
+	for range 9 {
+		m, _ = press(t, m, "j")
+	}
+	m = typed(t, m, "sg")
+	for _, h := range m.flash.ms {
+		if h.y < 0 {
+			t.Errorf("hit off screen: %+v", h)
+		}
+	}
+	if top := strings.Split(ansi.Strip(m.View()), "\n")[0]; !strings.HasPrefix(top, " agmux") {
+		t.Errorf("top bar %q", top)
+	}
+}
+
+// The first card of an open group can have two hits (its group's path and its name): each keeps its own label.
+func TestFlashTwoHitsOneCardKeepLabels(t *testing.T) {
+	src := &mutSrc{ss: []store.Session{{ID: "q1", Name: "qq", GroupKey: "/q", CWD: "/q", ContextPct: -1, TmuxPane: "%1"},
+		{ID: "z1", Name: "zq", GroupKey: "/q", CWD: "/q", ContextPct: -1, TmuxPane: "%2"}}}
+	m := typed(t, psized(src, 232, 50), "sq")
+	before := labelsOf(m)
+	if strings.Count(before, "q1=") != 2 {
+		t.Fatalf("two hits on q1: %s", before)
+	}
+	tm, _ := m.Update(frameMsg{})
+	if after := labelsOf(tm.(Model)); after != before {
+		t.Errorf("labels moved: %s → %s", before, after)
+	}
+}

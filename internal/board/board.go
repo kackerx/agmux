@@ -150,10 +150,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.say(cMuted, "preview closed: terminal too narrow")
 		}
 		if m.mode == flashing { // the hits were read off the old size
-			m.flashScan()
+			m.flashFollow()
 		}
 	case frameMsg:
 		m.frame++
+		if m.mode == flashing { // polls move cards: the hits follow, as View draws them
+			m.flashFollow()
+		}
 		cmd := m.capture() // the preview refreshes on the 500ms frame; called first: it marks m.capturing
 		return m, tea.Batch(nextFrame(), cmd)
 	case previewMsg:
@@ -381,18 +384,14 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.flashScan()
 			}
 		case (k.Type == tea.KeyRunes || k.Type == tea.KeySpace) && !k.Alt && !k.Paste && len(k.Runes) == 1 && unicode.IsPrint(k.Runes[0]):
-			i := slices.IndexFunc(m.flash.ms, func(x flashMatch) bool { return x.label == string(k.Runes) })
-			if i < 0 {
-				m.flash.pat += string(k.Runes)
+			gone := m.flashFollow() // the board as it is now: what a label is pressed on
+			label := string(k.Runes)
+			if i := slices.IndexFunc(m.flash.ms, func(x flashMatch) bool { return x.label == label }); i >= 0 {
+				m.mode, m.focus, m.msg = browsing, m.flash.ms[i].id, ""
+			} else if !slices.ContainsFunc(gone, func(x flashMatch) bool { return x.label == label }) {
+				m.flash.pat += label // not a label: more of the pattern
 				m.flashScan()
-				break
-			}
-			id := m.flash.ms[i].id
-			gs, _, _, _ := m.current()
-			// a card gone since the label was drawn (a poll) is no target: ignored, still flashing
-			if slices.ContainsFunc(m.items(gs), func(ids []string) bool { return slices.Contains(ids, id) }) {
-				m.mode, m.focus, m.msg = browsing, id, ""
-			}
+			} // else the label of a hit whose card has gone since it was drawn: ignored, still flashing
 		}
 		return m, nil
 	case pickAvatar: // other keys do nothing while the list is open
@@ -427,12 +426,29 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.do(m.keymap[k.String()])
 }
 
-// flashScan reads the flash pattern off the board as it is now (see flashScan in view.go).
-func (m *Model) flashScan() {
+// flashRead reads the flash pattern off the board as it is now (see flashScan in view.go); prev are
+// the hits drawn before, whose labels stay where they can.
+func (m *Model) flashRead(prev []flashMatch) []flashMatch {
 	gs, _, _, _ := m.current()
 	_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.foldedNow(), nil)
 	bodyH := max(m.h-3, 1)
-	m.flash.ms = flashScan(gs, rects, m.focus, m.flash.pat, scrollOff(rects, m.focus, bodyH), bodyH, m.cardsW(), m.now())
+	return flashScan(gs, rects, m.focus, m.flash.pat, scrollOff(rects, m.focus, bodyH), bodyH, m.cardsW(), m.now(), prev)
+}
+
+// flashScan: the pattern changed, so the hits are read anew with new labels.
+func (m *Model) flashScan() { m.flash.ms = m.flashRead(nil) }
+
+// flashFollow reads the hits again for a board that moved under them (a poll, a resize), keeping
+// the labels, and says the ones drawn before whose cards are gone from it.
+func (m *Model) flashFollow() (gone []flashMatch) {
+	old := m.flash.ms
+	m.flash.ms = m.flashRead(old)
+	for _, o := range old {
+		if !slices.ContainsFunc(m.flash.ms, func(n flashMatch) bool { return n.key() == o.key() }) {
+			gone = append(gone, o)
+		}
+	}
+	return gone
 }
 
 // visibleFocus is the focus once the filter is gone: a card that f had folded away is not there to
@@ -898,7 +914,9 @@ func (m Model) View() string {
 		for i := 1; i < len(lines)-2; i++ {
 			lines[i] = fg(cMuted, ansi.Strip(lines[i]))
 		}
-		for _, h := range m.flash.ms { // read off the window as it is: always between the bars
+		follow := m // the cards may have moved since the last frame: draw where they are now
+		follow.flashFollow()
+		for _, h := range follow.flash.ms { // read off the window as it is: always between the bars
 			lines[1+h.y] = put(lines[1+h.y], h.x, matched(h.text))
 			if h.label != "" {
 				lines[1+h.y] = put(lines[1+h.y], h.x+h.w, flashLabel(h.label))
