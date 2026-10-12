@@ -17,6 +17,7 @@ S1 只做 `agmux board`：全屏看板，在 tmux popup（fl-* 浮窗，约 180�
 ### B. HUD 状态文件 `$XDG_STATE_HOME/agmux/<session_id>.json`（默认 ~/.local/state/agmux/）【待接线】
 Claude Code 每次刷新状态栏把 payload JSON 喂给 ~/.config/bin/claude-hud；在那脚本里加一行 `printf '%s' "$payload" > …/<session_id>.json` 落盘（这改动在 ~/.config 仓库，要用户批准）。
 agmux 按 `nativeSessionId` 找文件，取：`context_window.used_percentage`（注意取紧跟 `remaining_percentage` 的那个，rate_limits 里有同名字段）、模型、effort、`session_name`。
+写入方用 `printf > tmp && mv` 原子落盘，但 agmux 读到解析失败的文件仍按不存在处理，不报错。
 除 used_percentage / session_name 外，其余字段名未核实：拿到第一份真实 payload 再定，dev 先按文件不存在处理。
 ### C. jsonl 兜底（只取模型）
 文件可达 16MB，不能整读：从末尾读最后 64KB，倒序找最后一条 `"type":"assistant"`，取 `message.model`。
