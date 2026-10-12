@@ -66,7 +66,12 @@ type Session struct {
 - 字段颜色和 ~/.config/bin/claude-hud 的段一一对应：名洋红、模型青、effort 紫、目录黄、分支橙红。
 - 状态：`⏵ working` 橙、`⏸ idle` 蓝灰、`● done` 绿（ccmux 配色）；`attentionType` 非空时整张卡边框红。焦点卡片边框变亮。不单独拎出需要处理的会话。
 - 上下文条：■（U+25A0）10 格，空格暗灰 #585b70；<30 绿 #a6e3a1，30–60 黄 #f9e2af，≥60 红 #ff6188。未知时 10 格全暗 + `--`。
-- 第 3 行左边：`lastPrompt`，background 模式用 `backgroundDetail`；只取第一行、去掉 `<cross-session-message …>` 这类标签后截断。子 agent / shell 为 0 时该段不显示。PR 号（`branchPRs`）有则放在分支后面。
+- 第 3 行左边：background 模式用 `backgroundDetail`，否则按 `lastPrompt` 的形态取一行再截断：
+  - cross-session message → `← <from-name>: <正文第一行>`
+  - task-notification → 其 `<summary>` 文本
+  - 其它 → 第一个非空行，去掉行内 `<…>` 标签
+- 子 agent / shell 为 0 时该段不显示。
+- PR 号（`branchPRs`）S1 不显示：真机全是 null / []，看到真实元素再接。
 - 卡片里不画按钮；所有操作走底栏键位。鼠标：点卡片 = 选中，再点 = 跳转。
 - 紧凑变体（3 行，给 S2 sidebar）：S1 不实现，但卡片渲染函数接受「高度」参数预留。
 
@@ -80,4 +85,4 @@ type Session struct {
 
 ## 测试约定
 - tmux 黑盒测试一律用独立 socket：`tmux -L agmux-test …`，绝不碰用户的 tmux server。
-- `ccmux show --json` 用 fixture（`testdata/show.json`，从真机抓）喂给 store 做单测；真机 e2e 只做 `agmux board` 能起来、能渲染出 ≥1 张卡片、q 退出。
+- `ccmux show --json` 用 fixture（`testdata/show.json`，从真机抓；`lastPrompt` 只保留标签结构，正文换成合成文本，不带真实消息）喂给 store 做单测；真机 e2e 只做 `agmux board` 能起来、能渲染出 ≥1 张卡片、q 退出。
