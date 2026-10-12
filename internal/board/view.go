@@ -17,6 +17,7 @@ import (
 
 const (
 	minColW  = 40
+	maxCols  = 4 // wider screens get wider cards, not more columns
 	colGap   = 2
 	cardH    = 5
 	barCells = avatar.Width // the bar sits right under the avatar, same width
@@ -45,7 +46,7 @@ func fg(c lipgloss.Color, s string) string { return lipgloss.NewStyle().Foregrou
 
 // columns returns how many columns fit in width w and how wide each is.
 func columns(w int) (n, colW int) {
-	n = max((w+colGap)/(minColW+colGap), 1)
+	n = min(max((w+colGap)/(minColW+colGap), 1), maxCols)
 	return n, (w - colGap*(n-1)) / n
 }
 
@@ -181,7 +182,7 @@ func midTrunc(s string, w int) string {
 //	╭──────────────────────────────────────────╮
 //	│ ▄▀▀▀▀▄   mods-tmux          ⏸ idle  2h │   avatar · agent icon + name · status · time
 //	│ ▀▄▄▄▄▀  ⑂ master          Opus 5.5·high │   branch · model·effort
-//	│ ■■■■■■ 41%         ⚇ 2 agents  ⚙ 1 shell │   context bar (avatar-wide) · subagents · shells
+//	│ ■■■■■■             ⚇ 2 agents  ⚙ 1 shell │   context bar (avatar-wide) · subagents · shells
 //	╰──────────────────────────────────────────╯
 func card(s store.Session, w, h int, focused bool, frame int, now time.Time) string {
 	alert := s.Attention != "" || s.Status == "waiting"
@@ -298,10 +299,10 @@ func plural(n int, word string) string {
 	return word + "s"
 }
 
-// contextBar draws claude-hud's 10-cell ■ bar; pct<0 = unknown.
+// contextBar draws claude-hud's ■ bar, no number; pct<0 = unknown (all dark).
 func contextBar(pct int) string {
 	if pct < 0 {
-		return fg(cDim, strings.Repeat("■", barCells)+" --")
+		return fg(cDim, strings.Repeat("■", barCells))
 	}
 	c := cGreen
 	switch {
@@ -314,7 +315,7 @@ func contextBar(pct int) string {
 	if pct > 0 && filled == 0 {
 		filled = 1
 	}
-	return fg(c, strings.Repeat("■", filled)) + fg(cDim, strings.Repeat("■", barCells-filled)) + fg(c, fmt.Sprintf(" %d%%", pct))
+	return fg(c, strings.Repeat("■", filled)) + fg(cDim, strings.Repeat("■", barCells-filled))
 }
 
 // modelName turns claude-opus-5-5 into "Opus 5.5" and drops date suffixes; other models pass through.

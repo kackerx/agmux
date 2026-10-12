@@ -39,7 +39,7 @@ func fixture(t *testing.T) []store.Session {
 
 func TestColumns(t *testing.T) {
 	for _, c := range []struct{ w, n, colW int }{
-		{30, 1, 30}, {81, 1, 81}, {82, 2, 40}, {113, 2, 55}, {200, 4, 48}, {232, 5, 44},
+		{30, 1, 30}, {81, 1, 81}, {82, 2, 40}, {113, 2, 55}, {200, 4, 48}, {232, 4, 56}, {300, 4, 73},
 	} {
 		if n, colW := columns(c.w); n != c.n || colW != c.colW {
 			t.Errorf("columns(%d) = %d×%d, want %d×%d", c.w, n, colW, c.n, c.colW)
@@ -211,7 +211,7 @@ func TestCardLines(t *testing.T) {
 	}{{0, 0, ""}, {2, 0, "⚇ 2 agents"}, {0, 1, "⚙ 1 shell"}, {1, 2, "⚇ 1 agent  ⚙ 2 shells"}} {
 		s := store.Session{ContextPct: 41, Subagents: make([]ccmux.Subagent, c.agents), Shells: c.shells}
 		l := ansi.Strip(line3(s, 40))
-		if ansi.StringWidth(l) != 40 || !strings.HasPrefix(l, "■■■■■■ 41%") || !strings.HasSuffix(l, c.right) ||
+		if ansi.StringWidth(l) != 40 || !strings.HasPrefix(l, "■■■■■■ ") || strings.Contains(l, "41") || !strings.HasSuffix(l, c.right) ||
 			(c.shells == 0 && strings.Contains(l, "⚙")) || (c.agents == 0 && strings.Contains(l, "⚇")) {
 			t.Errorf("agents=%d shells=%d line 3 %q, want %q on the right", c.agents, c.shells, l, c.right)
 		}
@@ -242,12 +242,12 @@ func TestContextBar(t *testing.T) {
 		text   string
 	}{
 		// 6 cells, rounded: 29% → 1.74 → 2, 41% → 2.46 → 2, 42% → 2.52 → 3; any non-zero shows at least one
-		{-1, 0, "", " --"}, {0, 0, "166;227;161", " 0%"}, {1, 1, "166;227;161", " 1%"}, {29, 2, "166;227;161", " 29%"},
-		{30, 2, "249;226;175", " 30%"}, {41, 2, "249;226;175", " 41%"}, {42, 3, "249;226;175", " 42%"},
-		{60, 4, "255;97;136", " 60%"}, {100, 6, "255;97;136", " 100%"},
+		{-1, 0, "", ""}, {0, 0, "166;227;161", ""}, {1, 1, "166;227;161", ""}, {29, 2, "166;227;161", ""},
+		{30, 2, "249;226;175", ""}, {41, 2, "249;226;175", ""}, {42, 3, "249;226;175", ""},
+		{60, 4, "255;97;136", ""}, {100, 6, "255;97;136", ""},
 	} {
 		bar := contextBar(c.pct)
-		if plain := ansi.Strip(bar); plain != strings.Repeat("■", 6)+c.text {
+		if plain := ansi.Strip(bar); plain != strings.Repeat("■", 6)+c.text { // no number, no "--"
 			t.Errorf("%d: %q", c.pct, plain)
 		}
 		if c.filled > 0 && !strings.Contains(bar, c.color+"m"+strings.Repeat("■", c.filled)+"\x1b") {
