@@ -2,7 +2,7 @@
 
 状态：待做 / 开发中 / 审查中 / 测试中 / 通过。M1 的 T9 过了再开。
 
-### T10 switch / send 迁到 tmux（开发中）
+### T10 switch / send 迁到 tmux（4a3b2d8 + 普通 pane 退让，审查中 / 测试中 / 待用户真机验收）
 - enter → `tmux switch-client -t <pane>`；`s` / `H` → `tmux send-keys -l -- <text>` + `Enter`。Runner 接口加 tmux 命令，假 runner 记录。
 - 实测已做（结论见 design.md「switch / send 迁到 tmux」）：按 AGMUX_CLIENT → 排除自身 session 的最近活动 client 选 client，switch 后 detach 自己的 session。
 - 单测用假 tmux 返回构造的 list-clients 输出，覆盖：AGMUX_CLIENT 设定 / 嵌套（排除自身 session）/ 直接 popup（无 TMUX_PANE）/ 没有可用 client 时底栏报错不退出。

@@ -24,7 +24,7 @@
 ## switch / send 迁到 tmux
 - agmux 调 `tmux` 只按 PATH 找，不写绝对路径，不加 `-L` / `-S`：靠继承的 `$TMUX` 连到自己所在的 server（popup 里就是用户的 server）。测试里把假 tmux 放 PATH、或把 `$TMUX` 指到 `-L agmux-test` 的 socket，调用就不会漏到真 server。
 - enter 跳转（实测结论，tmux 3.7c）：popup 里没有「当前 client」，裸 `switch-client` 会挑最近活动的 client，在用户的 fl-* 嵌套浮窗里会把**浮窗内部**那个 client 切走而不是外层终端；且 switch 不会关 popup。所以：
-  - 选 client：`$AGMUX_CLIENT` 有就用它（启动脚本可通过 run-shell 的 `#{client_name}` 传进来，精确）；否则在 `list-clients` 里排除 attach 到 agmux 自己所在 session（`$TMUX_PANE` 的 session）的 client，取最近活动的；没有 `$TMUX_PANE`（直接 `display-popup -E agmux board`）就取全部里最近活动的。多个外层 client 都久无活动时可能选错，接受，文档里写明用 `AGMUX_CLIENT` 可精确。
+  - 选 client：`$AGMUX_CLIENT` 有就用它（启动脚本可通过 run-shell 的 `#{client_name}` 传进来，精确）；否则在 `list-clients` 里排除 attach 到 agmux 自己所在 session（`$TMUX_PANE` 的 session）的 client，取最近活动的；没有 `$TMUX_PANE`（直接 `display-popup -E agmux board`）就取全部里最近活动的；排除后一个都不剩（agmux 跑在普通 pane 里、只有一个终端）就退回自己 session 里最近活动的那个，且这种情况不 detach。多个外层 client 都久无活动时可能选错，接受，文档里写明用 `AGMUX_CLIENT` 可精确。
   - 命令：`tmux switch-client -c <client> -t <pane>`；之后若 agmux 在 pane 里且自己的 session 还有别的 client（嵌套浮窗的情况），`tmux detach-client -s <自己的 session>` 关掉嵌套浮窗；然后退出。
   - 验收要在用户真实的 fl-* 启动方式下亲手试一次。
 - `s` 发送、`H` 交接：`tmux send-keys -t <pane> -l -- <text>` 再 `tmux send-keys -t <pane> Enter`。
