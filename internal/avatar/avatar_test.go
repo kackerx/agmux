@@ -1,0 +1,91 @@
+package avatar
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
+)
+
+func TestRenderShape(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	ids := map[string]bool{}
+	for _, s := range Sprites {
+		ids[s.ID] = true
+		for _, m := range []Mood{Normal, Scan, Alert, Dim} {
+			for f := range 4 {
+				lines := strings.Split(Render(s, "claude", m, f), "\n")
+				if len(lines) != 3 {
+					t.Fatalf("%s mood %d: %d lines", s.ID, m, len(lines))
+				}
+				for i, l := range lines {
+					if w := ansi.StringWidth(l); w != 6 {
+						t.Errorf("%s mood %d frame %d line %d: width %d", s.ID, m, f, i, w)
+					}
+				}
+			}
+		}
+	}
+	if len(Sprites) != 6 || len(ids) != 6 {
+		t.Fatalf("want 6 sprites with unique IDs, got %d / %d", len(Sprites), len(ids))
+	}
+}
+
+func TestMoods(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	s := Sprites[0]
+	normal := Render(s, "claude", Normal, 0)
+	if Render(s, "claude", Scan, 1) == normal || Render(s, "claude", Scan, 3) == normal || Render(s, "claude", Scan, 1) == Render(s, "claude", Scan, 3) {
+		t.Error("Scan: frames 1 and 3 should look right / left, unlike normal")
+	}
+	red := ";2;255;97;136" // fg or bg: an eye can sit in either half of a cell
+	if !strings.Contains(Render(s, "claude", Alert, 0), red) || strings.Contains(Render(s, "claude", Alert, 1), red) {
+		t.Error("Alert: red eyes on even frames only")
+	}
+	if Render(s, "claude", Dim, 0) == normal {
+		t.Error("Dim should differ from normal")
+	}
+	if Render(s, "claude", Normal, 0) == Render(s, "codex", Normal, 0) {
+		t.Error("band should differ by agentType")
+	}
+}
+
+func TestBindings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "avatars.json")
+	b, err := LoadBindings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.Get("s1"); ok {
+		t.Fatal("missing file should be empty")
+	}
+	def := For(b, "s1")
+	if For(b, "s1").ID != def.ID {
+		t.Fatal("default must be stable")
+	}
+	if err := b.Set("s1", "bot-04"); err != nil {
+		t.Fatal(err)
+	}
+	b2, err := LoadBindings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := b2.Get("s1"); !ok || id != "bot-04" || For(b2, "s1").ID != "bot-04" {
+		t.Fatalf("read back: %q %v", id, ok)
+	}
+	if data, _ := os.ReadFile(path); strings.TrimSpace(string(data)) != "{\n  \"s1\": \"bot-04\"\n}" {
+		t.Errorf("file format: %s", data)
+	}
+	b2.Set("s2", "no-such-bot")
+	if For(b2, "s2").ID == "no-such-bot" {
+		t.Error("unknown bound id should fall back to default")
+	}
+	os.WriteFile(path, []byte("{oops"), 0o644)
+	if _, err := LoadBindings(path); err == nil {
+		t.Error("corrupt file should error")
+	}
+}

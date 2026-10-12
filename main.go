@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -19,6 +20,7 @@ const usage = `usage: agmux <command>
 commands:
   board   full-screen session board (open it in a tmux popup)
   show    print sessions one per line: id, name, group, status, model, context%
+  avatars print every avatar sprite
 `
 
 func main() {
@@ -32,6 +34,10 @@ func main() {
 		err = board()
 	case "show":
 		err = show(os.Stdout, store.NewPoller())
+	case "avatars":
+		for _, s := range avatar.Sprites {
+			fmt.Printf("%s  %s\n%s\n\n", s.ID, s.Name, avatar.Render(s, "claude", avatar.Normal, 0))
+		}
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
