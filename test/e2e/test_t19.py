@@ -362,6 +362,33 @@ class SecondRound(Base):
         self.t.esc(); time.sleep(0.5); self.assertIn("▸ ~/work/alpha (3)", self.t.text(), "alpha is still folded: f during the filter did not unfold it either")
 
 
+class ThirdRound(Base):
+    """T19 third review (docs 8a73404): an empty query / a query with no match never moves the focus."""
+
+    def to_b1(self):
+        self.t.keys("l"); time.sleep(0.3); self.assertEqual(self.focused(), ["bravo-29"])
+
+    def test_enter_on_an_empty_query_closes_the_input_and_keeps_the_focus(self):
+        self.to_b1()
+        self.t.keys("/"); time.sleep(0.3); self.t.keys("Enter"); time.sleep(0.5)
+        self.assertNotIn("▏", self.top(), "the input is closed"); self.assertEqual(len(self.names()), 9)
+        self.assertEqual(self.focused(), ["bravo-29"], "the focus stays on the card it was on before /")
+
+    def test_enter_after_typing_and_erasing_everything_does_the_same(self):
+        self.to_b1()
+        self.t.keys("/"); self.t.lit("ab"); time.sleep(0.3); self.t.keys("C-h"); self.t.keys("C-h"); time.sleep(0.3)
+        self.assertEqual(self.count(), (9, 9)); self.t.keys("Enter"); time.sleep(0.5)
+        self.assertNotIn("▏", self.top()); self.assertEqual(self.focused(), ["bravo-29"])
+        self.t.keys("Enter"); self.assertTrue(wait(lambda: self.env.actions(), 3)); self.assertEqual(self.env.actions(), [["switch", "b1"]], "and enter then jumps from there")
+
+    def test_esc_after_keeping_a_query_with_no_match_returns_to_the_card_from_before(self):
+        self.to_b1()
+        self.search("qqq", enter=True); self.assertEqual(self.names(), [])
+        self.t.esc(); time.sleep(0.5)
+        self.assertEqual(len(self.names()), 9); self.assertEqual(self.focused(), ["bravo-29"], "not the first card of the board")
+        self.assertTrue(self.t.alive())
+
+
 class ReviewWithPanes(WithPanes):
     def test_clicking_the_preview_while_the_input_is_open_closes_the_input_and_enters_the_passthrough(self):
         self.press("p"); self.assertTrue(wait(lambda: self.pv() is not None, 4))
