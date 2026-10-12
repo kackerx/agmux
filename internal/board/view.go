@@ -180,11 +180,11 @@ func midTrunc(s string, w int) string {
 // card renders a session as w×h cells. h is the full height including the border;
 // S1 only draws 5 (3 body lines), smaller heights keep the first h-2 lines.
 //
-//	╭──────────────────────────────────────────╮
-//	│ ▄▀▀▀▀▄   mods-tmux          ⏸ idle  2h │   avatar · agent icon + name · status · time
-//	│ ▀▄▄▄▄▀  ⑂ master          Opus 5.5·high │   branch · model·effort
-//	│ ■■■■■■             ⚇ 2 agents  ⚙ 1 shell │   context bar (avatar-wide) · subagents · shells
-//	╰──────────────────────────────────────────╯
+//	╭──────────────────────────────────────────────╮
+//	│ ▄▀▀▀▀▄  qa-acceptance-pap-be-dev          3h │   avatar · name · time
+//	│ ▀▄▄▄▄▀   feature/qa-acceptance-pap-be-dev   │   branch
+//	│ ■■■□□□  ⏸ idle · Bash  ⚇ 2   Opus 5.5·high │   context bar · status + detail · counts · model·effort
+//	╰──────────────────────────────────────────────╯
 func card(s store.Session, w, h int, focused bool, frame int, now time.Time) string {
 	alert := s.Attention != "" || s.Status == "waiting"
 	border, mood := cDim, avatar.Dim
@@ -219,44 +219,20 @@ func card(s store.Session, w, h int, focused bool, frame int, now time.Time) str
 	return b + "\n" + fg(border, bs.BottomLeft+strings.Repeat(bs.Bottom, w-2)+bs.BottomRight)
 }
 
-// spread puts right flush against the right edge and gives left whatever is left.
+// spread puts right flush against the right edge and gives left whatever is left (keeping one
+// cell between them when there is a right side at all).
 func spread(left, right string, w int) string {
 	rw := ansi.StringWidth(right)
-	left = ansi.Truncate(left, max(w-rw-1, 0), "…")
-	return pad(left, w-rw) + right
-}
-
-// agentIcons are Nerd Font codicons (3.5+), drawn in the band color.
-var agentIcons = map[string]string{"claude": "\uec82", "codex": "\uec81"}
-
-func agentIcon(agentType string) string {
-	if i, ok := agentIcons[agentType]; ok {
-		return i
+	if rw > 0 {
+		rw++
 	}
-	return "\uec20" // cod-robot
+	left = ansi.Truncate(left, max(w-rw, 0), "…")
+	return pad(left, w-ansi.StringWidth(right)) + right
 }
 
-// line1: icon + name, then the status word, its detail (pending tool / agents) and the time.
-// The status word and time always show. The name gets all it needs first; the detail (MCP tool
-// names run to 40+ characters) takes what is left and is dropped, " · " included, when nothing
-// of it would show; only then is the name cut.
+// line1: the name, the time at the right edge; the name is cut only when it doesn't fit.
 func line1(s store.Session, w int, now time.Time) string {
-	word, detail := status(s)
-	ago := relTime(s.LastActivity, now)
-	if ago != "" {
-		ago = "  " + ago
-	}
-	icon := agentIcon(s.AgentType)
-	avail := w - ansi.StringWidth(icon) - 1 - ansi.StringWidth(word) - ansi.StringWidth(ago) - 1
-	if room := avail - ansi.StringWidth(s.Name); room < ansi.StringWidth(detail) {
-		full := detail
-		detail = ""
-		if room >= 5 { // " · " plus at least one character and "…"
-			detail = ansi.Truncate(full, room, "…")
-		}
-	}
-	left := fg(avatar.BandColor(s.AgentType), icon) + " " + fg(cName, s.Name)
-	return spread(left, word+fg(cMuted, detail+ago), w) // spread cuts the name if it still doesn't fit
+	return spread(fg(cName, s.Name), fg(cMuted, relTime(s.LastActivity, now)), w)
 }
 
 // status is the colored status word and its plain detail (" · Bash", " · agents" or "").
@@ -279,39 +255,60 @@ func status(s store.Session) (word, detail string) {
 	return fg(cMuted, "● "+s.Status), ""
 }
 
-// line2: branch on the left (cut first), model·effort on the right.
+// line2: the branch, cut when it doesn't fit.
 func line2(s store.Session, w int) string {
-	right := ""
+	if s.Branch == "" {
+		return ""
+	}
+	return fg(cBranch, ansi.Truncate("\ue725 "+s.Branch, w, "…")) // nf-dev-git_branch
+}
+
+// line3: context bar, the status word and its detail, subagent / shell counts, model·effort at the
+// right edge. The bar and status word always show; when space runs out the detail goes first,
+// then the counts, then the model is cut.
+func line3(s store.Session, w int) string {
+	word, detail := status(s)
+	left := contextBar(s.ContextPct) + "  " + word
+	room := w - ansi.StringWidth(left)
+
+	model := ""
 	if m := modelName(s.Model); m != "" {
-		right = fg(cModel, m)
+		model = fg(cModel, m)
 		if s.Effort != "" {
-			right += fg(cMuted, "·") + fg(cEffort, s.Effort)
+			model += fg(cMuted, "·") + fg(cEffort, s.Effort)
 		}
 	}
-	left := ""
-	if s.Branch != "" {
-		left = fg(cBranch, "⑂ "+s.Branch)
+	if mw := ansi.StringWidth(model); mw+1 > room { // last to go: cut the model to what is left
+		model = ansi.Truncate(model, max(room-1, 0), "…")
 	}
-	return spread(left, right, w)
-}
+	if model != "" {
+		room -= ansi.StringWidth(model) + 1
+	}
 
-// line3: context bar under the avatar, subagent / shell counts on the right.
-func line3(s store.Session, w int) string {
-	var right []string
+	var counts []string
 	if n := len(s.Subagents); n > 0 {
-		right = append(right, fg(cMuted, fmt.Sprintf("⚇ %d %s", n, plural(n, "agent"))))
+		counts = append(counts, fmt.Sprintf("⚇ %d", n))
 	}
 	if s.Shells > 0 {
-		right = append(right, fg(cMuted, fmt.Sprintf("⚙ %d %s", s.Shells, plural(s.Shells, "shell"))))
+		counts = append(counts, fmt.Sprintf("⚙ %d", s.Shells))
 	}
-	return spread(contextBar(s.ContextPct), strings.Join(right, "  "), w)
-}
+	c := ""
+	if len(counts) > 0 {
+		c = "  " + strings.Join(counts, " ")
+	}
+	if ansi.StringWidth(c) > room {
+		c = ""
+	}
+	room -= ansi.StringWidth(c)
 
-func plural(n int, word string) string {
-	if n == 1 {
-		return word
+	if ansi.StringWidth(detail) > room {
+		full := detail
+		detail = ""
+		if room >= 5 { // " · " plus at least one character and "…"
+			detail = ansi.Truncate(full, room, "…")
+		}
 	}
-	return word + "s"
+	return spread(left+fg(cMuted, detail+c), model, w)
 }
 
 // contextBar draws claude-hud's ■ bar, no number; pct<0 = unknown (all dark).

@@ -136,9 +136,9 @@ func TestCardStatus(t *testing.T) {
 	for _, c := range cases {
 		s := base
 		c.mod(&s)
-		l1 := line1(s, 40, now)
-		if !strings.Contains(l1, fg(c.color, c.head)) || !strings.HasSuffix(ansi.Strip(l1), " "+c.head+c.tail) {
-			t.Errorf("%s: line 1 %q, want it to end with %q (%q in %s)", c.name, ansi.Strip(l1), c.head+c.tail, c.head, c.color)
+		l3 := line3(s, 60)
+		if !strings.Contains(l3, fg(c.color, c.head)) || !strings.Contains(ansi.Strip(l3), "  "+c.head+c.tail) {
+			t.Errorf("%s: line 3 %q, want %q (%q in %s)", c.name, ansi.Strip(l3), c.head+c.tail, c.head, c.color)
 		}
 		for f := range 2 { // moods differ on different frames: Alert on even, Scan on odd
 			cd := card(s, 44, 5, false, f, now)
@@ -162,66 +162,40 @@ func TestCardStatus(t *testing.T) {
 func TestCardLines(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	s := store.Session{
-		Name: "qa-acceptance-pap-be-dev", AgentType: "claude", Status: "idle", LastActivity: now.Add(-3 * time.Minute),
-		Branch: "feature/qa-acceptance-pap", Model: "claude-opus-5-5", Effort: "high", ContextPct: -1,
+		Name: "qa-acceptance-pap-be-dev", AgentType: "claude", Status: "idle", LastActivity: now.Add(-3 * time.Hour),
+		Branch: "feature/qa-acceptance-pap-be-dev", Model: "claude-opus-5-5", Effort: "high", ContextPct: 41,
 	}
-
-	// line 1: icon + name give way; status and time always stay
+	// line 1: the name, the time always at the right edge; the name is cut only when it doesn't fit
 	for _, c := range []struct {
 		w       int
 		nameCut bool
-	}{{40, false}, {22, true}} {
+	}{{36, false}, {27, false}, {20, true}} {
 		l := ansi.Strip(line1(s, c.w, now))
-		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, "\uec82 qa-") || !strings.HasSuffix(l, " ⏸ idle  3m") ||
+		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, "qa-") || !strings.HasSuffix(l, " 3h") || // no icon before the name
 			strings.Contains(l, s.Name) == c.nameCut || strings.Contains(l, "…") != c.nameCut {
-			t.Errorf("w=%d line 1 %q: name cut=%v, status and time last", c.w, l, c.nameCut)
+			t.Errorf("w=%d line 1 %q: name cut=%v, time last", c.w, l, c.nameCut)
 		}
 	}
-	for at, icon := range map[string]string{"claude": "\uec82", "codex": "\uec81", "gemini": "\uec20", "": "\uec20"} {
-		if l := line1(store.Session{Name: "n", AgentType: at}, 30, now); !strings.HasPrefix(l, fg(avatar.BandColor(at), icon)) {
-			t.Errorf("%q: icon should be %U in the band color", at, []rune(icon)[0])
-		}
+	// line 2: the branch with its icon, in the branch color; cut when it doesn't fit
+	if l := line2(s, 36); l != fg(cBranch, "\ue725 "+s.Branch) {
+		t.Errorf("line 2: %q", ansi.Strip(l))
 	}
-
-	// line 2: branch gives way, model·effort flush right
-	for _, c := range []struct {
-		w             int
-		model, effort string
-		right         string
-		branchCut     bool
-	}{
-		{60, "claude-opus-5-5", "high", "Opus 5.5·high", false},
-		{34, "claude-opus-5-5", "high", "Opus 5.5·high", true},
-		{60, "claude-opus-5-5", "", "Opus 5.5", false},
-		{60, "", "high", "", false},
-	} {
-		s := s
-		s.Model, s.Effort = c.model, c.effort
-		l := ansi.Strip(line2(s, c.w))
-		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, "⑂ feature/") || !strings.HasSuffix(l, c.right) ||
-			strings.Contains(l, "feature/qa-acceptance-pap") == c.branchCut || strings.Contains(l, "…") != c.branchCut ||
-			(c.right == "" && strings.Contains(l, "high")) {
-			t.Errorf("w=%d line 2 %q: want %q flush right, branch cut=%v", c.w, l, c.right, c.branchCut)
-		}
+	if l := ansi.Strip(line2(s, 20)); ansi.StringWidth(l) != 20 || !strings.HasSuffix(l, "…") {
+		t.Errorf("line 2 cut: %q", l)
 	}
-
-	// line 3: context bar at the left edge, counts on the right
-	for _, c := range []struct {
-		agents, shells int
-		right          string
-	}{{0, 0, ""}, {2, 0, "⚇ 2 agents"}, {0, 1, "⚙ 1 shell"}, {1, 2, "⚇ 1 agent  ⚙ 2 shells"}} {
-		s := store.Session{ContextPct: 41, Subagents: make([]ccmux.Subagent, c.agents), Shells: c.shells}
-		l := ansi.Strip(line3(s, 40))
-		if ansi.StringWidth(l) != 40 || !strings.HasPrefix(l, "■■■■■■ ") || strings.Contains(l, "41") || !strings.HasSuffix(l, c.right) ||
-			(c.shells == 0 && strings.Contains(l, "⚙")) || (c.agents == 0 && strings.Contains(l, "⚇")) {
-			t.Errorf("agents=%d shells=%d line 3 %q, want %q on the right", c.agents, c.shells, l, c.right)
-		}
+	if line2(store.Session{}, 36) != "" {
+		t.Error("no branch, empty line")
 	}
-
-	// in the card: line 3's bar starts right under the avatar
-	lines := strings.Split(ansi.Strip(card(s, 44, 5, false, 0, now)), "\n")
-	if !strings.HasPrefix(lines[3], "│ ■") || ansi.StringWidth(lines[1]) != 44 {
-		t.Errorf("card rows: %q", lines)
+	// the acceptance card: 48 columns hold the 24-character name and the 32-character branch whole
+	lines := strings.Split(ansi.Strip(card(s, 48, 5, false, 0, now)), "\n")
+	if !strings.Contains(lines[1], s.Name+" ") || !strings.HasSuffix(lines[1], " 3h │") || !strings.Contains(lines[2], "\ue725 "+s.Branch) ||
+		!strings.HasPrefix(lines[3], "│ ■") || !strings.HasSuffix(lines[3], "Opus 5.5·high │") {
+		t.Errorf("48-column card:\n%s", strings.Join(lines, "\n"))
+	}
+	for _, l := range lines {
+		if ansi.StringWidth(l) != 48 {
+			t.Errorf("card line %q is %d wide", l, ansi.StringWidth(l))
+		}
 	}
 }
 
@@ -322,31 +296,29 @@ func TestOrderIgnoresCcmuxOrder(t *testing.T) {
 	}
 }
 
-// Line 1: the name gets all it needs first; the pending tool takes what is left and goes
-// (" · " included) when none of it would show; the status word and time always stay.
-func TestLine1NameFirst(t *testing.T) {
-	base := store.Session{Name: "qa-acceptance-pap-be-dev", AgentType: "claude", Status: "working", LastActivity: now.Add(-2 * time.Minute)}
+// Line 3: the bar and the status word always show; as space runs out the detail goes first,
+// then the subagent / shell counts, then the model is cut.
+func TestLine3Yields(t *testing.T) {
+	s := store.Session{Status: "working", PendingTool: "mcp__claude_ai_Claude_Docs__batch", Subagents: make([]ccmux.Subagent, 2),
+		Shells: 1, Model: "claude-opus-5-5", Effort: "high", ContextPct: 41}
 	for _, c := range []struct {
-		w          int
-		tool, want string // want: what follows "⏵ working" before the time
-		nameWhole  bool
+		w            int
+		detail, cnts string // what shows after the status word
+		model        string // at the right edge
 	}{
-		{44, "Bash", "", true}, // 56-column card: whole name, " · Bash" doesn't fit and goes
-		{48, "Bash", " · Bash", true},
-		{46, "Bash", " · Ba…", true}, // 30 cells left of the status: 24 name + 6
-		{60, "mcp__claude_ai_Claude_Docs__batch", " · mcp__claude_ai_C…", true},
-		{28, "mcp__claude_ai_Claude_Docs__batch", "", false}, // 40-column card: tool gone, then the name is cut
-		{80, "mcp__claude_ai_Claude_Docs__batch", " · mcp__claude_ai_Claude_Docs__batch", true},
+		{90, " · mcp__claude_ai_Claude_Docs__batch", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"},
+		{60, " · mcp__claude_ai_C…", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"}, // the detail is cut first
+		{44, "", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"},                     // 4 cells left: no bare " · …"
+		{40, "", "  ⚇ 2 ⚙ 1", "Opus 5.5·high"},                     // then gone, " · " included
+		{33, "", "", "Opus 5.5·high"},                              // then the counts
+		{26, "", "", "Opus 5.…"},                                   // the model last
+		{17, "", "", ""},                                           // only bar + status word left
 	} {
-		s := base
-		s.PendingTool = c.tool
-		l := ansi.Strip(line1(s, c.w, now))
-		if ansi.StringWidth(l) != c.w || !strings.HasSuffix(l, " ⏵ working"+c.want+"  2m") ||
-			strings.Contains(l, s.Name) != c.nameWhole || strings.Contains(l, " · …") {
-			t.Errorf("w=%d tool=%s: %q, want name whole=%v then \"⏵ working%s  2m\"", c.w, c.tool, l, c.nameWhole, c.want)
-		}
-		if !c.nameWhole && ansi.StringWidth(strings.Fields(l)[1]) < 10 {
-			t.Errorf("w=%d: the name should still keep 10+ cells on the narrowest card: %q", c.w, l)
+		l := ansi.Strip(line3(s, c.w))
+		want := "■■■■■■  ⏵ working" + c.detail + c.cnts
+		if ansi.StringWidth(l) != c.w || !strings.HasPrefix(l, want) || !strings.HasSuffix(l, c.model) ||
+			(c.detail == "" && strings.Contains(l, "·  ")) || (c.cnts == "" && strings.ContainsAny(l, "⚇⚙")) {
+			t.Errorf("w=%d: %q\n want %q … %q", c.w, l, want, c.model)
 		}
 	}
 }
