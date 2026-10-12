@@ -146,17 +146,39 @@ class Behaviour(Base):
         self.assertEqual(self.env.actions(), [], "x / r / enter did not fire")
         self.t.esc(); time.sleep(0.4); self.assertEqual(self.focused(), ["alpha-main"], "none of them moved the focus")
 
-    def test_a_card_that_vanishes_while_labels_are_up(self):
+    def test_the_label_of_a_card_that_vanished_is_ignored_and_the_jump_goes_on(self):
         self.flash(); lab = self.labels_by_name()["bravo-29"]
         S = json.loads((self.env.fake / "show.json").read_text())
         self.env.write_show([s for s in S if s["id"] != "b1"])
         n = self.env.show_calls(); self.assertTrue(wait(lambda: self.env.show_calls() >= n + 2, 8)); time.sleep(0.4)
         self.t.keys(lab); time.sleep(0.5)
-        self.assertTrue(self.t.alive(), "no crash on the label of a card that is gone"); self.assertEqual(self.env.actions(), [])
+        self.assertTrue(self.t.alive(), "no crash"); self.assertEqual(self.env.actions(), [])
+        self.assertIn("jump: press a label", self.bar(), "still waiting for a label: the dead one was ignored like any other non-label")
         self.assertEqual(len(find_cards(self.t.snap())), 8)
-        if "jump:" in self.bar():
-            self.t.esc(); time.sleep(0.4)
+        self.t.esc(); time.sleep(0.4)
+        self.assertEqual(self.focused(), ["alpha-main"], "the focus did not move (it did not fall to the first card by accident)")
         self.t.keys("j"); time.sleep(0.3); self.assertTrue(self.t.alive(), "the board still works"); self.t.keys("q"); self.assertEqual(self.t.exit_status(), 0)
+
+    def test_a_short_terminal_labels_only_the_cards_whose_top_border_is_on_screen(self):
+        S = json.loads((self.env.fake / "show.json").read_text()); base = S[0]
+        ten = [dict(base, id=f"s{i:02d}", summary=f"sess-{i:02d}", project="onecol", cwd=f"{self.env.home}/work/onecol", mainRepoRoot=f"{self.env.home}/work/onecol", tmuxPane=f"%{300 + i}",
+                    status="idle", subagents=[], pendingTool=None, nativeSessionId=f"n-s{i}", logPath=None) for i in range(10)]
+        self.env.write_show(ten); self.env.pane_ids = {t_["tmuxPane"]: t_["id"] for t_ in ten}; self.t.close()
+        t = self.t = Term(self.env, w=100, h=20, extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t.close)
+        self.assertTrue(wait(lambda: "agmux ·" in t.text(), 8), t.text())
+        for _ in range(9):
+            t.keys("j"); time.sleep(0.12)
+        time.sleep(0.4)
+        tops = [r for r, row in enumerate(t.snap()) if row.cells and row.cells[0][0] in "╭┏" and r < 19]
+        self.assertTrue(0 < len(tops) < 10, f"a 20-row terminal cannot show 10 cards: {len(tops)} tops on screen\n{t.text()}")
+        self.flash(); labs = label_cells(t.snap())
+        self.assertEqual(sorted(r for r, _, _ in labs), tops, "one label per top border that is on screen, none for cards that are not")
+        self.assertEqual(sorted(l for _, _, l in labs), sorted(ALPHABET[:len(tops)]), "and they use the first letters only")
+        hidden = ALPHABET[len(tops)]  # the next letter would belong to a card nobody can see
+        t.keys(hidden); time.sleep(0.4)
+        self.assertIn("jump: press a label", last_text_row(t.snap()), f"{hidden!r} is no label: ignored, still waiting")
+        t.esc(); time.sleep(0.3)
+        t.keys("Enter"); self.assertTrue(wait(lambda: self.env.actions(), 3)); self.assertEqual(self.env.actions(), [["switch", "s09"]], "the focus never left the last card")
 
     def test_with_a_filter_only_the_visible_cards_are_labelled(self):
         self.t.keys("/"); self.t.lit("brav"); self.t.keys("Enter"); time.sleep(0.5)
@@ -182,6 +204,22 @@ class Esc(Base):
         self.flash(); self.t.esc(); time.sleep(0.4)
         self.assertTrue(self.t.alive()); self.assertEqual(len(find_cards(self.t.snap())), 3, "the filter is still on")
         self.assertIn("j/k h/l move", self.bar())
+
+
+class EscRule(Base):
+    def test_a_kept_filter_clears_on_esc_even_when_quit_is_only_q(self):
+        self.config('[keys]\nquit = ["q"]\n'); self.t.close(); self.t = self.board()
+        self.t.keys("/"); self.t.lit("alpha"); self.t.keys("Enter"); time.sleep(0.5); self.assertEqual(len(find_cards(self.t.snap())), 3)
+        self.t.esc(); time.sleep(0.5)
+        self.assertEqual(len(find_cards(self.t.snap())), 9, "esc clears the filter although it is not a quit key here"); self.assertTrue(self.t.alive())
+        self.t.esc(); time.sleep(0.4); self.assertTrue(self.t.alive(), "and esc is not quit in this config")
+        self.t.keys("q"); self.assertEqual(self.t.exit_status(), 0)
+
+    def test_two_escapes_in_a_row_are_alt_esc_and_do_not_clear_the_filter(self):
+        self.t.keys("/"); self.t.lit("alpha"); self.t.keys("Enter"); time.sleep(0.5)
+        self.t.lit("\x1b\x1b"); time.sleep(0.6)  # ESC ESC arrives as one alt+esc key
+        self.assertEqual(len(find_cards(self.t.snap())), 3, "alt+esc is not esc: the filter stays")
+        self.assertIn("/ alpha", self.t.snap()[0].text)
 
 
 class Config(Base):

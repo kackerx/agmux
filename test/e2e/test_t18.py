@@ -154,6 +154,11 @@ class Picker(Base):
         self.open_picker(t); self.move_to(t, want); t.keys("Enter"); time.sleep(0.8)
         self.assertEqual({s: self.id_of(t, s) for s in IDLE if s != "a2"}, before)
 
+    def test_the_picker_footer_skips_an_action_that_has_no_key(self):
+        self.config('[keys]\nfold = ["enter"]\n')  # enter was jump's only key: jump (the picker's bind) is unbound now
+        t = self.board(); self.to_a2(t); self.open_picker(t)
+        self.assertEqual(last_text_row(t.snap()), " j/k move · q cancel")
+
     def test_a_second_binding_keeps_the_first(self):
         t = self.board(); self.to_a2(t)
         self.open_picker(t); self.move_to(t, "bot-03"); t.keys("Enter"); time.sleep(0.6)
@@ -258,6 +263,7 @@ class Review(Base):
         t = self.board(); self.to_a2(t); cur = self.id_of(t, "a2")
         self.open_picker(t); self.move_to(t, next(i for i in UNIQUE if i not in cur)); t.keys("Enter"); time.sleep(0.8)
         self.assertTrue(t.alive()); self.assertEqual(self.json.read_bytes(), before, "the file is untouched"); self.assertEqual([p.name for p in d.iterdir() if p.name.startswith("avatars") and p.name != "avatars.json"], [], "no temp file left behind")
+        self.assertEqual(len([r for r in t.snap() if "permission denied" in r.text]), 1, "the error is shown once, not on a second row as well")
         red = [r.text.strip() for r in t.snap()[-3:] if any(is_red(c[1]) for c in r.cells if c[0].strip())]
         self.assertTrue(red, f"an error shows in the message row:\n{t.text()[-300:]}")
         self.assertEqual(self.id_of(t, "a2"), cur, "the card keeps its avatar: nothing was saved")
