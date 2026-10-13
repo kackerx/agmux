@@ -202,3 +202,9 @@
 - 方案一（推荐）：去掉层对齐，组按序轮流分到各列（第 k 个组进第 k mod n 列），每列自己往下堆，上一组结束下一组紧接着。没有空洞；组到列的分配稳定，轮询增减会话只改本列高度。缺点：列高不齐（有的列长有的短），最多差一个组。
 - 方案二：瀑布流——下一个组进当前最矮的列。列高最均衡，但会话增减改变列高后，组会在列之间跳来跳去，看板每次轮询都可能重排。
 - 两种都是 layout() 里分配规则的改动，h/l 的空间导航、折叠、flash、滚动、鼠标命中都按 rects 走不用动；m1 design「放不下的组折到下一行」那句改。
+
+### 备忘：子 agent 下拉框（2026-10-13 用户问「有没有必要」；结论：暂不做）
+- 想法：卡片上点 `agents` 下拉一个框，列出子 agent 的信息 / 交互。
+- 数据：ccmux `subagents` 只有 agentId、status、attentionType、pendingTool、lastActivityAt、startedAt、worktreePath——没有名字和任务描述；Claude Code 自己列表里的名字和「Committing quick-add styles…」来自父会话 jsonl 的 Task tool_use（subagent_type、description），要自己解析并按 agentId 对上。
+- 交互：子 agent 没有 pane，不能跳转、不能发消息，框里只能看。
+- 判断：`p` 预览已经能看到 Claude Code 屏幕底部那份列表，enter 跳过去也是一键；T36 已把 `agents ⚇ n` 改醒目。做下拉框是中等工作量换一个只读视图，先不做；要做时从 jsonl 的 Task 调用取 subagent_type + description。
