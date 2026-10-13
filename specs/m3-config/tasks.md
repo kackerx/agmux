@@ -220,23 +220,23 @@
 
 ## 第八批（用户 2026-10-13 晚验收第六 + 七批通过后的意见）
 
-### T41 分支名放不下时省略前缀、保留后缀（dev @9730bc7 审查退回 1 必改（多字节前缀省略后高亮无测试，收穷举探针）+ 采纳建议（尾截 … 被黄底渗到，存量）；定稿：末段刚好放下但加 … 放不下时显示光秃末段，接受；修复 @64c17a1 复审再退 1 条：spread 的 reset 把名字行 … 的名字色抹掉 → 截断标记由调用方传 cutMark(c)，补丁 @32a2435 复审通过；建议 line3 的 cutMark 无测试，不改）
+### T41 分支名放不下时省略前缀、保留后缀（通过 @32a2435 / 16 条；dev @9730bc7 审查退回 1 必改（多字节前缀省略后高亮无测试，收穷举探针）+ 采纳建议（尾截 … 被黄底渗到，存量）；定稿：末段刚好放下但加 … 放不下时显示光秃末段，接受；修复 @64c17a1 复审再退 1 条：spread 的 reset 把名字行 … 的名字色抹掉 → 截断标记由调用方传 cutMark(c)，补丁 @32a2435 复审通过；建议 line3 的 cutMark 无测试，不改）
 - dev 顺带修：flash 之前没按 agent 让出的宽度读分支。
 - 用户：`feature/permission-dashboard`、`hotfix/alert-group` 放不下时现在从尾部截（`hotfix/alert-gro…`），有用的是后缀。改：放不下时先从左边一段一段去掉 `/` 前的前缀，剩余部分前面加一个 `…`（`…alert-group`、`…permission-dashboard`），直到放得下；只剩最后一段还放不下才像现在一样从尾部截。没有 `/` 的分支照旧尾部截。第 2 行右侧有 agent 角色时同样适用。搜索 / flash 的命中高亮按显示出来的字符算（前缀被省略的部分不画高亮）。
 - 验收：单测 宽度刚好放下全名不省略；少 1 格 → `…alert-group`；三段 `a/b/c` 逐段去；只剩末段仍放不下 → `…alert-gr…`→ 定稿写成末段尾截 `alert-gr…`（前面不再加 …，避免两个省略号）；无 `/` 尾截。黑盒 窄列抓屏。
 
-### T42 组标题横线颜色改成和组名一致（审查通过 @a2d5f83）
+### T42 组标题横线颜色改成和组名一致（通过 @a2d5f83）
 - 用户：横线现在 muted 灰不醒目，要和分组名同色（`dir` 色）。改：━ 用 `dir` 色（焦点在标题上时随标题用 focus 色）。design.md T40 那句同步。
 - 验收：单测 标题行的 ━ 转义码 = dir 色；黑盒抓屏带色核对。
 
-### T43 分组方式可切换：cwd / project / session / state，`g` 循环（dev @eb8759f 审查退回 2 必改：焦点在折叠标题上按 g 跳到全板第一张（改为先落到该组第一张卡）；flash 读显示标题 / g 结束手动滚动 / visibleFocus 用当前分组键三处无测试，收 4 探针；修复 @7dd2465 复审通过）
+### T43 分组方式可切换：cwd / project / session / state，`g` 循环（通过 @7dd2465 / 32 条；dev @eb8759f 审查退回 2 必改：焦点在折叠标题上按 g 跳到全板第一张（改为先落到该组第一张卡）；flash 读显示标题 / g 结束手动滚动 / visibleFocus 用当前分组键三处无测试，收 4 探针；修复 @7dd2465 复审通过）
 - dev 定稿（照准）：regroup 在 shown() 里换 GroupKey / GroupLabel，其余（layout / flow / 搜索 / flash / 鼠标 / `a`）不动；project 空 → "(no project)"；切换时焦点留原卡、手动滚动结束；名字标题不画路径命中；`agmux show` 分组列仍 cwd。底栏又长一段，120 列下尾部更早被截。
 - 定稿：切换方式清空折叠，各方式互不影响，切回不保留。
 - 用户：现在只有按 cwd 一种；参考 ccmux 加 project、tmux session，再加一个 state。`g` 切换。
 - 定稿：四种 `group_by`：`cwd`（现状，默认）→ `project`（ccmux 的 `project` 字段：worktree 归到主仓库名下，标题 = 项目名，如 `shopcart (8)`）→ `session`（`tmuxTarget` 的 session 名，没有 pane 的后台会话归 `(no pane)`）→ `state`（working / waiting / done / idle 四组，按这个顺序，不按名排）。`g`（新动作 `group`，默认 g）按上面顺序循环；底栏显示 `g group:cwd`；config `[layout] group_by` 定启动时的方式；折叠状态按「方式 + 标题」记，切换方式后各组展开。组内卡片排序不变（名字序）；state 分组里卡片仍显示自己的状态行。标题的路径缩写只用于 cwd；project / session / state 标题直接写名字。`flow` 两种模式都适用。
 - 验收：单测 四种分组的 key 与标题、state 的固定顺序、g 循环、配置值校验（非法报一行）、折叠记忆按方式隔离、`agmux config` 打印 group_by。黑盒 夹具里给两个 worktree + 主仓库同 project → project 模式合成一组；session 模式按 tmuxTarget；state 模式四组顺序；g 三次回到 cwd；底栏文案。
 
-### T44 `agmux board --stay`：常驻看板，enter 跳转 / q 都只收起浮窗不退出（dev @dad5f31 送审 / 送测）
+### T44 `agmux board --stay`：常驻看板，enter 跳转 / q 都只收起浮窗不退出（通过 @fabdc73 / 23 条，真 display-popup）
 - dev 偏离（照准）：popup client = own session 上 termname 以 tmux/screen 开头且不是跳转目标的 client（只按 own session 会把跑在普通 pane 里的用户终端 detach 掉）；无 popup client 时退化成现状且无提示（退化即退出）。
 - 审查退回（reviewer @dad5f31）3 必改：只 detach 自己 session 上的 popup 无测试（别的 fl-* 浮窗会被一起 detach）、detach 失败无测试、main.go 死代码 `case "board"`；采纳建议：list-clients 失败时报错留进程而不是退出。不做：退化时底栏仍写 q hide、不在 tmux 提示无单测。备忘：嵌套 ssh 两个 tmux-* client 同在 own session 时非目标的会被 detach（极少）。修复 @fabdc73 复审通过；等真 tmux 黑盒与整套回归。遗留不阻塞：退化时底栏仍写 q hide；不在 tmux 的提示无单测。
 - 用户 2026-10-13：浮窗里 enter 跳转后看板进程退出，下次 ctrl+1 要重起；想要回车跳到对应 pane 但看板不关，下次打开还是原来的进程。用户的 fl-toggle.sh 已经是「程序跑在常驻 session fl-agmux，浮窗 = display-popup -E 里 attach 它」，进程退出 session 才没。
@@ -245,7 +245,7 @@
 - README：浮窗一节加 --stay 的用法和 fl-toggle 式脚本示例（new-session -d … agmux board --stay）；底栏 stay 模式下 `q hide · Q quit`。
 - 验收：单测 stay 下 jump 发 switch-client + detach-client（目标 = own session 的 client）且不 Quit；quit 只 detach；exit Quit；非 stay 行为不变；own 无 client 时退化 + 提示。黑盒 真 tmux：常驻 session + popup attach，enter 后 popup 关、外层 client 到目标 pane、进程仍在、再 attach 看到同一焦点；q 同样；Q 退出进程。
 
-### T45 在看板里看过的 done 就算已读（dev @975ae2a + 补丁 @8dc339c；审查退回 3 必改：同尺寸再 attach 不发 WINCH（reviewer 真 tmux 实测）→ hidden 期间轮询 `#{session_attached}` 清除；dwell 焦点换卡 / 非 done 两处清零无测试；MarkSeen 比较 statusChangedAt 无测试；修复 @7cefc08 复审通过——reviewer 真 tmux 实测 session_attached 在 detach 返回后立刻为 0、20 轮无窗口；等整套回归）
+### T45 在看板里看过的 done 就算已读（通过 @7cefc08 / 21 条；dev @975ae2a + 补丁 @8dc339c；审查退回 3 必改：同尺寸再 attach 不发 WINCH（reviewer 真 tmux 实测）→ hidden 期间轮询 `#{session_attached}` 清除；dwell 焦点换卡 / 非 done 两处清零无测试；MarkSeen 比较 statusChangedAt 无测试；修复 @7cefc08 复审通过——reviewer 真 tmux 实测 session_attached 在 detach 返回后立刻为 0、20 轮无窗口；等整套回归）
 - dev 核实 statusChangedAt 只在状态变化时变。定稿：hideBoard 自己 detach 后 hidden=true，期间 dwell 不计，任何输入 / resize 清除；脚本从浮窗 detach 的情况不知道，接受。多看板互相误删 seen 条目接受；seen.json 复用 avatar.FileBindings 接受。
 - 用户 2026-10-13：done 的卡要跳过去 pane 才变 idle（ccmux 在 pane 获焦后清 attentionState），想在看板里 focus 到它就算看过，省得反复确认。
 - ccmux 没有 ack 命令，`show --json` 的 attentionGeneration 不随每次 done 递增（实测 state=unread 而 gen=0 的会话存在），所以 agmux 自己记：**已读 = (session id, statusChangedAt)**（status 变成 idle 的时刻；dev 核实该字段在「再次工作后又完成」时会变）。记录写 `$XDG_STATE_HOME/agmux/seen.json`，启动读、轮询时清掉已不存在的会话。
@@ -255,3 +255,8 @@
 
 ## 第八批审查最终结论（reviewer 2026-10-13，32a2435）
 - T41–T43 全部通过，无遗留必改；等 tester 整套回归。
+
+## 第八批 + T44 + T45 整批回归（tester 2026-10-13，7cefc08，套件 f372230）
+- go vet / go test -race 全绿；e2e 804 条全过（tmux 3.8，1674 s）。
+- 观察（不当缺陷，待定夺）：`(no project)` 按字节序排最前而 `(no pane)` 固定最后、大小写按字节序；`agmux show` 只有 status 列，done / 已读都显示 idle；list-clients 失败的消息行以命令行开头，120 列下原因被截；底栏加 g 后约 167 列，165 列以下 `q quit` 看不到；有 attention 的 working 会话在 state 模式落 working 组。
+- 没覆盖：真 kitty / ghostty 观感与 q=2、?1049l 兜底、真 pi sheet、≥100 用户图集耗时、flash 叠在占位符上、--force 竞态、嵌套 ssh 两 tmux-* client、脚本从浮窗 detach 时 hidden 靠轮询、fl-toggle.sh 真脚本未跑。
