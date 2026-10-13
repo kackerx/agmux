@@ -102,7 +102,8 @@
   - 先做**可行性 spike**（dev，scratchpad，不进产品代码）：一个 bubbletea 全屏程序，在 tmux 浮窗里上传 PNG（可拿 pi-emote 的 aza_choi 帧，MIT）并以 4×2、6×2、8×4 格三种框显示；每 200ms 重绘周围文字、每 500ms 换一张图片 id（动画）；验证：浮窗里能显示、不残影、不闪、重绘不丢；占位符行经 ansi.StringWidth 算出的宽度 = 列数（版面代码不用改）；长宽比是保持还是拉伸；退出时 a=d 删图，重开再传同 id 正常；一张 128×128 PNG 直通上传的耗时。用户在自己的 kitty 里跑看结果。
   - spike 结论（dev，aspike）：可行。c/r 同给时 kitty 保持比例居中；动画 25 张截图无空白、无错位；StringWidth = 列数；a=d 删图有效；12 张 435KB 写出 12ms；直通在浮窗里可用。坑：别用 show-environment 探测终端，用 client_termname；q=2 必带；先上传再进 bubbletea。设计定稿见 design.md「头像用真图」。
 
-### T28 头像用真图（待开工；设计 design.md「头像用真图」）
+### T28 头像用真图（dev @6f605fc 送审；退出删图改为不删）
+- dev 自报：`a` 浮层只认 sprite、`agmux avatars` 未列集（T29）；hash 池模数 6→7，e2e 依赖具体 hash 的断言要跟进；默认配置表多 `renderer = "auto"`；图片模式无 agentType 色带；`renderer = "image"` = 跳过终端名检查但 passthrough off 仍回落。两个看板同开时退出删图会删掉对方的图 → 定稿：退出不删。
 - 范围：avatar 包加图片集加载（内置 embed + 用户目录）、占位符渲染、启动上传 / 退出删除、探测与 `renderer` 配置、回落；store / board 的头像赋值接受集 id；现有 sprite 代码保留。`a` 列表、`agmux avatars`、README 放 T29。
 - 验收：单测 占位符行 StringWidth=6 且每格带行列变音符、前景色 = id；集加载（缺状态回 idle、无 idle 不算、非 png 忽略、帧按名排序）；探测表（termname × passthrough × renderer）；上传序列分块 ≤4096、tmux 里 ESC 加倍、q=2；退出删除每个 id。黑盒（tester）：夹具 tmux 的 client_termname 给 xterm-kitty 时抓屏里头像格是 U+10EEEE 且 SGR 前景是对应 id、随帧 tick 换 id；给 xterm-256color 时仍是像素头像；renderer=pixel 强制像素；用户目录放一套 PNG 后被认出；缺 idle 的集报底栏不退出。真 kitty 观感由用户验收。
 
