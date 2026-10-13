@@ -149,7 +149,7 @@
 
 ## 第六批（用户 2026-10-13 下午：22 张卡时底部被截、没法滚；要生成头像的 prompt）
 
-### T34 卡片区可滚动（dev @6bdad7a；tester 黑盒退回 1 条：开板后第一个滚轮 / ctrl+d 被吞（m.focus 初始空串被当成焦点移动 → followHidden 撤销滚动），修复 @b8c0a36；审查再退 4 必改：同根因在轮询删焦点卡后复现（改比「屏上显示的焦点」）、部分可见边界 / 滚动态点击 / 滚轮 mode 守卫无测试；定稿：过滤态顶栏无 more 提示接受；轮询回落焦点也算移出 → 回到跟随；修复 @e1a6ff0 复审：4 条关闭，再退 1 条只差测试（frameMsg 的 focus != was 守卫无测试），补丁中。已知窗口：轮询删卡到下一帧之间来滚轮，焦点回落后不跟随直到下次按键，接受）
+### T34 卡片区可滚动（dev @6bdad7a；tester 黑盒退回 1 条：开板后第一个滚轮 / ctrl+d 被吞（m.focus 初始空串被当成焦点移动 → followHidden 撤销滚动），修复 @b8c0a36；审查再退 4 必改：同根因在轮询删焦点卡后复现（改比「屏上显示的焦点」）、部分可见边界 / 滚动态点击 / 滚轮 mode 守卫无测试；定稿：过滤态顶栏无 more 提示接受；轮询回落焦点也算移出 → 回到跟随；修复 @e1a6ff0 + 测试 @656a036 复审通过（5 条必改全关闭）。已知窗口：轮询删卡到下一帧之间来滚轮，焦点回落后不跟随直到下次按键，接受）
 - dev 自报：搜索过滤态顶栏被过滤框替换看不到 more 提示；滚动中焦点卡被轮询删掉时焦点悄悄换到第一张、视图停在原偏移直到下次按键；单卡高于正文高的极窄终端没处理。
 - 现状：正文只跟着焦点滚（scrollOff），鼠标滚轮只滚预览，底部被截的卡没有任何提示；用户以为是 bug。
 - 做法：鼠标滚轮在卡片区（x < cardsW）每格滚 3 行，不动焦点；新增动作 `page_down` / `page_up`（默认 ctrl+d / ctrl+u）滚半个正文高度；手动滚过的偏移保留，直到按键移动焦点把焦点移出可见区才回到「跟着焦点」；顶栏在被截时加提示：下方还有内容 ` · ↓ more`、上方被滚走 ` · ↑ more`（都有就两个）。`agmux config` 打印新动作，README 键位表加一行。
@@ -173,3 +173,10 @@
 - 用户问能不能拿到会话用的哪个 agent 定义（`claude --agent orchestrator` 那个）。能：Claude Code 的 transcript jsonl 里有 `{"type":"agent-setting","agentSetting":"orchestrator",...}` 行（第 1 行，resume 时再写一次）；statusline payload 和 ccmux 都没有。
 - 做法：store 读 jsonl **开头 64KB**（现在读尾部 64KB 取模型的逻辑旁边再加一次读头），取第一条 agent-setting 的值存 `Session.Agent`，按 session ID 缓存（不会变）；没有就空。卡片第 2 行右侧靠右显示它（和第 1 行的时间同一规则：始终显示，分支放不下才截），新颜色项 `colors.agent` 默认 `#bd93f9`；`agmux show` 也多一列。README 颜色表加行。
 - 验收：单测 jsonl 第 1 行有 agent-setting → Agent="orchestrator"；没有 → ""；只在尾部有（头 64KB 外）不要求读到（写进注释）；第 2 行布局：分支 + 右侧 agent，窄时分支截断 agent 保留。黑盒 夹具 jsonl 带 agent-setting 的卡第 2 行右侧出现 `orchestrator` 且是 colors.agent 色；无的卡第 2 行照旧。
+
+### T38 浮窗（嵌套 tmux client）里图片模式失效（待开工，**插队优先**）
+- 用户现象（2026-10-13 下午）：~/go/bin/agmux 已是 c2b26dd，但在常驻浮窗里开看板，卡片和 `a` 格子全是像素头像（图集名字在、画的是 hash 出的 sprite）= 图片模式被判 off；底栏没有任何提示（auto 模式判 off 时 note 为空）。
+- 用户的浮窗脚本 `~/.config/tmux/scripts/fl-toggle.sh`：程序跑在常驻 session `fl-agmux`（`new-session -d … agmux board`），浮窗是 `display-popup -E "tmux attach-session -t fl-agmux"`——**同一个 server 上多了一个 termname 为 tmux-256color 的嵌套 client**（实测 list-clients：/dev/ttys001 xterm-kitty sess=agmux；/dev/ttys042 tmux-256color sess=fl-agmux，后者活动时间更新）。脚本用 `set-environment -t fl-agmux AGMUX_CLIENT <client>`（**没有 -h**），而 chooseClient 只读 `show-environment -h`，所以 AGMUX_CLIENT 实际没生效，走「最近活动且不在自己 session 的 client」。从别的 fl-* 浮窗切过来时脚本还会 unset AGMUX_CLIENT。
+- 先查后改（dev 在自己的 kitty + tmux 里用同一个脚本复现，把结论写进 design.md）：1. 这种布局下 chooseClient 选到哪个 client、为什么（TMUX_PANE → own 是否解析成功；popup client 和 agmux 进程启动的先后）；2. 单层 `\ePtmux;` 包装的上传经「嵌套 client → popup pty → 外层 tmux」能不能到 kitty（之前截图 9 在浮窗里见过图，说明某种情况下能）；3. 需不需要按嵌套层数多包一层。
+- 改：a. 嵌套识别——选中的 client termname 以 tmux- / screen- 开头时，视为嵌套一层，终端类型改看同 server 上最近活动、termname 不是 tmux-/screen- 的 client，上传按实测结果决定包装层数；b. **auto 判 off 时底栏给一行原因**（哪个 client、它的 termname / passthrough），用户能自诊；c. chooseClient 同时接受 `show-environment -t <own>`（非 -h）的 AGMUX_CLIENT（优先 -h），README 两种写法都写明。
+- 验收：单测 嵌套 client 的探测表、note 文案、非 -h 的 AGMUX_CLIENT；黑盒 fake tmux 给两 client（kitty + tmux-256color，后者更新且在自己 session）→ 图片模式 on、上传包装层数符合定稿；只有 tmux-256color client → off 且底栏有原因。真机：dev 用用户脚本在浮窗里看到图。
