@@ -122,23 +122,27 @@
 
 ## 第五批（用户 2026-10-13 下午验收意见：状态动作、头像等宽、选择框改格子 + 20 个默认头像）
 
-### T30 头像状态对齐 pi-emote（dev @1d4d5fd；审查退回 1 必改 + 2 建议，补丁 @2459066 复审通过）
+### T30 头像状态对齐 pi-emote（通过 @1d4d5fd+2459066 / test_t30 18 条）
 - dev 定稿（照准）：其它 status（background）= idle；hi 优先于 working；别名帧 id 按实际目录名哈希；眨眼 tick>0 且 tick%8==0、多帧按 8/16/24 轮；aza_choi 无 success 回落 idle。
 - 设计 design.md「头像图片：状态、宽度、选择框」第 1–3 条。store 里按 pendingTool 算出头像状态（和 getEffectiveStatus 一样放 store 做一次，view 只读）；avatar 包的帧选择按新状态名 + 回落链 + 别名；idle 眨眼规则；内置 aza_choi 改用原目录。
 - 验收：单测 状态映射表（每种 pendingTool / 无 tool / attention / waiting / done / idle）；回落链；别名目录；idle 第 2 帧只在第 8k 个 tick 出现一个 tick；黑盒 pendingTool=Read 的卡出 read 帧、Write → write、Bash → tool、无 tool → think；旧目录名 working 仍被认。
 
-### T31 头像填满 6 格（dev @24cf734 审查通过；3 建议补丁 @38cc815 + 测试 @6cd04df 复审通过；等测试）
+### T31 头像填满 6 格（通过 @24cf734+38cc815+6cd04df / test_t31 12 条）
 - 设计第 4 条（已改）：kitty 忽略占位符放置的源矩形，改为载入时 png.Decode 裁居中 3:2 再编码上传；坏 PNG 跳过并报。
 - 验收：单测 128×128 → 128×85、200×100 → 中间 150×100、3:2 原样；坏 PNG 跳过且 Problems 一行；黑盒 上传载荷解码后是 3:2（内置帧 64×42），不带 x/y/w/h。
 
-### T32 选择框改 5×4 格子 + 20 个内置头像（dev @353a904；审查退回 2 必改（缺测试：格子位置 270 组合探针、穿着格 focus 色）+ 采纳 2 建议（末行无空格子断言、bot-06 报错文案），补丁 @ea5df78 复审通过）
+### T32 选择框改 5×4 格子 + 20 个内置头像（通过 @353a904+ea5df78 / test_t32 27 条）
 - reviewer 核过 CC0 来源 zip（license 逐字一致、14 张逐像素 0 差异）；party-* 随 T33 删除。
 - dev 定稿（照准）：格宽 9（8 时 8 字符 id 粘连）、整框 47×14；当前穿的那格 = 名字 focus 色 + 光标反白（8×3 格画不出边框）；放不下上方时少画几行；esc / q 都取消。内置 14 张来自 OpenGameArt「Wacky EGA style character portraits」（CC0，Tim Rachor，38×38 → 76×76，只有 idle），许可原文随附，CREDITS.md 记录。
 - 设计第 5–6 条。CC0 来源逐个核对许可页后再收，CREDITS.md 记 URL / 作者 / 许可；README 署名。
 - 验收：单测 格子布局（焦点卡下方 / 放不下换上方、5×4、格内 id 行、光标起点、滚动行、enter 绑定、消息行 id）；内置集数 = 15、sprite = 5；黑盒 120×40 按 a 抓屏：框在焦点卡下方、20 格、最后一排 5 个像素头像、l/j 移动、enter 后卡片换图、矮终端（高 20）时上方或滚动仍能选到最后一个。
 
-### T33 内置头像换成 pi-agent-portrait 的 10 个角色（dev @de20b1e 审查退回 1 条只差测试，补丁 @c919932 + c2b26dd 复审通过；第五批审查全过，等整套回归）
+### T33 内置头像换成 pi-agent-portrait 的 10 个角色（通过 @de20b1e+c919932+c2b26dd）
 - reviewer 浅克隆上游比对：141 帧清单一致、抽 47 帧像素等于 2×2 均值；许可逐字一致；直通 321 个 DCS 序列最大 4153 字节、分块边界无问题。
 - 数字：141 帧、PNG 803 KB、直通后 1.08 MB，载入 73 ms、写出 1.3 ms，浮窗起到看板出现 0.67 s 时头像已全在。aza_choi / cipher / default / red 上游无 success 目录 → 回落 idle（验收「每状态 ≥1」对 success 不要求）。
 - 设计 design.md「内置头像换成 pi-agent-portrait 的角色」。只拿 10 个角色目录里七个状态（含别名）下不带 `_v\d+` 的 PNG，预缩 64×64 embed；删 party-*；`_v\d+` 忽略规则加到 loadSets（用户集同样）；格宽 10；CREDITS / README。
 - 验收：单测 内置集数 10 且每个 idle/think/read/write/tool/hi/success 帧数 ≥1、不含 `_v2`；用户集里 `idle_v2.png` 被忽略、`idle_2.png` 仍算帧；格宽 10 的布局。黑盒 `agmux avatars` 列 10 个内置 + 5 sprite；`a` 格子 15 格、名字不贴邻格；上传帧数 = 各集基础 take 之和。
+
+## 第五批整批回归（tester 2026-10-13，c2b26dd，套件 4bb5295）
+- go vet / go test -race 全绿；e2e 574 条全过（1169s）。首轮 7 条红全是测试跟不上产品（眨眼相位、帧去重、计数），改后整套全绿。
+- 没覆盖：真 kitty / ghostty 的填满与观感、CREDITS / LICENSE 内容、最近邻缩放对照片的锯齿、≥100 用户集的上传耗时、≥4096 边长图在真终端的内存。
