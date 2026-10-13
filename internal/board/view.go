@@ -237,7 +237,7 @@ func header(g group, w int, folded, focused bool, hl []int) string {
 	}
 	title := fg(c, mark) + midTrunc(hilite(tildePath(g.key), hl, c), w-2-len(count)) + fg(cMuted, count)
 	if rule := w - ansi.StringWidth(title) - 1; rule > 0 { // a heavy line to the column's right edge
-		title += " " + fg(cMuted, strings.Repeat("━", rule))
+		title += " " + fg(c, strings.Repeat("━", rule)) // the title's own color: dir, or focus on a focused folded title
 	}
 	return title
 }

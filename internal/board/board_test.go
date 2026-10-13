@@ -501,8 +501,8 @@ func TestLayoutStack(t *testing.T) {
 	}
 }
 
-// A group's title: the path, the count, then a heavy line to the column's right edge in the muted
-// color (folded or not); a title that fills the column has no room for one.
+// A group's title: the path, the count, then a heavy line to the column's right edge in the title's
+// own color (dir; focus on a focused folded title), folded or not; a title that fills the column has no room for one.
 func TestGroupHeaderRule(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -512,9 +512,12 @@ func TestGroupHeaderRule(t *testing.T) {
 		h := header(g, 40, folded, false, nil)
 		plain := ansi.Strip(h)
 		if ansi.StringWidth(h) != 40 || !strings.HasPrefix(plain, map[bool]string{false: "▾ ", true: "▸ "}[folded]+"/some/path (3) ━") || !strings.HasSuffix(plain, "━") ||
-			!strings.Contains(h, fg(cMuted, strings.Repeat("━", 40-ansi.StringWidth("▾ /some/path (3) ")))) {
+			!strings.Contains(h, fg(cDir, strings.Repeat("━", 40-ansi.StringWidth("▾ /some/path (3) ")))) {
 			t.Errorf("folded=%v: %q (%d wide)", folded, plain, ansi.StringWidth(h))
 		}
+	}
+	if h := header(g, 40, true, true, nil); !strings.Contains(h, fg(cFocus, strings.Repeat("━", 40-ansi.StringWidth("▸ /some/path (3) ")))) {
+		t.Errorf("a focused title's line is not in the focus color: %q", h)
 	}
 	if h := header(g, 18, false, false, nil); ansi.StringWidth(h) != 18 || !strings.HasSuffix(ansi.Strip(h), " ━") { // room for the space and one stroke
 		t.Errorf("one stroke: %q", ansi.Strip(h))
