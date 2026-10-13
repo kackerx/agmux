@@ -307,15 +307,31 @@ func Placeholder(id uint32) []string {
 // chunkSize is what kitty takes of base64 in one escape sequence.
 const chunkSize = 4096
 
+// Via is where Upload writes: how the bytes get to the terminal that stores the pictures.
+type Via int
+
+const (
+	// ToTerminal: agmux's own stdout is the terminal (outside tmux): it first switches to the
+	// alternate screen, where the board will run.
+	ToTerminal Via = iota
+	// ToPassthrough: stdout is a tmux pane: each sequence goes through tmux's DCS passthrough.
+	// It needs allow-passthrough, an attached client, and reaches only one tmux layer.
+	ToPassthrough
+	// ToTTY: w is the tty of the tmux client in the real terminal: bare sequences, no tmux in
+	// the way (so no passthrough, nesting or attached-client conditions).
+	ToTTY
+)
+
 // Upload sends every frame of sets to the terminal as a virtual placement of Width × Height/2 cells
 // (U=1: nothing is drawn until placeholders show it), each the centered 3:2 part of its picture
 // (cropPNG) so that it fills all the cells. q=2 silences the terminal's replies, which
-// inside tmux would arrive as keystrokes. In tmux each sequence goes through its DCS passthrough.
-// Outside tmux it first switches to the alternate screen, where the board will run.
+// inside tmux would arrive as keystrokes. Every write is one sequence of at most chunkSize base64
+// bytes (plus its framing): through a tty shared with tmux's own drawing the chance to be
+// interleaved with it is smallest that way.
 // The images are never deleted: they are small, stay in the terminal until it closes, and the next
 // start overwrites them under the same IDs (a second board's exit must not blank the first's).
-func Upload(w io.Writer, sets []*Set, tmux bool) (err error) {
-	if !tmux { // kitty keeps images per screen; the board runs on the alternate one, so upload there (tmux's client is already on it)
+func Upload(w io.Writer, sets []*Set, via Via) (err error) {
+	if via == ToTerminal { // kitty keeps images per screen; the board runs on the alternate one, so upload there (tmux's client is already on it)
 		if _, err := io.WriteString(w, "\x1b[?1049h"); err != nil {
 			return err
 		}
@@ -339,7 +355,7 @@ func Upload(w io.Writer, sets []*Set, tmux bool) (err error) {
 					if off == 0 {
 						seq = fmt.Sprintf("\x1b_Ga=T,U=1,f=100,q=2,i=%d,c=%d,r=%d,m=%d;%s\x1b\\", s.ids[st][i], Width, Height/2, more, b64[off:end])
 					}
-					if _, err = io.WriteString(w, passthrough(seq, tmux)); err != nil {
+					if _, err = io.WriteString(w, passthrough(seq, via == ToPassthrough)); err != nil {
 						return err
 					}
 				}

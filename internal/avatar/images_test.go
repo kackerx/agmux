@@ -339,8 +339,12 @@ func captureAlt(t *testing.T, tmux bool) (seqs []string, png []byte, alt bool) {
 	t.Helper()
 	png = noisePNG() // 100 × 100 pixels of noise: about 40 KB, many chunks
 	useSets(t, fstest.MapFS{"s/idle/1.png": &fstest.MapFile{Data: png}})
+	via := ToTerminal
+	if tmux {
+		via = ToPassthrough
+	}
 	var b bytes.Buffer
-	if err := Upload(&b, Sets, tmux); err != nil {
+	if err := Upload(&b, Sets, via); err != nil {
 		t.Fatal(err)
 	}
 	out, alt := strings.CutPrefix(b.String(), "\x1b[?1049h")
@@ -588,7 +592,7 @@ func TestUploadAlternateScreen(t *testing.T) {
 		t.Error("in tmux there is no screen switch")
 	}
 	var b bytes.Buffer
-	Upload(&b, Sets, false)
+	Upload(&b, Sets, ToTerminal)
 	if strings.Count(b.String(), "\x1b[?1049h") != 1 || !strings.HasPrefix(b.String(), "\x1b[?1049h\x1b_G") {
 		t.Errorf("once, before the first image: %.40q", b.String())
 	}
@@ -647,14 +651,14 @@ func (f *failAt) Write(p []byte) (int, error) {
 func TestUploadFailureLeavesAlternateScreen(t *testing.T) {
 	useSets(t, fstest.MapFS{"s/idle/1.png": file("a")})
 	w := &failAt{n: 2} // the first image chunk
-	if err := Upload(w, Sets, false); err == nil || !strings.Contains(err.Error(), "pty closed") {
+	if err := Upload(w, Sets, ToTerminal); err == nil || !strings.Contains(err.Error(), "pty closed") {
 		t.Fatalf("error: %v", err)
 	}
 	if got := w.got.String(); got != "\x1b[?1049h\x1b[?1049l" {
 		t.Errorf("wrote %q, want the switch there and back", got)
 	}
 	w = &failAt{n: 1}
-	if err := Upload(w, Sets, true); err == nil || w.got.Len() != 0 {
+	if err := Upload(w, Sets, ToPassthrough); err == nil || w.got.Len() != 0 {
 		t.Errorf("in tmux: %v %q", err, w.got.String())
 	}
 }
@@ -738,4 +742,31 @@ func TestSpriteFor(t *testing.T) {
 	if a.ID == "" || a.ID != b.ID {
 		t.Errorf("set stand-in: %q %q", a.ID, b.ID)
 	}
+}
+
+// To a client's tty the sequences go bare: no wrapper, no screen switch; and each write is one
+// sequence of at most chunkSize base64 bytes, so that tmux's own drawing has the least to cut into.
+func TestUploadToTTY(t *testing.T) {
+	png := noisePNG()
+	useSets(t, fstest.MapFS{"s/idle/1.png": &fstest.MapFile{Data: png}})
+	w := &recordingWriter{}
+	if err := Upload(w, Sets, ToTTY); err != nil {
+		t.Fatal(err)
+	}
+	plain, _ := capture(t, false)
+	if len(w.writes) != len(plain) || len(w.writes) < 5 {
+		t.Fatalf("%d writes, want one per sequence (%d, more than 5)", len(w.writes), len(plain))
+	}
+	for i, got := range w.writes {
+		if got != plain[i] || strings.Contains(got, "\x1bPtmux;") || strings.Contains(got, "\x1b[?1049") || len(got) > chunkSize+100 {
+			t.Fatalf("write %d: %.60q (%d bytes)", i, got, len(got))
+		}
+	}
+}
+
+type recordingWriter struct{ writes []string }
+
+func (r *recordingWriter) Write(p []byte) (int, error) {
+	r.writes = append(r.writes, string(p))
+	return len(p), nil
 }

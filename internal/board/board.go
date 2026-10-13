@@ -129,9 +129,11 @@ func Run(p *store.Poller, cfg *config.Config, img ImageMode) error {
 	m := New(p, realRunner{})
 	m.cfg, m.keymap = cfg, cfg.KeyMap()
 	if img.On { // before the screen is taken over: bubbletea must not interleave with the upload
-		if err := avatar.Upload(os.Stdout, avatar.Sets, os.Getenv("TMUX") != ""); err != nil {
+		note, err := uploadImages(img, realRunner{})
+		if err != nil {
 			return err
 		}
+		img.Note = note
 		useImages = true
 	}
 	lines := slices.Clone(avatar.Problems())
@@ -809,11 +811,14 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg { return doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true} }
 }
 
-const clientsFormat = "#{client_activity}\t#{client_name}\t#{client_session}"
+// clientsFormat: the termname and the tty are asked here, not by display-message -c, which in
+// tmux 3.8 ignores -c without -t and answers for the most recently active client.
+const clientsFormat = "#{client_activity}\t#{client_name}\t#{client_session}\t#{client_termname}\t#{client_tty}"
 
 type tmuxClient struct {
 	activity      int
 	name, session string
+	termname, tty string // "" when the line had no such field
 }
 
 // pickedClient is chooseClient's answer: the client, whether the launcher named it exactly, agmux's
@@ -840,10 +845,14 @@ func chooseClient(r Runner, getenv func(string) string) (pickedClient, error) {
 	}
 	var clients []tmuxClient
 	for l := range strings.Lines(out) {
-		f := strings.SplitN(strings.TrimRight(l, "\n"), "\t", 3)
-		if len(f) == 3 {
+		f := strings.SplitN(strings.TrimRight(l, "\n"), "\t", 5)
+		if len(f) >= 3 {
 			n, _ := strconv.Atoi(f[0])
-			clients = append(clients, tmuxClient{n, f[1], f[2]})
+			c := tmuxClient{activity: n, name: f[1], session: f[2]}
+			if len(f) == 5 {
+				c.termname, c.tty = f[3], f[4]
+			}
+			clients = append(clients, c)
 		}
 	}
 	exact := getenv("AGMUX_CLIENT")
@@ -852,9 +861,16 @@ func chooseClient(r Runner, getenv func(string) string) (pickedClient, error) {
 		// can't reach agmux's process environment; it sets the session's environment instead
 		// hidden (-h): a plain session variable would be inherited by panes opened later and then,
 		// as their process variable, win with a stale client
-		if out, err := r.Tmux("show-environment", "-h", "-t", own, "AGMUX_CLIENT"); err == nil {
-			if v, ok := strings.CutPrefix(strings.TrimSuffix(out, "\n"), "AGMUX_CLIENT="); ok { // "-AGMUX_CLIENT" = unset
+		// A launcher that set it plain (no -h) is read too, when no hidden one is there.
+		for _, flags := range [][]string{{"-h"}, nil} {
+			out, err := r.Tmux(append(append([]string{"show-environment"}, flags...), "-t", own, "AGMUX_CLIENT")...)
+			out = strings.TrimSuffix(out, "\n")
+			if v, ok := strings.CutPrefix(out, "AGMUX_CLIENT="); err == nil && ok {
 				exact = v
+				break
+			}
+			if err == nil && strings.HasPrefix(out, "-AGMUX_CLIENT") { // unset on purpose: the plain one is not asked
+				break
 			}
 		}
 	}

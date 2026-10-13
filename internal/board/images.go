@@ -1,7 +1,9 @@
 package board
 
 import (
+	"fmt"
 	"hash/fnv"
+	"io"
 	"os"
 	"strings"
 
@@ -52,47 +54,104 @@ func blinkOffset(key string) int {
 // kittyTerm: the TERM values whose terminals draw kitty graphics with Unicode placeholders.
 func kittyTerm(t string) bool { return t == "xterm-kitty" || t == "xterm-ghostty" }
 
-// ImageMode is whether avatars are drawn as pictures, and the one line to say on the board's bottom row.
+// nestedTerm: a client whose TERM is tmux's or screen's is a tmux inside something (a popup that
+// attaches to another session), not the terminal that stores pictures.
+func nestedTerm(t string) bool { return strings.HasPrefix(t, "tmux") || strings.HasPrefix(t, "screen") }
+
+// ImageMode is whether avatars are drawn as pictures, and the one line to say on the board's bottom
+// row. In tmux, Client and TTY are the client of the real terminal: the pictures are uploaded to its tty.
 type ImageMode struct {
-	On   bool
-	Note string
+	On          bool
+	Note        string
+	Client, TTY string
 }
 
 // DetectImages is imageMode for the real tmux and environment. It also tells the avatar package
 // whether a hash may pick image sets, so call it before the first poll.
 func DetectImages(cfg *config.Config) ImageMode {
-	on, note := imageMode(realRunner{}, os.Getenv, cfg.AvatarRenderer)
-	avatar.HashImages = on
-	return ImageMode{on, note}
+	img := imageMode(realRunner{}, os.Getenv, cfg.AvatarRenderer)
+	avatar.HashImages = img.On
+	return img
 }
 
 // imageMode decides whether avatars are drawn as pictures, from [avatars] renderer: "pixel" never;
-// "auto" when the terminal is kitty or ghostty (in tmux: the attached client's TERM, the client
-// chosen as for a jump; not $TERM_PROGRAM, which in tmux is whatever started the server) and, in
-// tmux, allow-passthrough is on; "image" skips the terminal check but still needs the passthrough,
-// and says so when it falls back. note is that one line for the board's bottom row.
-func imageMode(r Runner, getenv func(string) string, renderer string) (on bool, note string) {
+// "auto" when the terminal is kitty or ghostty; "image" skips the terminal check. In tmux the
+// terminal is the TERM of the client chosen as for a jump (not $TERM_PROGRAM, which in tmux is
+// whatever started the server); when that client is itself a tmux (a popup that attaches to
+// another session) it is the most recently active client that is not. Pictures then go to that
+// client's tty, so allow-passthrough, nesting and whether anything is attached yet do not matter.
+// Note is the reason for a fallback, for the board's bottom row.
+func imageMode(r Runner, getenv func(string) string, renderer string) ImageMode {
 	if renderer == "pixel" || len(avatar.Sets) == 0 {
-		return false, ""
+		return ImageMode{}
 	}
 	force := renderer == "image"
 	if getenv("TMUX") == "" {
-		return force || kittyTerm(getenv("TERM")) || getenv("TERM_PROGRAM") == "ghostty", ""
+		return ImageMode{On: force || kittyTerm(getenv("TERM")) || getenv("TERM_PROGRAM") == "ghostty"}
 	}
-	if !force {
-		pc, err := chooseClient(r, getenv)
-		if err != nil {
-			return false, ""
-		}
-		if term, err := r.Tmux("display-message", "-p", "-c", pc.name, "#{client_termname}"); err != nil || !kittyTerm(strings.TrimSpace(term)) {
-			return false, ""
+	pc, err := chooseClient(r, getenv)
+	if err != nil {
+		return ImageMode{On: force, Note: noClient + hintPixel(force)}
+	}
+	var c tmuxClient
+	for _, o := range pc.clients {
+		if o.name == pc.name {
+			c = o
 		}
 	}
-	if pt, err := r.Tmux("show-options", "-gv", "allow-passthrough"); err != nil || strings.TrimSpace(pt) == "off" {
-		if force {
-			return false, "avatars: renderer = \"image\" needs tmux allow-passthrough on (tmux set -g allow-passthrough on); showing pixel avatars"
+	if nestedTerm(c.termname) {
+		best := -1
+		for _, o := range pc.clients {
+			if o.termname != "" && !nestedTerm(o.termname) && o.activity > best {
+				c, best = o, o.activity
+			}
 		}
-		return false, ""
+		if best < 0 && force { // nothing but tmux clients: no terminal to write to
+			return ImageMode{On: true, Note: "avatars: every tmux client is itself a tmux, no terminal to draw pictures through" + hintPixel(force)}
+		}
 	}
-	return true, ""
+	if !force && !kittyTerm(c.termname) {
+		return ImageMode{Note: fmt.Sprintf("avatars: pixel; tmux client %s is %q, not kitty or ghostty%s", c.name, c.termname, hintPixel(force))}
+	}
+	if c.tty == "" {
+		c.tty = c.name
+	}
+	return ImageMode{On: true, Client: c.name, TTY: c.tty}
+}
+
+// noClient is the note when list-clients gave nothing to ask.
+const noClient = "avatars: no tmux client found to draw pictures through (tmux list-clients is empty or failed)"
+
+func hintPixel(force bool) string {
+	if force {
+		return "; trying tmux passthrough"
+	}
+	return ` (renderer = "image" forces pictures, "pixel" hides this note)`
+}
+
+// openTTY opens a client's tty for writing; tests replace it.
+var openTTY = func(path string) (io.WriteCloser, error) { return os.OpenFile(path, os.O_WRONLY, 0) }
+
+// uploadImages sends the pictures where the terminal that stores them can be reached: to the tty of
+// the tmux client in the real terminal, or, if that cannot be opened or written, through tmux's
+// passthrough (one tmux layer, an attached client and allow-passthrough on); outside tmux to
+// stdout. note is img.Note, or what to say instead when it fell back.
+func uploadImages(img ImageMode, r Runner) (note string, err error) {
+	if os.Getenv("TMUX") == "" {
+		return img.Note, avatar.Upload(os.Stdout, avatar.Sets, avatar.ToTerminal)
+	}
+	note = img.Note
+	if img.TTY != "" {
+		f, oerr := openTTY(img.TTY)
+		if oerr == nil {
+			oerr = avatar.Upload(f, avatar.Sets, avatar.ToTTY)
+			f.Close()
+			r.Tmux("refresh-client", "-t", img.Client) // if tmux's own drawing was cut into, it draws the screen again
+			if oerr == nil {
+				return note, nil
+			}
+		}
+		note = fmt.Sprintf("avatars: cannot write to %s (%v); using tmux passthrough, which needs allow-passthrough on", img.TTY, oerr)
+	}
+	return note, avatar.Upload(os.Stdout, avatar.Sets, avatar.ToPassthrough)
 }

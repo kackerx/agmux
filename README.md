@@ -69,6 +69,7 @@ tmux set-environment -h -t "$target" AGMUX_CLIENT "$(tmux display -p "#{client_n
   tmux set-environment -h -t "$target" AGMUX_CLIENT "$(tmux show-environment -h -t "$current" AGMUX_CLIENT | cut -d= -f2-)"
   ```
 - agmux 只认还 attach 着、且不在看板自己 session 里的 client；不符合就当没设，按最近活动猜。
+- 启动脚本里写的是普通（不带 `-h`）session 环境也认：`tmux set-environment -t "$target" AGMUX_CLIENT "$client"`。`-h` 的优先；两者都没有才按最近活动猜。普通的缺点见上：之后新开的 pane 会继承它。
 
 只有拿到了 `AGMUX_CLIENT`（进程环境或 session 环境），跳转后 agmux 才会把浮窗里的那个 client detach 掉、浮窗随之关闭；拿不到就只切换，浮窗留着。
 
@@ -114,7 +115,7 @@ default = "hash"                    # 没绑定的会话：hash = 按名字固�
 
 头像可以是真图（PNG），不只是像素头像：每个会话在卡片左上角占 6 列 × 2 行，和下面的上下文条一样宽。图取**居中的 3:2 区域**铺满这 6 格（方形图上下各裁掉约 1/6，头顶和下巴别画太满；比 3:2 更宽的图裁左右）。高超过 128 像素的会缩到 128（不会放大小图）；不是有效 PNG、或任一边超过 4096 像素的帧会被跳过，启动时底栏报一行。
 
-- **要求**：终端是 kitty 或 ghostty（用 kitty 图形协议的 Unicode 占位符）；在 tmux 里还要 `set -g allow-passthrough on`（tmux ≥ 3.3）。不满足时自动回落到像素头像（`[avatars] renderer = "pixel"` 可以强制，`"image"` 跳过终端检测，但 tmux 里没开 `allow-passthrough` 仍会回落并在底栏提示）。
+- **要求**：终端是 kitty 或 ghostty（用 kitty 图形协议的 Unicode 占位符）。在 tmux 里，看哪个 client 的终端：和 `enter` 跳转用同一个 client（见下面「tmux 浮窗绑定」），它的 `client_termname` 是 `xterm-kitty` / `xterm-ghostty`；若它自己就是 `tmux-*` / `screen-*`（浮窗里 attach 的内层 client），改看最近活动的非 tmux client。图直接写进那个 client 的 tty，所以**不需要 `allow-passthrough`**，嵌套浮窗、常驻 session 先起都行。不满足时自动回落到像素头像，并在底栏说一行原因（哪个 client、它的 termname）；`[avatars] renderer = "pixel"` 强制像素并去掉这行，`"image"` 跳过终端检测。
 - **图片集**：一个目录 = 一个头像，目录名就是它的 id（和像素头像同一个命名空间，同名时图片集优先）：
 
   ```

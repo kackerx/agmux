@@ -9,8 +9,10 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -53,64 +55,59 @@ func useKit(t *testing.T) {
 func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
 // Pictures are drawn only when [avatars] renderer and the terminal say so: pixel never; auto for
-// kitty / ghostty (in tmux the attached client's TERM, with allow-passthrough on); image skips the
-// terminal check but not the passthrough.
+// kitty / ghostty (in tmux the TERM of the client a jump would use, read from list-clients; a client
+// that is a tmux itself is skipped for the most recent real one); image skips the terminal check.
+// In tmux the pictures go to that client's tty, so allow-passthrough does not matter.
 func TestImageMode(t *testing.T) {
 	useKit(t)
 	inTmux := map[string]string{"TMUX": "/tmp/tmux-1/default,1,0"}
+	nested := map[string]string{"TMUX": "x", "TMUX_PANE": "%2"}
+	line := func(act int, name, sess, term string) string {
+		return fmt.Sprintf("%d\t%s\t%s\t%s\t%s\n", act, name, sess, term, name)
+	}
 	for _, c := range []struct {
 		name     string
 		renderer string
 		env      map[string]string
-		term     string // tmux's #{client_termname}
-		pass     string // allow-passthrough, "" = the option doesn't exist
+		clients  string // list-clients output
 		on       bool
-		note     string
+		client   string // the client the pictures go to
+		note     string // part of the board's note ("" = none)
 	}{
-		{"kitty client", "auto", inTmux, "xterm-kitty", "on", true, ""},
-		{"ghostty client, passthrough all", "auto", inTmux, "xterm-ghostty", "all", true, ""},
-		{"other client", "auto", inTmux, "xterm-256color", "on", false, ""},
-		{"kitty, passthrough off", "auto", inTmux, "xterm-kitty", "off", false, ""},
-		{"kitty, no such option (tmux < 3.3)", "auto", inTmux, "xterm-kitty", "", false, ""},
-		{"TERM_PROGRAM says kitty but the client does not", "auto", map[string]string{"TMUX": "x", "TERM_PROGRAM": "kitty"}, "xterm-256color", "on", false, ""},
-		{"pixel is never pictures", "pixel", inTmux, "xterm-kitty", "on", false, ""},
-		{"image on a plain client", "image", inTmux, "xterm-256color", "on", true, ""},
-		{"image, passthrough off: says so", "image", inTmux, "xterm-256color", "off", false, "allow-passthrough"},
-		{"outside tmux: kitty TERM", "auto", map[string]string{"TERM": "xterm-kitty"}, "", "", true, ""},
-		{"outside tmux: ghostty", "auto", map[string]string{"TERM": "xterm-256color", "TERM_PROGRAM": "ghostty"}, "", "", true, ""},
-		{"outside tmux: other", "auto", map[string]string{"TERM": "xterm-256color", "TERM_PROGRAM": "iTerm.app"}, "", "", false, ""},
-		{"outside tmux: image forced", "image", map[string]string{"TERM": "xterm-256color"}, "", "", true, ""},
+		{"kitty client", "auto", inTmux, line(5, "/dev/c", "main", "xterm-kitty"), true, "/dev/c", ""},
+		{"no tty in the answer: the client name is the tty", "auto", inTmux, "5\t/dev/c\tmain\txterm-kitty\t\n", true, "/dev/c", ""},
+		{"ghostty client", "auto", inTmux, line(5, "/dev/c", "main", "xterm-ghostty"), true, "/dev/c", ""},
+		{"other client: says which and what", "auto", inTmux, line(5, "/dev/c", "main", "xterm-256color"), false, "", "/dev/c"},
+		{"other client: the TERM is in the note", "auto", inTmux, line(5, "/dev/c", "main", "xterm-256color"), false, "", "xterm-256color"},
+		{"pixel is never pictures", "pixel", inTmux, line(5, "/dev/c", "main", "xterm-kitty"), false, "", ""},
+		{"image on a plain client", "image", inTmux, line(5, "/dev/c", "main", "xterm-256color"), true, "/dev/c", ""},
+		{"no client: says so", "auto", inTmux, "", false, "", "no tmux client"},
+		{"image with no client: tries passthrough", "image", inTmux, "", true, "", "passthrough"},
+		// the user's layout: agmux runs in fl-1, shown by a popup client (tmux-256color) of the kitty client of another session
+		{"popup client in own session, kitty elsewhere", "auto", nested, line(5, "/dev/kitty", "main", "xterm-kitty") + line(9, "/dev/popup", "fl-1", "tmux-256color"), true, "/dev/kitty", ""},
+		// a chosen client that is a tmux itself: the most recent real terminal instead
+		{"chosen client is nested: the real one", "auto", map[string]string{"TMUX": "x", "AGMUX_CLIENT": "/dev/popup"},
+			line(5, "/dev/old", "a", "xterm-kitty") + line(7, "/dev/new", "b", "xterm-ghostty") + line(9, "/dev/popup", "c", "screen-256color"), true, "/dev/new", ""},
+		{"only nested clients, image forced: no terminal, passthrough", "image", map[string]string{"TMUX": "x", "AGMUX_CLIENT": "/dev/popup"}, line(9, "/dev/popup", "c", "tmux-256color"), true, "", "every tmux client"},
+		{"only nested clients", "auto", map[string]string{"TMUX": "x", "AGMUX_CLIENT": "/dev/popup"}, line(9, "/dev/popup", "c", "tmux-256color"), false, "", "tmux-256color"},
+		{"outside tmux: kitty TERM", "auto", map[string]string{"TERM": "xterm-kitty"}, "", true, "", ""},
+		{"outside tmux: ghostty", "auto", map[string]string{"TERM": "xterm-256color", "TERM_PROGRAM": "ghostty"}, "", true, "", ""},
+		{"outside tmux: other", "auto", map[string]string{"TERM": "xterm-256color", "TERM_PROGRAM": "iTerm.app"}, "", false, "", ""},
+		{"outside tmux: image forced", "image", map[string]string{"TERM": "xterm-256color"}, "", true, "", ""},
 	} {
-		r := &fakeRunner{tmuxOut: map[string]string{"display-message": c.term + "\n", "show-options": c.pass + "\n"}}
-		if c.pass == "" {
-			r.tmuxFail = map[string]error{"show-options": errors.New("unknown option: allow-passthrough")}
+		r := &fakeRunner{tmuxOut: map[string]string{"list-clients": c.clients, "display-message": "fl-1\n"}}
+		img := imageMode(r, env(c.env), c.renderer)
+		if img.On != c.on || img.Client != c.client || (c.note == "") != (img.Note == "") || !strings.Contains(img.Note, c.note) {
+			t.Errorf("%s: %+v, want on=%v client %q note containing %q", c.name, img, c.on, c.client, c.note)
 		}
-		on, note := imageMode(r, env(c.env), c.renderer)
-		if on != c.on || (c.note == "") != (note == "") || !strings.Contains(note, c.note) {
-			t.Errorf("%s: on=%v note=%q, want on=%v note containing %q", c.name, on, note, c.on, c.note)
+		if img.On && img.Client != "" && img.TTY != img.Client {
+			t.Errorf("%s: tty %q, want the client's tty", c.name, img.TTY)
 		}
-		if c.env["TMUX"] != "" && c.renderer == "auto" && c.term != "" { // the client is the one a jump would use, asked by name
-			found := false
-			for _, call := range r.calls {
-				found = found || strings.Join(call, " ") == "tmux display-message -p -c /dev/c #{client_termname}"
-			}
-			if !found {
-				t.Errorf("%s: client_termname not asked of the chosen client: %q", c.name, r.calls)
+		for _, call := range r.calls {
+			if call[1] == "display-message" && strings.Contains(strings.Join(call, " "), "client_termname") || call[1] == "show-options" {
+				t.Errorf("%s: asked tmux for %q: the termname comes from list-clients, passthrough does not matter", c.name, call)
 			}
 		}
-	}
-	// no client to ask (none attached, or tmux says no): not kitty as far as anyone knows
-	for name, r := range map[string]*fakeRunner{
-		"no clients":         {tmuxOut: map[string]string{"list-clients": "", "display-message": "xterm-kitty\n", "show-options": "on\n"}},
-		"list-clients fails": {tmuxFail: map[string]error{"list-clients": errors.New("no server")}, tmuxOut: map[string]string{"display-message": "xterm-kitty\n", "show-options": "on\n"}},
-	} {
-		if on, _ := imageMode(r, env(inTmux), "auto"); on {
-			t.Errorf("%s: pictures without a client to ask", name)
-		}
-	}
-	avatar.UseSets(fstest.MapFS{}) // no sets: nothing to draw
-	if on, _ := imageMode(&fakeRunner{}, env(map[string]string{"TERM": "xterm-kitty"}), "auto"); on {
-		t.Error("pictures with no image sets")
 	}
 }
 
@@ -579,5 +576,65 @@ func TestAvatarGridEverywhere(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// In tmux the pictures are written to the real terminal's client tty, bare, and tmux is told to
+// redraw that client afterwards; a tty that cannot be opened falls back to tmux's passthrough on
+// stdout, and says so.
+func TestUploadImages(t *testing.T) {
+	useKit(t)
+	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
+	tty := filepath.Join(t.TempDir(), "ttys001")
+	os.WriteFile(tty, nil, 0o644)
+	r := &fakeRunner{}
+	note, err := uploadImages(ImageMode{On: true, Client: "/dev/c", TTY: tty, Note: "kept"}, r)
+	got, _ := os.ReadFile(tty)
+	if err != nil || note != "kept" || !strings.HasPrefix(string(got), "\x1b_Ga=T,U=1") || strings.Contains(string(got), "\x1bPtmux;") || strings.Contains(string(got), "\x1b[?1049") {
+		t.Errorf("to the tty: err %v, note %q, wrote %.40q", err, note, got)
+	}
+	if want := []string{"tmux", "refresh-client", "-t", "/dev/c"}; !slices.ContainsFunc(r.calls, func(c []string) bool { return slices.Equal(c, want) }) {
+		t.Errorf("no refresh-client: %q", r.calls)
+	}
+
+	out, _ := os.Create(filepath.Join(t.TempDir(), "stdout"))
+	old := os.Stdout
+	os.Stdout = out
+	note, err = uploadImages(ImageMode{On: true, Client: "/dev/c", TTY: filepath.Join(t.TempDir(), "no", "such", "tty")}, &fakeRunner{})
+	os.Stdout = old
+	out.Close()
+	got, _ = os.ReadFile(out.Name())
+	if err != nil || !strings.Contains(note, "cannot write") || !strings.HasPrefix(string(got), "\x1bPtmux;") {
+		t.Errorf("tty not openable: err %v, note %q, stdout %.40q", err, note, got)
+	}
+}
+
+// A write that fails halfway to the tty falls back to passthrough like one that cannot open it.
+type failingTTY struct{ n int }
+
+func (f *failingTTY) Write(p []byte) (int, error) {
+	if f.n--; f.n < 0 {
+		return 0, errors.New("input/output error")
+	}
+	return len(p), nil
+}
+func (f *failingTTY) Close() error { return nil }
+
+func TestUploadImagesWriteError(t *testing.T) {
+	useKit(t)
+	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
+	openTTY = func(string) (io.WriteCloser, error) { return &failingTTY{n: 1}, nil }
+	t.Cleanup(func() {
+		openTTY = func(path string) (io.WriteCloser, error) { return os.OpenFile(path, os.O_WRONLY, 0) }
+	})
+	out, _ := os.Create(filepath.Join(t.TempDir(), "stdout"))
+	old := os.Stdout
+	os.Stdout = out
+	note, err := uploadImages(ImageMode{On: true, Client: "/dev/c", TTY: "/dev/ttys001", Note: "stale"}, &fakeRunner{})
+	os.Stdout = old
+	out.Close()
+	got, _ := os.ReadFile(out.Name())
+	if err != nil || !strings.Contains(note, "input/output error") || strings.Contains(note, "stale") || !strings.HasPrefix(string(got), "\x1bPtmux;") {
+		t.Errorf("err %v, note %q, stdout %.40q", err, note, got)
 	}
 }
