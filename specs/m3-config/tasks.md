@@ -137,7 +137,7 @@
 - 设计第 5–6 条。CC0 来源逐个核对许可页后再收，CREDITS.md 记 URL / 作者 / 许可；README 署名。
 - 验收：单测 格子布局（焦点卡下方 / 放不下换上方、5×4、格内 id 行、光标起点、滚动行、enter 绑定、消息行 id）；内置集数 = 15、sprite = 5；黑盒 120×40 按 a 抓屏：框在焦点卡下方、20 格、最后一排 5 个像素头像、l/j 移动、enter 后卡片换图、矮终端（高 20）时上方或滚动仍能选到最后一个。
 
-### T33 内置头像换成 pi-agent-portrait 的 10 个角色（dev @de20b1e 审查退回 1 条只差测试：`_v\d+` 正则对 idle_v.png 的正例，补丁中）
+### T33 内置头像换成 pi-agent-portrait 的 10 个角色（dev @de20b1e 审查退回 1 条只差测试，补丁 @c919932 + c2b26dd（只改测试）送复审）
 - reviewer 浅克隆上游比对：141 帧清单一致、抽 47 帧像素等于 2×2 均值；许可逐字一致；直通 321 个 DCS 序列最大 4153 字节、分块边界无问题。
 - 数字：141 帧、PNG 803 KB、直通后 1.08 MB，载入 73 ms、写出 1.3 ms，浮窗起到看板出现 0.67 s 时头像已全在。aza_choi / cipher / default / red 上游无 success 目录 → 回落 idle（验收「每状态 ≥1」对 success 不要求）。
 - 设计 design.md「内置头像换成 pi-agent-portrait 的角色」。只拿 10 个角色目录里七个状态（含别名）下不带 `_v\d+` 的 PNG，预缩 64×64 embed；删 party-*；`_v\d+` 忽略规则加到 loadSets（用户集同样）；格宽 10；CREDITS / README。
