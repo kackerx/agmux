@@ -451,6 +451,42 @@ func TestCropPNGShrinks(t *testing.T) {
 	}
 }
 
+// Shrinking samples the part that is kept, not the whole picture: what the crop cuts off is green,
+// and no green is left after shrinking (a sampling that forgets the crop's offset pulls it in).
+func TestCropPNGShrinkSamplesTheCrop(t *testing.T) {
+	for _, d := range [][2]int{{1024, 1024}, {900, 300}, {1000, 3000}, {300, 200}, {512, 700}} {
+		w, h := d[0], d[1]
+		c := cropFor(w, h)
+		im := image.NewNRGBA(image.Rect(0, 0, w, h))
+		for y := range h {
+			for x := range w {
+				col := color.NRGBA{255, 0, 0, 255} // kept
+				if x < c.x || x >= c.x+c.w || y < c.y || y >= c.y+c.h {
+					col = color.NRGBA{0, 255, 0, 255} // cut off
+				}
+				im.SetNRGBA(x, y, col)
+			}
+		}
+		var b bytes.Buffer
+		png.Encode(&b, im)
+		out, err := cropPNG(b.Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := png.Decode(bytes.NewReader(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for y := got.Bounds().Min.Y; y < got.Bounds().Max.Y; y++ {
+			for x := got.Bounds().Min.X; x < got.Bounds().Max.X; x++ {
+				if r, g, _, _ := got.At(x, y).RGBA(); g>>8 != 0 || r>>8 != 255 {
+					t.Fatalf("%d × %d: pixel (%d, %d) of the result is not from the kept part", w, h, x, y)
+				}
+			}
+		}
+	}
+}
+
 // A small file can claim a huge picture: over 4096 pixels either way is refused from the header,
 // before anything is allocated.
 func TestCropPNGRefusesHuge(t *testing.T) {
