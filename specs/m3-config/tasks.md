@@ -220,16 +220,16 @@
 
 ## 第八批（用户 2026-10-13 晚验收第六 + 七批通过后的意见）
 
-### T41 分支名放不下时省略前缀、保留后缀（dev @9730bc7 审查退回 1 必改（多字节前缀省略后高亮无测试，收穷举探针）+ 采纳建议（尾截 … 被黄底渗到，存量）；定稿：末段刚好放下但加 … 放不下时显示光秃末段，接受；修复 @64c17a1 复审再退 1 条：spread 的 reset 把名字行 … 的名字色抹掉 → 截断标记由调用方传 cutMark(c)，补丁 @32a2435 送复审）
+### T41 分支名放不下时省略前缀、保留后缀（dev @9730bc7 审查退回 1 必改（多字节前缀省略后高亮无测试，收穷举探针）+ 采纳建议（尾截 … 被黄底渗到，存量）；定稿：末段刚好放下但加 … 放不下时显示光秃末段，接受；修复 @64c17a1 复审再退 1 条：spread 的 reset 把名字行 … 的名字色抹掉 → 截断标记由调用方传 cutMark(c)，补丁 @32a2435 复审通过；建议 line3 的 cutMark 无测试，不改）
 - dev 顺带修：flash 之前没按 agent 让出的宽度读分支。
 - 用户：`feature/permission-dashboard`、`hotfix/alert-group` 放不下时现在从尾部截（`hotfix/alert-gro…`），有用的是后缀。改：放不下时先从左边一段一段去掉 `/` 前的前缀，剩余部分前面加一个 `…`（`…alert-group`、`…permission-dashboard`），直到放得下；只剩最后一段还放不下才像现在一样从尾部截。没有 `/` 的分支照旧尾部截。第 2 行右侧有 agent 角色时同样适用。搜索 / flash 的命中高亮按显示出来的字符算（前缀被省略的部分不画高亮）。
 - 验收：单测 宽度刚好放下全名不省略；少 1 格 → `…alert-group`；三段 `a/b/c` 逐段去；只剩末段仍放不下 → `…alert-gr…`→ 定稿写成末段尾截 `alert-gr…`（前面不再加 …，避免两个省略号）；无 `/` 尾截。黑盒 窄列抓屏。
 
-### T42 组标题横线颜色改成和组名一致（审查通过 @a2d5f83；等整套回归）
+### T42 组标题横线颜色改成和组名一致（审查通过 @a2d5f83）
 - 用户：横线现在 muted 灰不醒目，要和分组名同色（`dir` 色）。改：━ 用 `dir` 色（焦点在标题上时随标题用 focus 色）。design.md T40 那句同步。
 - 验收：单测 标题行的 ━ 转义码 = dir 色；黑盒抓屏带色核对。
 
-### T43 分组方式可切换：cwd / project / session / state，`g` 循环（dev @eb8759f 审查退回 2 必改：焦点在折叠标题上按 g 跳到全板第一张（改为先落到该组第一张卡）；flash 读显示标题 / g 结束手动滚动 / visibleFocus 用当前分组键三处无测试，收 4 探针；修复 @7dd2465 复审通过；等整套回归）
+### T43 分组方式可切换：cwd / project / session / state，`g` 循环（dev @eb8759f 审查退回 2 必改：焦点在折叠标题上按 g 跳到全板第一张（改为先落到该组第一张卡）；flash 读显示标题 / g 结束手动滚动 / visibleFocus 用当前分组键三处无测试，收 4 探针；修复 @7dd2465 复审通过）
 - dev 定稿（照准）：regroup 在 shown() 里换 GroupKey / GroupLabel，其余（layout / flow / 搜索 / flash / 鼠标 / `a`）不动；project 空 → "(no project)"；切换时焦点留原卡、手动滚动结束；名字标题不画路径命中；`agmux show` 分组列仍 cwd。底栏又长一段，120 列下尾部更早被截。
 - 定稿：切换方式清空折叠，各方式互不影响，切回不保留。
 - 用户：现在只有按 cwd 一种；参考 ccmux 加 project、tmux session，再加一个 state。`g` 切换。
@@ -250,3 +250,6 @@
 - 触发：焦点在这张卡上**连续 2 个 tick（1 s）**（j/k 路过不算）、或在它上面开预览 / 进直通、或 enter 跳转。标为已读后卡片按 idle 画（状态词 `⏸ idle`、头像 idle 态、边框 idle 色），`agmux show` 也按已读显示（store 里做，view 只读）。ccmux 之后真的清掉 attentionState 时记录自然失效（删掉该条）。新的 done（statusChangedAt 变了）重新显示。
 - 不做：告警 / waiting 的已读（那是要你处理的，不能看一眼就算）。
 - 验收：单测 2 tick 后 Done=false 且 seen.json 有条目、1 tick 不算、路过不算、预览 / 直通 / enter 立即算、statusChangedAt 变化后重新 done、ccmux 清掉后条目删除、文件坏了当空且底栏一行；黑盒 真 tmux 夹具 done 卡 focus 1 s 后变 idle，重启看板仍 idle，夹具改 statusChangedAt 后回 done。
+
+## 第八批审查最终结论（reviewer 2026-10-13，32a2435）
+- T41–T43 全部通过，无遗留必改；等 tester 整套回归。
