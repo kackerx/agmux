@@ -182,7 +182,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 	s.AvatarID = avatar.For(p.Avatars, p.AvatarBind, p.AvatarDefault, s.AvatarKey()).ID
 	hudModel := ""
 	if r.NativeSessionID != "" {
-		s.ContextPct, hudModel = readHUD(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
+		s.ContextPct, hudModel, s.Effort = readHUD(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
 	}
 	if r.LogPath != "" {
 		s.Model = lastModel(r.LogPath)
@@ -203,13 +203,12 @@ func (p *Poller) convert(r ccmux.Session) Session {
 }
 
 // readHUD reads what `agmux statusline` saved from Claude Code's status line payload:
-// context_window.used_percentage (truncated like claude-hud, 29.6 → 29) and model.display_name.
-// Missing or unparsable file = unknown (-1, ""), never an error.
-// ponytail: effort is not read until a real payload confirms its field name.
-func readHUD(path string) (pct int, model string) {
+// context_window.used_percentage (truncated like claude-hud, 29.6 → 29), model.display_name and
+// effort.level. Missing or unparsable file = unknown (-1, "", ""), never an error.
+func readHUD(path string) (pct int, model, effort string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return -1, ""
+		return -1, "", ""
 	}
 	var hud struct {
 		ContextWindow struct {
@@ -218,15 +217,18 @@ func readHUD(path string) (pct int, model string) {
 		Model struct {
 			DisplayName string `json:"display_name"`
 		} `json:"model"`
+		Effort struct {
+			Level string `json:"level"`
+		} `json:"effort"`
 	}
 	if json.Unmarshal(data, &hud) != nil {
-		return -1, ""
+		return -1, "", ""
 	}
 	pct = -1
 	if hud.ContextWindow.UsedPercentage != nil {
 		pct = int(*hud.ContextWindow.UsedPercentage)
 	}
-	return pct, hud.Model.DisplayName
+	return pct, hud.Model.DisplayName, hud.Effort.Level
 }
 
 const tailBytes = 64 << 10

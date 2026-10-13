@@ -1763,8 +1763,7 @@ func TestAvatarBindError(t *testing.T) {
 	}
 }
 
-// Every [colors] entry reaches the element design.md names for it (effort: never shown yet,
-// its field is unverified and never set).
+// Every [colors] entry reaches the element design.md names for it.
 func TestEveryColorWired(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -1797,6 +1796,9 @@ func TestEveryColorWired(t *testing.T) {
 	has("name", card(idle, 48, 5, false, 0, now, hit{}), "name", "nm")
 	has("branch", card(idle, 48, 5, false, 0, now, hit{}), "branch", "\ue725 br")
 	has("model", card(idle, 48, 5, false, 0, now, hit{}), "model")
+	withEffort := idle
+	withEffort.Effort = "high"
+	has("effort", card(withEffort, 48, 5, false, 0, now, hit{}), "effort", "high")
 	done := idle
 	done.Done = true
 	has("done border", card(done, 48, 5, false, 0, now, hit{}), "done")
