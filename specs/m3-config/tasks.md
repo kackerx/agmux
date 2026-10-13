@@ -102,7 +102,8 @@
   - 先做**可行性 spike**（dev，scratchpad，不进产品代码）：一个 bubbletea 全屏程序，在 tmux 浮窗里上传 PNG（可拿 pi-emote 的 aza_choi 帧，MIT）并以 4×2、6×2、8×4 格三种框显示；每 200ms 重绘周围文字、每 500ms 换一张图片 id（动画）；验证：浮窗里能显示、不残影、不闪、重绘不丢；占位符行经 ansi.StringWidth 算出的宽度 = 列数（版面代码不用改）；长宽比是保持还是拉伸；退出时 a=d 删图，重开再传同 id 正常；一张 128×128 PNG 直通上传的耗时。用户在自己的 kitty 里跑看结果。
   - spike 结论（dev，aspike）：可行。c/r 同给时 kitty 保持比例居中；动画 25 张截图无空白、无错位；StringWidth = 列数；a=d 删图有效；12 张 435KB 写出 12ms；直通在浮窗里可用。坑：别用 show-environment 探测终端，用 client_termname；q=2 必带；先上传再进 bubbletea。设计定稿见 design.md「头像用真图」。
 
-### T28 头像用真图（dev @6f605fc + 4648d7d；审查退回 5 必改 + 采纳 2 建议 + 2 spec 定稿，修复中）
+### T28 头像用真图（dev @6f605fc + 4648d7d；审查退回 5 必改 + 采纳 2 建议 + 2 spec 定稿，修复 @0223f6d 送复审）
+- 修复定稿：id 哈希含文件内容；`avatar.HashImages` 开关由 main 在首次 Refresh 前经 `board.DetectImages` 设定；`board.Run` 多一个 ImageMode 参数，上传在 Refresh 之后。dev 在真 kitty 里 tmux 外跑过看板，头像和 `a` 浮层都在。
 - 审查退回（reviewer @4648d7d，探针 cr-t28-6f605fc/probes/）必改：1. tmux 外上传到主屏、卡片在备用屏，一张都不显示（用 kitty 自己的 Screen 回放核实）→ tmux 外先 ?1049h 再上传；2. 用户集目录是符号链接被静默跳过 → fs.Stat 判目录；3. 「被同名集遮住的 sprite 不进池」无测试守（变异存活）→ 断言 Choices 长度与唯一；4. 选不到 client 回落像素无测试守 → TestImageMode 加行；5. 名为 hash 的用户集劫持 default → 保留名跳过并报。采纳建议：a. 图片 id 改 fnv(集+状态+文件) 24 位；b. 跳过 . 开头文件。spec 定稿：像素模式 hash 池只含 sprite（imageMode 在 poller 首次 Refresh 前定）；用户验收加 tmux 外真 kitty。
 - dev 自报：`a` 浮层只认 sprite、`agmux avatars` 未列集（T29）；hash 池模数 6→7，e2e 依赖具体 hash 的断言要跟进；默认配置表多 `renderer = "auto"`；图片模式无 agentType 色带；`renderer = "image"` = 跳过终端名检查但 passthrough off 仍回落。两个看板同开时退出删图会删掉对方的图 → 定稿：退出不删。
 - 范围：avatar 包加图片集加载（内置 embed + 用户目录）、占位符渲染、启动上传 / 退出删除、探测与 `renderer` 配置、回落；store / board 的头像赋值接受集 id；现有 sprite 代码保留。`a` 列表、`agmux avatars`、README 放 T29。
