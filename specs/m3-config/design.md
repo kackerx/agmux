@@ -93,7 +93,7 @@
 
 ## 头像图片：状态、宽度、选择框（T30–T32，用户 2026-10-13 验收意见）
 - **状态名改成和 pi-emote 一样**，用户能把 pi-emote 的角色目录原样丢进来。状态和触发：`idle` = 原始 idle；`think` = working 且没有 pendingTool（含 agents）；`read` = pendingTool 是 Read / Grep / Glob / WebFetch / WebSearch；`write` = Write / Edit / MultiEdit / NotebookEdit；`tool` = 其它 pendingTool；`hi` = 需要处理（attention 非空或 waiting）；`success` = done。回落链：read / write / tool → think → idle；hi → idle；success → idle。旧名 `working` / `attention` / `done` 当别名（= think / hi / success）仍认。talk / failure / compact 没有触发源，目录存在也不用。
-- **idle 眨眼**：idle 的第一帧是常态脸，其余帧每 8 个 tick（4 s）轮一帧、只显示一个 tick（pi-emote 的 idle_blink 就这样用；否则 500 ms 一眨太频繁）。其它状态照旧每 tick 循环。
+- **idle 眨眼**：idle 的第一帧是常态脸，其余帧每 8 个 tick（4 s）轮一帧、只显示一个 tick（pi-emote 的 idle_blink 就这样用；否则 500 ms 一眨太频繁）。每张卡按会话 AvatarKey 的 hash 加 0..7 的 tick 偏移，整屏的 idle 卡不会同时眨（reviewer 建议，照准）。其它状态照旧每 tick 循环。
 - 内置 aza_choi 直接用它原目录结构（idle 含 blink、think、read、write、tool、hi；没有 success → 回落 idle），不再手工映射。
 - **宽度和上下文条一样 6 格**：box 仍 6 列 × 2 行，载入时 `png.Decode` 每帧并裁出**居中的 3:2 区域**（按格子 1:2 的常见比例，6×2 格 ≈ 3:2；128×128 → 128×85，宽图裁左右；已是 3:2 原样发），重新编码后上传，这样图填满 6 格；上下会裁掉约 1/6（头顶 / 下巴）。**kitty 对占位符的虚拟放置忽略源矩形 x/y/w/h**（dev 真机对照实测），不能靠协议裁。像素头像本来就 6 格。坏 PNG（非 PNG 或数据截断）→ 跳过该帧、每集一行报底栏；跳完没有 idle 的集整个跳过。用户放大图时启动会慢一点，不做缩放。
 - **选择框**：`a` 后在焦点卡片**正下方**下拉（下方放不下就放上方）一个 **5 列 × 4 行** 的格子，每格 = 6×2 头像 + 下面一行 id（sprite 用 name），格宽 8、格高 3，整框约 42 × 14 含边框；顺序：内置图集 → 用户图集（名字序）→ 像素头像放最后一排；超过 20 个按行滚动。`up/down/left/right`（hjkl / 方向键）移动，`jump`（enter）绑定并关闭，`quit`（esc）取消；当前穿的那格用 focus 色边框 + 光标起点在它上面；消息行显示光标所在的 id。像素模式下图集格用按集 id hash 的 sprite 代画。原来的纵向列表删除。

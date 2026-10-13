@@ -122,7 +122,7 @@
 
 ## 第五批（用户 2026-10-13 下午验收意见：状态动作、头像等宽、选择框改格子 + 20 个默认头像）
 
-### T30 头像状态对齐 pi-emote（dev @1d4d5fd 送审 / 送测）
+### T30 头像状态对齐 pi-emote（dev @1d4d5fd；审查退回 1 必改（眨眼周期无测试守）+ 采纳 2 建议（选择框 idle 第 0 帧断言、眨眼按会话错开），修复中）
 - dev 定稿（照准）：其它 status（background）= idle；hi 优先于 working；别名帧 id 按实际目录名哈希；眨眼 tick>0 且 tick%8==0、多帧按 8/16/24 轮；aza_choi 无 success 回落 idle。
 - 设计 design.md「头像图片：状态、宽度、选择框」第 1–3 条。store 里按 pendingTool 算出头像状态（和 getEffectiveStatus 一样放 store 做一次，view 只读）；avatar 包的帧选择按新状态名 + 回落链 + 别名；idle 眨眼规则；内置 aza_choi 改用原目录。
 - 验收：单测 状态映射表（每种 pendingTool / 无 tool / attention / waiting / done / idle）；回落链；别名目录；idle 第 2 帧只在第 8k 个 tick 出现一个 tick；黑盒 pendingTool=Read 的卡出 read 帧、Write → write、Bash → tool、无 tool → think；旧目录名 working 仍被认。
