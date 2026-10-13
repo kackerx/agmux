@@ -170,7 +170,7 @@
 - 用户以为新版没装：装了（13:02，c2b26dd），但没绑定的会话按 hash 在「5 个像素 + 10 个图集」里挑，三分之一还是像素。改：**图片模式下 hash 池只含图集**，像素头像只能按 `a` 手选；像素模式照旧只含 sprite。design.md「选择与绑定」那句同步改。
 - 验收：单测 agents 详情 / 计数的转义码是 working 色；图片模式 Choices 不含 sprite、像素模式不含集。黑盒 带 subagents 的卡第 3 行 `agents` 和 `⚇` 段是 working 色；图片模式 100 个无绑定会话全是占位符头像。
 
-### T37 卡片显示 agent 角色定义（dev @ebcc6db 审查退回 1 必改（colors.agent 未入 TestEveryColorWired）+ spec 改：来源改为尾部 64KB 最后一条 agent-setting、无则看开头（reviewer 实测 39 个 jsonl：1 个首条在 8.6MB 处、该行反复写且最后一条离末尾 ≤34KB），补丁中）
+### T37 卡片显示 agent 角色定义（dev @ebcc6db 审查退回 1 必改（colors.agent 未入 TestEveryColorWired）+ spec 改：来源改为尾部 64KB 最后一条 agent-setting、无则看开头（reviewer 实测 39 个 jsonl：1 个首条在 8.6MB 处、该行反复写且最后一条离末尾 ≤34KB），补丁 @47bde68 送复审：尾部最后一条 > 头第一条，头按路径缓存，短文件无不缓存）
 - dev 定稿（照准）：缓存规则——找到即缓存；文件 >64KB 仍无也缓存「无」；短文件无则下次轮询再看。无分支时第 2 行只显示右侧 agent。
 - 用户问能不能拿到会话用的哪个 agent 定义（`claude --agent orchestrator` 那个）。能：Claude Code 的 transcript jsonl 里有 `{"type":"agent-setting","agentSetting":"orchestrator",...}` 行（第 1 行，resume 时再写一次）；statusline payload 和 ccmux 都没有。
 - 做法：store 读 jsonl **开头 64KB**（现在读尾部 64KB 取模型的逻辑旁边再加一次读头），取第一条 agent-setting 的值存 `Session.Agent`，按 session ID 缓存（不会变）；没有就空。卡片第 2 行右侧靠右显示它（和第 1 行的时间同一规则：始终显示，分支放不下才截），新颜色项 `colors.agent` 默认 `#bd93f9`；`agmux show` 也多一列。README 颜色表加行。
