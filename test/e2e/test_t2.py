@@ -40,7 +40,7 @@ class AvatarsCmd(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         blocks = parse_blocks(r.stdout)
         self.assertEqual(len(blocks), 7, f"want the image-set block + 6 sprite blocks separated by blank lines:\n{r.stdout}")
-        self.assertRegex(blocks[0][0], r"aza_choi  builtin  idle 1 · working 4 · attention 4 · done 4", "T29: the sets come first, one line each")
+        self.assertRegex(blocks[0][0], r"aza_choi  builtin  idle 2 · think 4 · read 4 · write 4 · tool 4 · hi 4 · success 0", "T29: the sets come first, one line each")
         self.assertEqual(len(blocks[0]), 1); blocks = blocks[1:]
         ids, names = [], []
         for b in blocks:

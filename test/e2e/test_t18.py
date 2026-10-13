@@ -158,7 +158,8 @@ class Picker(Base):
         self.assertEqual(json.loads(self.json.read_text()), {"pj-fallback": want}, "avatars.json: {name: id}, keyed by the card name, not the session id")
         self.assertEqual(self.env.actions(), [], "binding calls neither ccmux nor tmux"); self.assertTrue(t.alive(), "enter in the picker binds, it does not jump / quit")
         # the picker remembers: reopening marks the new avatar as current
-        ov = self.open_picker(t); self.assertEqual([r["id"] for r in ov["rows"] if r["current"]], [want])
+        self.open_picker(t)
+        self.assertTrue(wait(lambda: [r["id"] for r in (overlay(t.snap()) or {"rows": []})["rows"] if r["current"]] == [want], 3), "reopening marks the new avatar as current")  # the picker is drawn in several writes: poll
         t.keys("q"); t.close()
         t2 = self.board(); self.to_a2(t2)
         self.assertEqual(self.id_of(t2, "a2"), (want,), "still bound after restarting the board")

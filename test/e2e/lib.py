@@ -696,7 +696,7 @@ def upload_ids(env, cfg, extra=None):
     e = {"XDG_CONFIG_HOME": str(cfg), "TERM": "xterm-kitty", **(extra or {})}
     r = PtyRun(env, extra=e)
     try:
-        assert wait(lambda: b"alpha-main" in bytes(r.data), 8), bytes(r.data)[-300:]
+        assert wait(lambda: b" sessions" in bytes(r.data), 8), bytes(r.data)[-300:]
         r.send("q"); r.exited(5)
         return {v["data"]: i for i, v in kitty_images(kitty_commands(bytes(r.data))).items()}
     finally:
@@ -752,3 +752,14 @@ def sample_series(fn, secs, step=0.05):
     while time.time() - t0 < secs:
         out.append((time.time() - t0, fn())); time.sleep(step)
     return out
+
+
+FALLBACK = {"read": "think", "write": "think", "tool": "think", "think": "idle", "hi": "idle", "success": "idle"}  # T30: a state without frames shows the next one on its chain
+OLD_NAMES = {"think": "working", "hi": "attention", "success": "done"}  # old directory names, still accepted (the new name wins when both exist)
+
+
+def frames_for(frames, state):
+    """frames = {state: [ids or anything]} of a set; the frames a card in `state` shows: its own, else along FALLBACK, ending at idle."""
+    while not frames.get(state) and state != "idle":
+        state = FALLBACK[state]
+    return frames[state], state

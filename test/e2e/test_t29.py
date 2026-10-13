@@ -7,10 +7,11 @@ from test_t3 import ready, by_name, NAMES, last_text_row, C_FOCUS
 from test_t2 import run_avatars, parse_blocks, sprite_blocks
 from test_t18 import overlay, IDS, LISTING, SPRITE_NAMES, HASHED_SPRITE
 import test_t28 as t28
+from test_t28 import BUILTIN_LINE
 from test_t28 import cards_of, named, card_avatar
 
 SETS = t28.SETS
-IDLE_PNG = (SETS / "idle" / "idle.png").read_bytes()
+IDLE_PNG = (SETS / "idle" / "idle.png").read_bytes()  # the calm face: first of the idle frames
 
 
 class Base(t28.Base):
@@ -29,7 +30,8 @@ class Base(t28.Base):
         t.keys("j"); time.sleep(0.3)  # pj-fallback
 
     def a2(self, raw=None):
-        raw = raw or ""; cs = cards_of(raw); return named(cs, "pj-fallback"), parse_screen(raw)
+        raw = raw or ""  # while the picker is still on screen its box looks like a card named "avatar for pj-fallback": not the card
+        cs = [c for c in cards_of(raw) if "pj-fallback" in c.line(1) and "avatar for" not in c.line(1)]; assert len(cs) == 1, f"pj-fallback: {len(cs)} cards"; return cs[0], parse_screen(raw)
 
 
 def cells_of_row(ov_row, raw):
@@ -147,11 +149,11 @@ class PickerImage(Base):
         self.assertEqual(card_avatar(t.raw(), self.a2(t.raw())[0]), [], "bound to a sprite: pixels")
         self.picker(t)
         for _ in range(4): t.keys("k"); time.sleep(0.15)
-        t.keys("Enter"); ok = wait(lambda: (lambda r: len(card_avatar(r, self.a2(r)[0])) == 12)(t.raw()), 2.5)
+        t.keys("Enter"); ok = wait(lambda: (lambda r: len(card_avatar(r, self.a2(r)[0])) == 12 and overlay(parse_screen(r)) is None)(t.raw()), 2.5)
         self.assertTrue(ok, "the card shows the placeholders within a couple of frame ticks:\n" + t.text()); self.assertEqual(json.loads(self.json.read_text()), {"pj-fallback": "aza_choi"})
 
     def test_a_user_set_row_shows_its_own_idle_frame(self):
-        write_avatar_set(self.cfg, "mine", {"idle": 2, "working": 1}); t = self.board(); self.to_a2(t); ov = self.picker(t, ("aza_choi", "mine")); raw = t.raw()
+        write_avatar_set(self.cfg, "mine", {"idle": 2, "think": 1}); t = self.board(); self.to_a2(t); ov = self.picker(t, ("aza_choi", "mine")); raw = t.raw()
         ids = upload_ids(self.env, self.cfg); mine_idle = (self.cfg / "agmux" / "avatars" / "mine" / "idle" / "01.png").read_bytes()
         self.assertEqual([r["id"] for r in ov["rows"]][:2], ["aza_choi", "mine"]); self.assertEqual({c[2] for c in cells_of_row(ov["rows"][1], raw)}, {ids[mine_idle]})
 
@@ -167,28 +169,28 @@ class AvatarsCmd(Base):
 
     def test_sets_first_one_line_each_then_a_blank_line_then_the_sprites(self):
         r = self.run_cmd("avatars"); self.assertEqual(r.returncode, 0, r.stderr); self.assertEqual(r.stderr, "")
-        lines = r.stdout.split("\n"); self.assertEqual(lines[0], "aza_choi  builtin  idle 1 · working 4 · attention 4 · done 4"); self.assertEqual(lines[1], "")
+        lines = r.stdout.split("\n"); self.assertEqual(lines[0], BUILTIN_LINE); self.assertEqual(lines[1], "")
         self.assertEqual([b[0] for b in sprite_blocks(r.stdout)], [f"{i}  {n}" for i, n in zip(IDS, SPRITE_NAMES)]); self.assertNotIn("\x1b", r.stdout)
 
     def test_user_sets_say_where_they_come_from_and_their_frame_counts(self):
-        write_avatar_set(self.cfg, "mine", {"idle": 1, "working": 3}); write_avatar_set(self.cfg, "zeta", {"idle": 2, "done": 1})
+        write_avatar_set(self.cfg, "mine", {"idle": 1, "think": 3}); write_avatar_set(self.cfg, "zeta", {"idle": 2, "success": 1})
         out = self.run_cmd("avatars").stdout.split("\n\n")[0].split("\n")
-        self.assertEqual(out, ["aza_choi  builtin  idle 1 · working 4 · attention 4 · done 4", "mine  user  idle 1 · working 3 · attention 0 · done 0", "zeta  user  idle 2 · working 0 · attention 0 · done 1"])
+        self.assertEqual(out, [BUILTIN_LINE, "mine  user  idle 1 · think 3 · read 0 · write 0 · tool 0 · hi 0 · success 0", "zeta  user  idle 2 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 1"])
 
     def test_a_user_set_with_the_builtin_name_replaces_its_line(self):
         write_avatar_set(self.cfg, "aza_choi", {"idle": 2}); out = self.run_cmd("avatars").stdout.split("\n\n")[0]
-        self.assertEqual(out, "aza_choi  user  idle 2 · working 0 · attention 0 · done 0")
+        self.assertEqual(out, "aza_choi  user  idle 2 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 0")
 
     def test_only_png_files_are_counted(self):
-        write_avatar_set(self.cfg, "mine", {"idle": 1}, **{"idle/a.txt": "x", "working/b.jpg": b"\xff", "done/c.png.bak": b"x"})
-        self.assertIn("mine  user  idle 1 · working 0 · attention 0 · done 0", self.run_cmd("avatars").stdout)
+        write_avatar_set(self.cfg, "mine", {"idle": 1}, **{"idle/a.txt": "x", "think/b.jpg": b"\xff", "success/c.png.bak": b"x"})
+        self.assertIn("mine  user  idle 1 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 0", self.run_cmd("avatars").stdout)
 
     def test_a_set_named_like_a_sprite_replaces_the_sprite_block(self):
         write_avatar_set(self.cfg, "bot-02", {"idle": 1}); r = self.run_cmd("avatars")
         self.assertIn("bot-02  user  idle 1", r.stdout); self.assertEqual([b[0].split("  ")[0] for b in sprite_blocks(r.stdout)], ["bot-01", "bot-03", "bot-04", "bot-05", "bot-06"])
 
     def test_a_skipped_set_goes_to_stderr_in_one_line_and_the_exit_code_stays_0(self):
-        write_avatar_set(self.cfg, "noidle", {"working": 2}); r = self.run_cmd("avatars")
+        write_avatar_set(self.cfg, "noidle", {"think": 2}); r = self.run_cmd("avatars")
         self.assertEqual(r.returncode, 0); self.assertEqual(r.stderr, 'agmux: avatar set "noidle" has no idle/*.png: skipped\n'); self.assertNotIn("noidle", r.stdout)
 
     def test_help_mentions_sets_then_sprites(self):

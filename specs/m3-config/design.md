@@ -98,3 +98,10 @@
 - **宽度和上下文条一样 6 格**：box 仍 6 列 × 2 行，载入时 `png.Decode` 每帧并裁出**居中的 3:2 区域**（按格子 1:2 的常见比例，6×2 格 ≈ 3:2；128×128 → 128×85，宽图裁左右；已是 3:2 原样发），重新编码后上传，这样图填满 6 格；上下会裁掉约 1/6（头顶 / 下巴）。**kitty 对占位符的虚拟放置忽略源矩形 x/y/w/h**（dev 真机对照实测），不能靠协议裁。像素头像本来就 6 格。坏 PNG（非 PNG 或数据截断）→ 跳过该帧、每集一行报底栏；跳完没有 idle 的集整个跳过。裁完再缩到高 ≤128 px（小图不放大；reviewer 建议：生成图常是 1024²，不缩每次启动要经直通传几十 MB），超过 4096² 的帧先用 DecodeConfig 拦下跳过并报（防压缩炸弹），帧 id 哈希加常量盐避免升级期间新旧看板同 id 指向不同像素。
 - **选择框**：`a` 后在焦点卡片**正下方**下拉（下方放不下就放上方）一个 **5 列 × 4 行** 的格子，每格 = 6×2 头像 + 下面一行 id（sprite 用 name），格宽 8、格高 3，整框约 42 × 14 含边框；顺序：内置图集 → 用户图集（名字序）→ 像素头像放最后一排；超过 20 个按行滚动。`up/down/left/right`（hjkl / 方向键）移动，`jump`（enter）绑定并关闭，`quit`（esc）取消；当前穿的那格用 focus 色边框 + 光标起点在它上面；消息行显示光标所在的 id。像素模式下图集格用按集 id hash 的 sprite 代画。原来的纵向列表删除。
 - **内置头像 20 个**：15 个图集（aza_choi + 14 个 CC0 像素肖像，来源 OpenGameArt 的 CC0 Portraits 合集 / RPG portraits 等，只收 CC0；静态图 = 只有 idle 一帧）+ 5 个像素 sprite（去掉和 bot-01 字形重复的 bot-06 Cyclops；绑过 bot-06 的落到 hash）。每个内置图集记来源 URL 和作者到 `internal/avatar/sets/CREDITS.md`，README 署名列出。风格会杂；用户要统一风格可以自己生成后放用户目录（pi-agent-portrait 的 draw-portrait 能从一句描述生成）。
+
+## 内置头像换成 pi-agent-portrait 的角色（T33，用户 2026-10-13：party-* 太丑）
+- 内置图集改为 pi-agent-portrait（MIT）仓库自带的 10 个角色：`aza_choi`、`cipher`、`default`、`forge`、`moss`、`nova`、`oana`、`quill`、`red`、`sprocket`（anime 像素风，全部带 idle / think / read / write / tool / hi / success 等状态，每帧 128×128）；`aza_choi_nobg`、`ascii*`、`test`、`_unused` 不收。party-01..14 及其许可文件删除。id 沿用上游名字，用户照 pi 的文档就能对上。
+- **`_v2` / `_v3` 这类是「备选 take」不是动画帧**（pi-agent-portrait 每个状态随机挑一个 take 用到状态结束）：加载时文件名匹配 `_v\d+\.png$` 的一律忽略（内置和用户集同规则），否则每集近 60 帧、10 集启动要传几 MB。只认基础 take 后每集约 18 帧。
+- 上游状态目录 talk / failure / compact / bash / search / heard / error / sleep / wait / interrupted 不加载也不上传（已有规则：只认七个状态 + 三个别名）。
+- 内置帧照旧预缩到 64×64 后 embed；CREDITS.md 改记 pi-agent-portrait（MIT，作者 testy-cool；aza_choi 原出 pi-emote）；README 署名同步。
+- 选择框格宽改 10（8 字符 id 在 9 格里和邻格贴着），整框 52 × 14。内置 10 图集 + 5 像素 = 15 格，第 4 排只有 5 个像素头像（第 3 排空着无妨）。要凑 20 得再生成 5 个：pi-agent-portrait 的 draw-portrait 走 codex CLI（用户的 ChatGPT 登录，每个约 90 s，需 Pillow + NumPy），要用户点头后再做。
