@@ -4171,3 +4171,122 @@ func TestGroupStartAndSearch(t *testing.T) {
 		}
 	}
 }
+
+func groupFocusSrc() staticSrc {
+	return staticSrc{
+		{ID: "a1", Name: "a-one", GroupKey: "/a", CWD: "/a", Project: "pa", TmuxSession: "s1", TmuxPane: "%1", Status: "idle", ContextPct: -1},
+		{ID: "a2", Name: "a-two", GroupKey: "/a", CWD: "/a", Project: "pa", TmuxSession: "s2", TmuxPane: "%2", Status: "working", ContextPct: -1},
+		{ID: "b1", Name: "b-one", GroupKey: "/b", CWD: "/b", Project: "pb", Status: "idle", ContextPct: -1},
+		{ID: "c1", Name: "c-one", GroupKey: "/c", CWD: "/c", Project: "pc", TmuxSession: "s1", TmuxPane: "%3", Status: "waiting", ContextPct: -1},
+	}
+}
+
+// g with the focus on a card keeps it on that card; on a folded title, where does it go?
+func TestGroupFocusOnFoldedTitle(t *testing.T) {
+	m := New(groupFocusSrc(), &fakeRunner{})
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = tm.(Model)
+	m, _ = press(t, m, "j", "j") // some card
+	before := m.focus
+	m, _ = press(t, m, "g")
+	if m.focus != before {
+		t.Errorf("g moved the focus off a card: %s -> %s", before, m.focus)
+	}
+	m, _ = press(t, m, "g", "g", "g") // back to cwd
+	// fold c's group (focus on c1), the focus is its title; g
+	m.focus = "c1"
+	m, _ = press(t, m, "f")
+	title := m.focus
+	m, _ = press(t, m, "g")
+	c := m
+	c.current()
+	t.Logf("focus on the folded title %q, g -> focus %q (shown %q)", title, m.focus, c.focus)
+	if c.focus != "c1" {
+		t.Errorf("focus on c's folded title: after g it is on %q, not on a card of that group", c.focus)
+	}
+}
+
+func groupModel(t *testing.T, mode string) Model {
+	m := New(groupFocusSrc(), &fakeRunner{})
+	m.getenv = func(string) string { return "" }
+	m.groupBy = mode
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	return tm.(Model)
+}
+
+// flash reads the titles as drawn: in "state" the key is "0working", the title "working".
+func TestFlashStateTitle(t *testing.T) {
+	m := groupModel(t, "state")
+	m = typed(t, m, "s0")
+	if len(m.flash.ms) != 0 {
+		t.Errorf("a 0 is not on screen, yet hits %+v", m.flash.ms)
+	}
+}
+
+// g ends a manual scroll (the commit says so).
+func TestGroupEndsScroll(t *testing.T) {
+	m := groupModel(t, "cwd")
+	m.window()
+	m.top, m.scrolled = 1, true
+	m, _ = press(t, m, "g")
+	if m.scrolled {
+		t.Error("still scrolled after g")
+	}
+}
+
+// project grouping: a card whose group is folded, found by a kept filter; esc puts the focus on the
+// group's title (visibleFocus must use this grouping's keys).
+func TestVisibleFocusProject(t *testing.T) {
+	m := groupModel(t, "project")
+	m.focus = "c1"
+	m, _ = press(t, m, "f")
+	if m.focus != headerID("pc") {
+		t.Fatalf("fold: focus %q", m.focus)
+	}
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "c-one")
+	m, _ = press(t, m, "enter")
+	m, _ = press(t, m, "esc")
+	if m.focus != headerID("pc") {
+		t.Errorf("esc: focus %q, want the folded title %q", m.focus, headerID("pc"))
+	}
+}
+
+// the same for a folded title
+func TestFlashStateFoldedTitle(t *testing.T) {
+	m := groupModel(t, "state")
+	m.focus = "a1" // idle
+	m, _ = press(t, m, "f")
+	if m.focus != headerID("3idle") {
+		t.Fatalf("fold: focus %q", m.focus)
+	}
+	m = typed(t, m, "s3") // the folded idle group's key is "3idle"
+	if len(m.flash.ms) != 0 {
+		t.Errorf("a 3 is not on screen, yet hits %+v", m.flash.ms)
+	}
+}
+
+// g where keys are not board actions: typed into the search box, a flash pattern, sent to the pane.
+func TestGInOtherModes(t *testing.T) {
+	m := groupModel(t, "cwd")
+	m, _ = press(t, m, "/", "g")
+	if m.groupMode() != "cwd" || m.query != "g" {
+		t.Errorf("searching: group %s query %q", m.groupMode(), m.query)
+	}
+	m = groupModel(t, "cwd")
+	m, _ = press(t, m, "s", "g")
+	if m.groupMode() != "cwd" || m.flash.pat != "g" {
+		t.Errorf("flash: group %s pat %q", m.groupMode(), m.flash.pat)
+	}
+	r := &fakeRunner{}
+	m = groupModel(t, "cwd")
+	m.run = r
+	m, _ = press(t, m, "i", "g")
+	if m.groupMode() != "cwd" || len(sentKeys(r)) == 0 {
+		t.Errorf("pass-through: group %s sent %q", m.groupMode(), sentKeys(r))
+	}
+	m = groupModel(t, "cwd")
+	m, _ = press(t, m, "/", "a", "enter", "g") // kept filter: g is an action
+	t.Logf("kept filter + g: group %s query %q", m.groupMode(), m.query)
+}

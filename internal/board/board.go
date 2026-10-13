@@ -621,6 +621,13 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		m.searching, m.searchFrom, m.msg = true, m.focus, ""
 		return m, nil
 	case "group": // the next grouping; every group open in it, the focus where it was
+		if strings.HasPrefix(m.focus, "\x00") { // on a folded title: that group's first card (the title goes with the fold)
+			for _, g := range groups(regroup(m.src.Sessions(), m.groupMode())) {
+				if headerID(g.key) == m.focus {
+					m.focus = g.sessions[0].ID
+				}
+			}
+		}
 		i := slices.Index(config.GroupModes, m.groupMode())
 		m.groupBy, m.folded, m.scrolled, m.msg = config.GroupModes[(i+1)%len(config.GroupModes)], map[string]bool{}, false, ""
 		return m, nil
