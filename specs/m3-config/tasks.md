@@ -109,6 +109,7 @@
 - 范围：avatar 包加图片集加载（内置 embed + 用户目录）、占位符渲染、启动上传 / 退出删除、探测与 `renderer` 配置、回落；store / board 的头像赋值接受集 id；现有 sprite 代码保留。`a` 列表、`agmux avatars`、README 放 T29。
 - 验收：单测 占位符行 StringWidth=6 且每格带行列变音符、前景色 = id；集加载（缺状态回 idle、无 idle 不算、非 png 忽略、帧按名排序）；探测表（termname × passthrough × renderer）；上传序列分块 ≤4096、tmux 里 ESC 加倍、q=2；退出删除每个 id。黑盒（tester）：夹具 tmux 的 client_termname 给 xterm-kitty 时抓屏里头像格是 U+10EEEE 且 SGR 前景是对应 id、随帧 tick 换 id；给 xterm-256color 时仍是像素头像；renderer=pixel 强制像素；用户目录放一套 PNG 后被认出；缺 idle 的集报底栏不退出。真 kitty 观感由用户验收。
 
-### T29 头像图片集的入口（dev @04f22be 送审，建在 4648d7d 上）
+### T29 头像图片集的入口（dev @04f22be，审查退回 2 必改 + 1 建议，修复中）
+- 审查退回（reviewer @04f22be，探针 cr-t29-04f22be/probes/）：1. 列表比屏高时 ▸ 跑出画面、enter 绑看不见的头像（用户集无上限）→ 以 pick 为中心取能放进 m.h−2 行的一段；2. 「遮住的 sprite 不列」无测试守 → 断言 Listing 长度 / bot-03 只出现一次；建议 a 底栏 "wears bot-03" 断言也做。其余（占位符同 id 不冲突、截边保留前景色、光标定位、README 与代码一致、署名 © 2026 Eiji Onchi MIT）都过。
 - dev 自报未处理：浮层每项 2 行，加了集后更长，窄终端被裁的老问题照旧。
 - `a` 列表先列图片集再列 sprite；`agmux avatars` 打印集与 sprite；config `[avatars] renderer`、`default` 可填集 id；README 新节：目录结构、状态与帧、aza_choi 署名（pi-emote，MIT）、kitty/ghostty + allow-passthrough 要求。
