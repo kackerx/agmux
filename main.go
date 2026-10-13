@@ -19,7 +19,7 @@ const usage = `usage: agmux <command>
 
 commands:
   board   full-screen session board (open it in a tmux popup; AGMUX_CLIENT: see README)
-  show    print sessions one per line: id, name, group, status, model, context%
+  show    print sessions one per line: id, name, group, status, model, context%, agent
   avatars print every avatar: image sets, then pixel sprites
   avatars import <sheet.png> --name <id> [--layout 30|19] [--force]
           cut a pi-agent-portrait sheet (6 × 5 cells; 19: 5 × 4) into the image set <id>
@@ -144,7 +144,7 @@ func show(w io.Writer, p *store.Poller) error {
 		if s.ContextPct >= 0 {
 			pct = fmt.Sprintf("%d%%", s.ContextPct)
 		}
-		fmt.Fprintln(w, strings.Join([]string{s.ID, s.Name, s.GroupKey, s.Status, s.Model, pct}, "\t"))
+		fmt.Fprintln(w, strings.Join([]string{s.ID, s.Name, s.GroupKey, s.Status, s.Model, pct, s.Agent}, "\t"))
 	}
 	return nil
 }

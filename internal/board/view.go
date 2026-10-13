@@ -36,6 +36,7 @@ var (
 	cName     = lipgloss.Color("5")
 	cModel    = lipgloss.Color("14")
 	cEffort   = lipgloss.Color("13")
+	cAgent    = lipgloss.Color("#bd93f9")
 	cDir      = lipgloss.Color("11")
 	cBranch   = lipgloss.Color("12")
 	cMuted    = lipgloss.Color("#6272a4") // secondary text
@@ -57,7 +58,7 @@ var (
 func useConfig(c *config.Config) {
 	for name, v := range map[string]*lipgloss.Color{
 		"working": &cWorking, "idle": &cDim, "done": &cDone, "attention": &cRed, "focus": &cFocus, "match": &cMatch, "border": &cBorder,
-		"name": &cName, "branch": &cBranch, "model": &cModel, "effort": &cEffort, "dir": &cDir,
+		"name": &cName, "branch": &cBranch, "model": &cModel, "effort": &cEffort, "agent": &cAgent, "dir": &cDir,
 		"bar_low": &cGreen, "bar_mid": &cYellow, "bar_high": &cBarHigh, "bar_empty": &cBarEmpty,
 		"muted": &cMuted, "disabled": &cOff,
 	} {
@@ -322,16 +323,22 @@ func status(s store.Session) (word, detail string) {
 	return fg(cMuted, "● "+s.Status), ""
 }
 
-// line2: the branch, cut when it doesn't fit.
+// line2: the branch, and the agent definition at the right edge; the branch is cut when they don't fit.
 func line2(s store.Session, w int, hl []int) string {
-	if s.Branch == "" {
-		return ""
+	left := ""
+	if s.Branch != "" {
+		shifted := make([]int, len(hl))
+		for i, p := range hl {
+			shifted[i] = p + 2 // past the icon and its space
+		}
+		left = hilite("\ue725 "+s.Branch, shifted, cBranch) // nf-dev-git_branch
 	}
-	shifted := make([]int, len(hl))
-	for i, p := range hl {
-		shifted[i] = p + 2 // past the icon and its space
+	if s.Agent == "" {
+		return ansi.Truncate(left, w, fg(cBranch, "…"))
 	}
-	return ansi.Truncate(hilite("\ue725 "+s.Branch, shifted, cBranch), w, fg(cBranch, "…")) // nf-dev-git_branch
+	agent := ansi.Truncate(s.Agent, w, "…")
+	left = ansi.Truncate(left, max(w-ansi.StringWidth(agent)-1, 0), fg(cBranch, "…"))
+	return pad(left, w-ansi.StringWidth(agent)) + fg(cAgent, agent)
 }
 
 // line3: context bar, the status word and its detail, subagent / shell counts, model·effort at the

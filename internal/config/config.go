@@ -38,13 +38,13 @@ var defaultKeys = map[string][]string{
 
 // Colors, in print order.
 var Colors = []string{
-	"working", "idle", "done", "attention", "focus", "match", "border", "name", "branch", "model", "effort", "dir",
+	"working", "idle", "done", "attention", "focus", "match", "border", "name", "branch", "model", "effort", "agent", "dir",
 	"bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled",
 }
 
 var defaultColors = map[string]string{
 	"working": "#ffb86c", "idle": "#585b70", "done": "#50fa7b", "attention": "#ff6188", "focus": "#ff8ebe", "match": "#f2d06b", "border": "",
-	"name": "5", "branch": "12", "model": "14", "effort": "13", "dir": "11",
+	"name": "5", "branch": "12", "model": "14", "effort": "13", "agent": "#bd93f9", "dir": "11",
 	"bar_low": "#a6e3a1", "bar_mid": "#f9e2af", "bar_high": "#ff6188", "bar_empty": "#585b70",
 	"muted": "#6272a4", "disabled": "#45475a",
 }

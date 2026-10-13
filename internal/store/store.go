@@ -27,7 +27,8 @@ type Session struct {
 	Done                                       bool // ccmux's "done": idle, no subagent running, attentionState set
 	AgentsWorking                              bool // Status is "working" only because subagents are
 	Model, Effort                              string
-	ContextPct                                 int // <0 = unknown
+	Agent                                      string // the agent definition (claude --agent <name>) from the transcript's agent-setting line; "" if none
+	ContextPct                                 int    // <0 = unknown
 	Subagents                                  []Subagent
 	Shells                                     int // always 0 in S1
 	AvatarID                                   string
@@ -64,6 +65,7 @@ type Poller struct {
 
 	refreshMu sync.Mutex        // serializes Refresh; guards models
 	models    map[string]string // session ID → last model found in its jsonl
+	agents    map[string]string // session ID → agent definition, once known (it never changes)
 
 	avatarErr error // avatars.json could not be read, as of the last poll or bind
 
@@ -189,6 +191,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 	}
 	if r.LogPath != "" {
 		s.Model = lastModel(r.LogPath)
+		s.Agent = p.agent(s.ID, r.LogPath)
 	}
 	// ~8% of transcripts end in a big attachment / long line with no assistant entry in the tail
 	if p.models == nil {
@@ -303,4 +306,52 @@ func lastModel(path string) string {
 		}
 	}
 	return ""
+}
+
+// agent is the session's agent definition. It is read once: Claude Code writes the agent-setting
+// line first (and again on resume, with the same value), so a name found is cached, and so is
+// "none" once the transcript is longer than what is read: the line would be in it by then.
+func (p *Poller) agent(id, path string) string {
+	if a, ok := p.agents[id]; ok {
+		return a
+	}
+	a, final := agentSetting(path)
+	if final {
+		if p.agents == nil {
+			p.agents = map[string]string{}
+		}
+		p.agents[id] = a
+	}
+	return a
+}
+
+const headBytes = 64 << 10
+
+// agentSetting returns agentSetting of the first {"type":"agent-setting",...} line in the first
+// 64KB of a jsonl transcript. final says whether asking again could change the answer: no, when it
+// was found or when the transcript is longer than what was read (a later line is not looked for).
+// ponytail: a transcript whose agent-setting line is not in its first 64KB shows no agent.
+func agentSetting(path string) (agent string, final bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	buf, err := io.ReadAll(io.LimitReader(f, headBytes))
+	if err != nil {
+		return "", false
+	}
+	for _, l := range bytes.Split(buf, []byte("\n")) { // a line cut by the 64KB limit does not parse: skipped
+		if !bytes.Contains(l, []byte(`"agent-setting"`)) {
+			continue
+		}
+		var e struct {
+			Type         string `json:"type"`
+			AgentSetting string `json:"agentSetting"`
+		}
+		if json.Unmarshal(l, &e) == nil && e.Type == "agent-setting" && e.AgentSetting != "" {
+			return e.AgentSetting, true
+		}
+	}
+	return "", len(buf) == headBytes
 }

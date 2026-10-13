@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/kackerx/agmux/internal/avatar"
+	"github.com/kackerx/agmux/internal/ccmux"
+	"github.com/kackerx/agmux/internal/store"
 )
 
 // `agmux avatars` lists the image sets first (id, source, frames per state), then the sprites as
@@ -116,5 +118,23 @@ func TestAvatarsImport(t *testing.T) {
 	avatars(&out, &errs)
 	if want := "kit  user  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2"; !strings.Contains(out.String(), want) {
 		t.Errorf("avatars lists:\n%s\nwant a line %q", out.String(), want)
+	}
+}
+
+// `agmux show` ends each line with the session's agent definition (empty if it has none).
+func TestShowAgentColumn(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "s.jsonl")
+	os.WriteFile(log, []byte(`{"type":"agent-setting","agentSetting":"orchestrator"}`+"\n"), 0o644)
+	p := &store.Poller{StateDir: dir, Show: func() ([]ccmux.Session, error) {
+		return []ccmux.Session{{ID: "a", Summary: "one", LogPath: log}, {ID: "b", Summary: "two"}}, nil
+	}}
+	var out bytes.Buffer
+	if err := show(&out, p); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	if len(lines) != 2 || !strings.HasSuffix(lines[0], "\torchestrator") || !strings.HasSuffix(lines[1], "\t") || strings.Count(lines[1], "\t") != 6 {
+		t.Errorf("show:\n%s", out.String())
 	}
 }

@@ -451,3 +451,58 @@ func pngOf(label string) []byte {
 	png.Encode(&b, im)
 	return b.Bytes()
 }
+
+func TestAgentSetting(t *testing.T) {
+	as := func(n string) string { return `{"type":"agent-setting","agentSetting":"` + n + `","sessionId":"x"}` }
+	pad := `{"type":"user","pad":"` + strings.Repeat("x", headBytes) + `"}`
+	for _, c := range []struct {
+		name  string
+		body  string
+		want  string
+		final bool
+	}{
+		{"first line", as("orchestrator") + "\n" + `{"type":"user"}` + "\n", "orchestrator", true},
+		{"none, a short file: may still come", `{"type":"user"}` + "\n", "", false},
+		{"empty file", "", "", false},
+		{"none, a long file: the line is not coming", pad + "\n", "", true},
+		{"only after the first 64KB: not looked for", pad + "\n" + as("late") + "\n", "", true},
+		{"resume writes it again: the first one", as("a") + "\n" + as("b") + "\n", "a", true},
+		{"text that only mentions it", `{"type":"user","note":"agent-setting","agentSetting":"fake"}` + "\n" + as("real") + "\n", "real", true},
+		{"no value is no agent", `{"type":"agent-setting","agentSetting":""}` + "\n" + as("next") + "\n", "next", true},
+		{"a line still being written", as("whole") + "\n" + `{"type":"agent-setting","agentSetting":"par`, "whole", true},
+		{"not finished and alone", `{"type":"agent-setting","agentSetting":"par`, "", false},
+	} {
+		path := filepath.Join(t.TempDir(), "s.jsonl")
+		os.WriteFile(path, []byte(c.body), 0o644)
+		if got, final := agentSetting(path); got != c.want || final != c.final {
+			t.Errorf("%s: %q final %v, want %q %v", c.name, got, final, c.want, c.final)
+		}
+	}
+	if got, final := agentSetting(filepath.Join(t.TempDir(), "missing")); got != "" || final {
+		t.Errorf("missing file: %q %v", got, final)
+	}
+}
+
+// Session.Agent: read once and kept; looked for again while the transcript is short and has none.
+func TestAgentCache(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "s.jsonl")
+	p := &Poller{Show: func() ([]ccmux.Session, error) { return []ccmux.Session{{ID: "a", LogPath: log}, {ID: "b"}}, nil }, StateDir: dir}
+	write := func(body string) { os.WriteFile(log, []byte(body), 0o644) }
+	agent := func() string { p.Refresh(); return p.Sessions()[0].Agent }
+	write(`{"type":"user"}` + "\n")
+	if a := agent(); a != "" {
+		t.Fatalf("no agent-setting yet: %q", a)
+	}
+	write(`{"type":"agent-setting","agentSetting":"orchestrator"}` + "\n")
+	if a := agent(); a != "orchestrator" {
+		t.Fatalf("written after the first poll: %q", a)
+	}
+	write(`{"type":"user"}` + "\n") // the file changed: the answer does not (it never does)
+	if a := agent(); a != "orchestrator" {
+		t.Errorf("not cached: %q", a)
+	}
+	if b := p.Sessions()[1].Agent; b != "" {
+		t.Errorf("a session without a log: %q", b)
+	}
+}

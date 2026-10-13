@@ -19,7 +19,7 @@ go install github.com/kackerx/agmux@latest
 
 ```sh
 agmux board     # 全屏看板，建议开在 tmux 浮窗里
-agmux show      # 每个会话一行：id、名字、分组、状态、模型、上下文%
+agmux show      # 每个会话一行：id、名字、分组、状态、模型、上下文%、agent 定义（没有就空）
 agmux avatars   # 打印全部头像：先是图片集（id、来源、各状态帧数），再是像素头像
 agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 sheet 切成图片集（见「头像图片」）
 ```
@@ -96,6 +96,7 @@ leave_preview = ["tab"]       # 默认和 focus_preview 同一个键（进出都
 [colors]        # #rrggbb 或 ANSI 0–255
 working = "#ffb86c"
 focus = "#ff8ebe"
+agent = "#bd93f9"   # 卡片第 2 行右侧的 agent 定义名（`claude --agent <name>` 的那个，读自 transcript 开头的 agent-setting 行；没有就不显示）
 match = "#f2d06b"   # 搜索命中字符的底色（字固定深色 #2d2a2e）
 border = "#585b70"  # 所有非焦点卡的边框统一用这个色（默认空 = 边框跟状态变色）；焦点卡仍是 focus，状态行和头像神态仍按状态着色
 

@@ -131,6 +131,31 @@ func TestBackgroundWorkIsWorkingColor(t *testing.T) {
 	}
 }
 
+// Line 2: the branch, the agent definition flush right in its own color; the branch is cut, the agent kept.
+func TestLine2Agent(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, c := range []struct {
+		name          string
+		branch, agent string
+		w             int
+		want          string // plain text
+	}{
+		{"branch only: as before", "main", "", 30, "\ue725 main"},
+		{"branch and agent", "main", "orchestrator", 30, "\ue725 main" + strings.Repeat(" ", 30-6-12) + "orchestrator"},
+		{"the branch gives way", "feature/long-branch-name", "orchestrator", 24, "\ue725 feature/…" + " " + "orchestrator"},
+		{"no branch", "", "orchestrator", 20, strings.Repeat(" ", 8) + "orchestrator"},
+		{"no branch, no agent", "", "", 20, ""},
+		{"an agent wider than the card is cut", "main", "a-very-long-agent-definition-name", 12, "a-very-long…"},
+	} {
+		out := line2(store.Session{Branch: c.branch, Agent: c.agent}, c.w, nil)
+		if got := ansi.Strip(out); got != c.want || (c.agent != "" && !strings.Contains(out, fg(cAgent, ansi.Strip(out[strings.LastIndex(out, " ")+1:])))) {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestCardStatus(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	base := store.Session{ID: "a", Name: "n", AgentType: "claude", AvatarID: "bot-01", ContextPct: -1}
