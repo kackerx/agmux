@@ -92,10 +92,20 @@ class Errors(Base):
     def test_bad_layout_and_bad_names_are_refused(self):
         self.write_sheet()
         r = self.run_cmd("avatars", "import", str(self.sheet), "--name", "kit", "--layout", "7"); self.assertEqual(r.returncode, 1); self.assertIn("--layout", r.stderr); self.assertIn("19", r.stderr)
-        for bad in ("hash", ".hidden", "a/b", "a\\b"):
+        for bad in ("hash", ".hidden", "a/b", "a\\b", "a b", "a:b", "é", "名字", "-x", "_x", "x\ty", "a*"):
             with self.subTest(name=bad):
-                r = self.run_cmd("avatars", "import", str(self.sheet), "--name", bad); self.assertEqual(r.returncode, 1, r.stderr); self.assertIn("--name", r.stderr)
+                r = self.run_cmd("avatars", "import", str(self.sheet), "--name", bad); self.assertNotEqual(r.returncode, 0, bad); self.assertIn("--name", r.stderr); self.assertEqual(len(r.stderr.strip().splitlines()), 1, r.stderr)
         self.assertEqual(self.files(self.dir) if self.dir.exists() else [], [])
+
+    def test_names_the_regex_allows_are_accepted(self):
+        self.write_sheet()
+        for ok in ("a", "A9", "9a", "my-set_1", "kit.v2", "Z", "a" * 60):
+            with self.subTest(name=ok):
+                r = self.run_cmd("avatars", "import", str(self.sheet), "--name", ok); self.assertEqual(r.returncode, 0, f"{ok}: {r.stderr}"); self.assertTrue((self.dir / ok).is_dir())
+
+    def test_dash_h_prints_the_usage_line_and_the_flags_and_exits_2(self):
+        r = self.run_cmd("avatars", "import", "-h"); self.assertEqual(r.returncode, 2); out = r.stdout + r.stderr
+        for s in ("usage: agmux avatars import <sheet.png> --name <id> [--layout 30|19] [--force]", "-force", "-layout", "-name"): self.assertIn(s, out)
 
     def test_help_lists_the_command(self):
         r = self.run_cmd("help"); self.assertIn("avatars import <sheet.png> --name <id>", r.stdout)
@@ -109,27 +119,27 @@ class ForceRace(Base):
     def test_the_old_set_survives_or_the_new_one_is_complete_never_neither(self):
         import threading
         self.write_sheet(); kit = self.dir / "kit"; self.assertEqual(self.run_cmd("avatars", "import", str(self.sheet), "--name", "kit").returncode, 0)
-        marker = kit / "mine" / "own.png"; marker.parent.mkdir(); marker.write_bytes(png((1, 1, 1))); stop = threading.Event(); intr = {"n": 0}
+        marker = kit / "mine" / "own.png"; marker.parent.mkdir(); marker.write_bytes(png((1, 1, 1))); stop = threading.Event(); intr = {"n": 0}; quiet = threading.Event(); quiet.set()  # quiet: the intruder may act
         def intruder():
             while not stop.is_set():
                 try:
-                    if not kit.exists(): kit.mkdir(); (kit / "x").write_text("intruder"); intr["n"] += 1
+                    if quiet.is_set() and not kit.exists(): kit.mkdir(); (kit / "x").write_text("intruder"); intr["n"] += 1
                 except OSError: pass
         th = threading.Thread(target=intruder, daemon=True); th.start(); outcomes = []
         try:
             for _ in range(25):
                 r = self.run_cmd("avatars", "import", str(self.sheet), "--name", "kit", "--force"); outcomes.append(r.returncode)
                 if r.returncode == 0:
+                    quiet.clear(); time.sleep(0.03)
                     self.assertGreaterEqual(len(list(kit.rglob("*.png"))), 30, f"run {len(outcomes)}: exit 0 means the new set is in place"); self.assertFalse(marker.exists(), "and it replaced the old one")
-                    marker.parent.mkdir(exist_ok=True); marker.write_bytes(png((1, 1, 1)))  # put the user's file back for the next round
+                    marker.parent.mkdir(exist_ok=True); marker.write_bytes(png((1, 1, 1))); quiet.set()  # put the user's file back for the next round
                 else:
                     import re as _re
-                    m = _re.search(r"the old set is kept at (\S+)", r.stderr); kept = pathlib.Path(m.group(1).rstrip(".,;:")) if m else None
+                    m = _re.search(r"the old set could not be put back \(.*?\): it is at (\S+)|the old set is kept at (\S+)", r.stderr); kept = pathlib.Path((m.group(1) or m.group(2)).rstrip(".,;:")) if m else None
                     self.assertTrue(marker.exists() or (kept and (kept / "mine" / "own.png").exists()),
                                     f"run {len(outcomes)}: exit 1 and the user's old set is neither in <id> nor at the path the error names: {r.stderr!r}")
-                    if kept and not marker.exists():  # the old set was left at its bak path: put it back for the next round
-                        for p in list(kit.iterdir()) if kit.exists() else []: shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink()
-                        shutil.rmtree(kit, ignore_errors=True); os.rename(kept, kit)
+                    if kept and not marker.exists():  # the old set was left at its bak path: put it back for the next round (with the intruder held back)
+                        quiet.clear(); time.sleep(0.05); shutil.rmtree(kit, ignore_errors=True); os.rename(kept, kit); quiet.set()
         finally:
             stop.set(); th.join(2)
         print("force-race outcomes", outcomes, "intruder dirs", intr["n"]); self.assertTrue(set(outcomes) <= {0, 1}, outcomes)

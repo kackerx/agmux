@@ -146,7 +146,6 @@ class Polled(Base):
     def drop(self, name):
         S = json.loads((self.env.fake / "show.json").read_text()); self.env.write_show([s for s in S if s["summary"] != name])
 
-    @unittest.expectedFailure  # b8c0a36: the stale manual offset survives the focus falling back to the first card (review item; dev is fixing: remove when it lands)
     def test_the_focus_card_deleted_by_a_poll_resets_the_view_to_following(self):
         t = self.board(); self.wheel(t, 3); self.assertNotIn("m00", self.rows(t)); self.drop("m00")
         self.assertTrue(wait(lambda: "21 sessions" in self.top(t), 8), self.top(t)); time.sleep(0.5); r = self.rows(t)
