@@ -859,6 +859,38 @@ def build_states_fixture(env, cases=None):
     return out
 
 
+GROUP_ROWS = [  # T43: name, project, cwd (relative to ~/work), branch, tmuxTarget (None = background, no pane), (status, attentionState)
+    ("shop-main", "shopcart", "shopcart", "main", "alpha # main:1.0", ("working", None)),
+    ("shop-hf", "shopcart", "shopcart.worktrees/hotfix/alert-group", "hotfix/alert-group", "alpha # hotfix/alert-group:2.0", ("waiting", None)),
+    ("shop-hf2", "shopcart", "shopcart.worktrees/hotfix/alert-group", "hotfix/alert-group", "beta # hotfix/alert-group:1.0", ("idle", "unread")),
+    ("shop-feat", "shopcart", "shopcart.worktrees/feature/permission-dashboard", "feature/permission-dashboard", "beta # feature/permission-dashboard:1.1", ("idle", None)),
+    ("sql-a", "sqlmux", "sqlmux", "main", "gamma sess # main:1.0", ("working", None)),
+    ("sql-b", "sqlmux", "sqlmux", "main", "alpha # main:1.1", ("working", None)),
+    ("sql-c", "sqlmux", "sqlmux", "main", "gamma sess # w:0.0", ("waiting", None)),
+    ("solo-bg", "solo", "solo", "main", None, ("idle", None)),
+]
+
+
+def build_group_fixture(env):
+    """T43 fixture: 8 sessions in 3 projects (shopcart = main repo + two worktrees = 3 cwds; 5 cwds in all), tmux sessions alpha / beta / `gamma sess` (a space in the name; window names with `/` and `:`),
+    one background session without a pane, and all four states (done = idle + unread). Panes %401.. . Returns the expected membership per group_by:
+    {mode: {title: [names sorted]}} for cwd (titles `~/work/...`), project, session, state; plus `order_state` = the fixed state order and `sessions`."""
+    now = datetime.datetime.now(datetime.timezone.utc); h = env.home; S = []
+    for i, (name, proj, cwd, br, target, (status, att)) in enumerate(GROUP_ROWS):
+        wt = "worktrees" in cwd
+        S.append(dict(id=f"g{i:02d}", summary=name, agentType="claude", cwd=f"{h}/work/{cwd}", project=proj, mainRepoRoot=f"{h}/work/{proj}", isWorktree=wt, worktreeRoot=f"{h}/work/{cwd}" if wt else None,
+                      gitBranch=br, status=status, attentionType=None, pendingTool=None, tmuxPane=f"%{401 + i}" if target else None, tmuxTarget=target, trackingMode="native" if target else "background",
+                      subagents=[], nativeSessionId=f"n-g{i:02d}", logPath=None, lastActivityAt=iso(now - datetime.timedelta(seconds=90)), updatedAt=iso(now), backgroundDetail=None,
+                      lastPrompt=None, attentionState=att))
+    env.write_show(S); env.pane_ids = {s["tmuxPane"]: s["id"] for s in S if s["tmuxPane"]}
+    state_of = lambda r: "done" if r[5] == ("idle", "unread") else r[5][0]
+    by = {"cwd": {}, "project": {}, "session": {}, "state": {}}
+    for r in GROUP_ROWS:
+        for mode, key in (("cwd", f"~/work/{r[2]}"), ("project", r[1]), ("session", r[4].split(" # ")[0] if r[4] else "(no pane)"), ("state", state_of(r))):
+            by[mode].setdefault(key, []).append(r[0])
+    return dict(sessions=S, groups={m: {k: sorted(v) for k, v in d.items()} for m, d in by.items()}, order_state=["working", "waiting", "done", "idle"])
+
+
 def sample_series(fn, secs, step=0.05):
     """[(t, fn())] for secs seconds: fn reads the screen and returns what to track (an image id, a status word...)."""
     t0, out = time.time(), []
