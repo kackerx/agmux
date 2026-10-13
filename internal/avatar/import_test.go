@@ -8,16 +8,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeSheet is a navy sheet of cols × rows slots (cell px each), slot i painted with cellColor(i),
-// then a light gray margin right and below as an image model leaves around the grid; the slots from
+// then a margin right and below as an image model leaves around the grid; the slots from
 // blank on are white (an older sheet's empty cells).
-func fakeSheet(t *testing.T, path string, cols, rows, cell, blank int) {
+func fakeSheet(t *testing.T, path string, cols, rows, cell, blank int, margin ...color.NRGBA) {
 	t.Helper()
 	im := image.NewNRGBA(image.Rect(0, 0, cols*cell+37, rows*cell+23))
-	draw.Draw(im, im.Bounds(), image.NewUniform(color.NRGBA{230, 230, 230, 255}), image.Point{}, draw.Src) // light, but only just
+	m := color.NRGBA{201, 201, 201, 255} // light, but only just (mean 201; the cut takes <= 200 for dark)
+	if len(margin) > 0 {
+		m = margin[0]
+	}
+	for i := 0; i < len(im.Pix); i += 4 { // not draw.Draw: it would premultiply a transparent white into black
+		im.Pix[i], im.Pix[i+1], im.Pix[i+2], im.Pix[i+3] = m.R, m.G, m.B, m.A
+	}
 	draw.Draw(im, image.Rect(0, 0, cols*cell, rows*cell), image.NewUniform(color.NRGBA{20, 20, 60, 255}), image.Point{}, draw.Src)
 	for i := 0; i < cols*rows; i++ {
 		c := color.Color(color.White)
@@ -129,6 +137,9 @@ func TestImportErrors(t *testing.T) {
 		{sheet, "", "30", "--name"},
 		{sheet, "hash", "30", "reserved"},
 		{sheet, "a/b", "30", "--name"},
+		{sheet, "a b", "30", "--name"},
+		{sheet, "日本", "30", "--name"},
+		{sheet, "-x", "30", "--name"},
 		{sheet, ".x", "30", "--name"},
 		{text, "x", "30", "cannot decode"},
 		{white, "x", "30", "dark"},
@@ -162,5 +173,114 @@ func TestImportErrors(t *testing.T) {
 	}
 	if ents, _ := os.ReadDir(filepath.Dir(dir)); len(ents) != 1 {
 		t.Errorf("leftovers beside the set: %v", ents)
+	}
+}
+
+// A transparent white margin is white, as for PIL's convert("RGB") in draw-portrait (alpha is
+// dropped, not multiplied in, which would make it black); a name with . _ - is fine.
+func TestImportTransparentMargin(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	sheet := filepath.Join(t.TempDir(), "sheet.png")
+	fakeSheet(t, sheet, 6, 5, 40, 30, color.NRGBA{255, 255, 255, 0})
+	dir, err := Import(sheet, "Kit.v2_x-1", "30", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := color.NRGBAModel.Convert(readFrame(t, filepath.Join(dir, piFrames[29])).At(0, 127))
+	if want := color.NRGBAModel.Convert(cellColor(29)); got != want {
+		t.Errorf("last frame: %v, want %v", got, want)
+	}
+}
+
+// --force when the new set cannot be moved in: the old one is back in place, or, if even that
+// fails, named in the error. Never deleted.
+func TestImportForceKeepsOldSet(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	sheet := filepath.Join(t.TempDir(), "sheet.png")
+	fakeSheet(t, sheet, 6, 5, 40, 30)
+	avs := filepath.Join(root, "agmux", "avatars")
+	dst := filepath.Join(avs, "kit")
+	t.Cleanup(func() { rename = os.Rename })
+	seed := func() {
+		os.RemoveAll(avs)
+		os.MkdirAll(filepath.Join(dst, "idle"), 0o755)
+		os.WriteFile(filepath.Join(dst, "idle", "mine.png"), []byte("the user's own frame"), 0o644)
+	}
+	failInto := func(restoreToo bool) {
+		rename = func(from, to string) error {
+			if to == dst && (restoreToo || !strings.HasSuffix(from, ".old")) {
+				return os.ErrPermission
+			}
+			return os.Rename(from, to)
+		}
+	}
+	seed()
+	failInto(false)
+	if _, err := Import(sheet, "kit", "30", true); err == nil {
+		t.Fatal("expected the failed move to be an error")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "idle", "mine.png")); err != nil {
+		t.Errorf("the old set is not back in place: %v", err)
+	}
+	if ents, _ := os.ReadDir(avs); len(ents) != 1 {
+		t.Errorf("leftovers beside the set: %v", ents)
+	}
+	seed()
+	failInto(true)
+	_, err := Import(sheet, "kit", "30", true)
+	if err == nil || !strings.Contains(err.Error(), ".old") {
+		t.Fatalf("the error should say where the old set is: %v", err)
+	}
+	var bak string
+	filepath.WalkDir(avs, func(p string, d os.DirEntry, _ error) error {
+		if d.Name() == "mine.png" {
+			bak = p
+		}
+		return nil
+	})
+	if bak == "" || !strings.Contains(err.Error(), filepath.Dir(filepath.Dir(bak))) {
+		t.Errorf("the old set is at %q; the error says %v", bak, err)
+	}
+}
+
+// --force while something recreates the set directory (another import, a sync tool) right after it
+// was moved aside: whenever Import fails, the old set is still somewhere.
+func TestImportForceRace(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	sheet := filepath.Join(t.TempDir(), "sheet.png")
+	fakeSheet(t, sheet, 6, 5, 40, 30)
+	avs := filepath.Join(root, "agmux", "avatars")
+	dst := filepath.Join(avs, "kit")
+	for range 10 {
+		os.RemoveAll(avs)
+		os.MkdirAll(filepath.Join(dst, "idle"), 0o755)
+		os.WriteFile(filepath.Join(dst, "idle", "mine.png"), []byte("the user's own frame"), 0o644)
+		var stop atomic.Bool
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for !stop.Load() {
+				if os.Mkdir(dst, 0o755) == nil {
+					os.WriteFile(filepath.Join(dst, "racer"), nil, 0o644)
+				}
+				time.Sleep(20 * time.Microsecond)
+			}
+		}()
+		_, err := Import(sheet, "kit", "30", true)
+		stop.Store(true)
+		<-done
+		if err == nil {
+			continue
+		}
+		found := false
+		filepath.WalkDir(avs, func(p string, d os.DirEntry, _ error) error {
+			found = found || d != nil && d.Name() == "mine.png"
+			return nil
+		})
+		if !found {
+			t.Fatalf("Import failed (%v) and the old set is nowhere under %s", err, avs)
+		}
 	}
 }

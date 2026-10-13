@@ -4,12 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 
 	"github.com/kackerx/agmux/internal/xdg"
 )
@@ -25,6 +26,9 @@ var piFrames = []string{"idle/idle.png", "idle/idle_blink.png", "hi/hi1.png", "h
 	"wait/wait1.png", "wait/wait2.png", "interrupted/interrupted1.png", "search/search1.png",
 	"bash/bash1.png", "error/error1.png", "heard/heard1.png"}
 
+// setName is what a set ID may be: a plain directory name that is not hidden.
+var setName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
 const importSize = 128 // pixels a frame is cut to
 
 // Import cuts the pi-agent-portrait sheet (a PNG) into the set <name> under the user's avatars
@@ -36,8 +40,8 @@ func Import(sheet, name, layout string, force bool) (string, error) {
 	} else if layout != "30" {
 		return "", fmt.Errorf("--layout %q: use 30 (6 × 5 cells) or 19 (5 × 4)", layout)
 	}
-	if name == "" || name == "hash" || strings.HasPrefix(name, ".") || strings.ContainsAny(name, `/\`) {
-		return "", fmt.Errorf("--name %q: a set ID is a plain directory name, and not \"hash\" (reserved)", name)
+	if !setName.MatchString(name) || name == "hash" {
+		return "", fmt.Errorf("--name %q: a set ID starts with a letter or digit and has only letters, digits, . _ - (and \"hash\" is reserved)", name)
 	}
 	cfg, err := xdg.ConfigDir()
 	if err != nil {
@@ -82,19 +86,31 @@ func Import(sheet, name, layout string, force bool) (string, error) {
 			return "", err
 		}
 	}
-	// a set that is there (only reached when forced) goes aside first and comes back if the new one can't be moved in
+	// a set that is there (only reached when forced) goes aside first; it is deleted only once the
+	// new one is in place, and put back if that fails
 	bak := tmp + ".old"
-	if err := os.Rename(dst, bak); err == nil {
-		defer os.RemoveAll(bak)
+	moved := false
+	if err := rename(dst, bak); err == nil {
+		moved = true
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return "", err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		os.Rename(bak, dst)
+	if err := rename(tmp, dst); err != nil {
+		if moved {
+			if err2 := rename(bak, dst); err2 != nil {
+				return "", fmt.Errorf("%v; and the old set could not be put back (%v): it is at %s", err, err2, bak)
+			}
+		}
 		return "", err
+	}
+	if moved {
+		os.RemoveAll(bak)
 	}
 	return dst, nil
 }
+
+// rename is os.Rename; tests replace it.
+var rename = os.Rename
 
 func writePNG(path string, im image.Image) error {
 	f, err := os.Create(path)
@@ -116,8 +132,8 @@ func writePNG(path string, im image.Image) error {
 func cutSheet(im image.Image, n, cols, rows int) ([]*image.NRGBA, error) {
 	b := im.Bounds()
 	dark := func(x, y int) bool {
-		r, g, bl, _ := im.At(b.Min.X+x, b.Min.Y+y).RGBA()
-		return (r>>8)+(g>>8)+(bl>>8) <= 600 // mean of the three channels <= 200
+		c := color.NRGBAModel.Convert(im.At(b.Min.X+x, b.Min.Y+y)).(color.NRGBA) // as PIL's convert("RGB"): alpha dropped, not multiplied in
+		return int(c.R)+int(c.G)+int(c.B) <= 600                                 // mean of the three channels <= 200
 	}
 	bottom, right := 0, 0
 	for y := b.Dy() - 1; y >= 0 && bottom == 0; y-- {

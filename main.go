@@ -103,6 +103,10 @@ func avatarsCmd(args []string, w, errw io.Writer) int {
 	}
 	fs := flag.NewFlagSet("avatars import", flag.ContinueOnError)
 	fs.SetOutput(errw)
+	fs.Usage = func() {
+		fmt.Fprintln(errw, usage)
+		fs.PrintDefaults()
+	}
 	name := fs.String("name", "", "ID of the new set (its directory name)")
 	layout := fs.String("layout", "30", "cells on the sheet: 30 (6 × 5) or 19 (5 × 4)")
 	force := fs.Bool("force", false, "replace a set that exists")

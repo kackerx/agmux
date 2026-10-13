@@ -100,6 +100,9 @@ func TestAvatarsImport(t *testing.T) {
 			t.Errorf("%v: exit %d, %q", args, code, errs)
 		}
 	}
+	if _, _, errs := run("import", "-h"); !strings.Contains(errs, "<sheet.png>") || !strings.Contains(errs, "-force") {
+		t.Errorf("-h prints %q", errs)
+	}
 	if code, out, errs := run("import", sheet, "--name", "kit"); code != 0 || !strings.Contains(out, "imported") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
