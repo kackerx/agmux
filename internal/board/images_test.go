@@ -224,5 +224,75 @@ func TestAvatarPickerSets(t *testing.T) {
 		if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "kit"`) || p.Sessions()[0].AvatarID != "kit" {
 			t.Errorf("a set's ID is bound: %s %v", data, p.Sessions())
 		}
+		// a set that shadows a sprite is bound under its ID, not the sprite's name
+		if n := len(avatar.Listing()); n != len(avatar.Sets)+len(avatar.Sprites)-1 {
+			t.Errorf("images=%v: %d entries, want the sets and the sprites minus the shadowed one", images, n)
+		}
+		if n := strings.Count(ansi.Strip(view), "bot-03"); n != 1 {
+			t.Errorf("images=%v: bot-03 is listed %d times", images, n)
+		}
+		m, _ = press(t, m, "a", "k", "enter")
+		if v := ansi.Strip(m.View()); !strings.Contains(v, "one wears bot-03") || strings.Contains(v, "wears Sprout") {
+			t.Errorf("images=%v: %q", images, v)
+		}
+		m, _ = press(t, m, "a", "j", "enter") // back to kit for the next round
+	}
+}
+
+// A list taller than the screen shows the entries around the cursor: the cursor never leaves the
+// screen, the board's bars stay, and enter binds the entry the cursor is on.
+func TestAvatarPickerScrolls(t *testing.T) {
+	files := fstest.MapFS{}
+	for i := range 20 {
+		files[fmt.Sprintf("u%02d/idle/1.png", i)] = png("x")
+	}
+	avatar.UseSets(files)
+	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
+	useImages = false
+	dir := t.TempDir()
+	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
+	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: "u00", Show: func() ([]ccmux.Session, error) {
+		return []ccmux.Session{{ID: "a1", Summary: "one", CWD: "/a", TmuxPane: "%1", Status: "idle"}}, nil
+	}}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	all := avatar.Listing() // 20 sets, then the 6 sprites
+	for _, h := range []int{30, 12, 6} {
+		m := New(p, &fakeRunner{})
+		m.getenv = func(string) string { return "" }
+		tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: h})
+		m, _ = press(t, tm.(Model), "a")
+		for i := range all { // every cursor position, top to bottom
+			lines := strings.Split(ansi.Strip(m.View()), "\n")
+			var marked []string
+			for _, l := range lines {
+				if _, rest, ok := strings.Cut(l, "▸"); ok {
+					marked = append(marked, rest)
+				}
+			}
+			if len(lines) != h || len(marked) != 1 || !strings.Contains(marked[0], all[i]) {
+				t.Fatalf("h=%d cursor on %s: %d lines, marked rows %q\n%s", h, all[i], len(lines), marked, strings.Join(lines, "\n"))
+			}
+			top, bottom := -1, -1 // the box's own rows: the top bar above it and the footer below it stay
+			for y, l := range lines {
+				if strings.Contains(l, "╭") {
+					top = y
+				}
+				if strings.Contains(l, "╰") {
+					bottom = y
+				}
+			}
+			if h >= 12 && (top < 1 || bottom > h-2) {
+				t.Errorf("h=%d cursor on %s: the box covers the bars (rows %d..%d):\n%s", h, all[i], top, bottom, strings.Join(lines, "\n"))
+			}
+			m, _ = press(t, m, "j")
+		}
+		m, _ = press(t, m, "enter") // the cursor is on the last entry
+		if data, _ := os.ReadFile(filepath.Join(dir, "avatars.json")); !strings.Contains(string(data), `"one": "`+all[len(all)-1]+`"`) {
+			t.Errorf("h=%d: bound %s, want %s", h, data, all[len(all)-1])
+		}
+		os.Remove(filepath.Join(dir, "avatars.json"))
+		p.Refresh() // the session wears the default again
 	}
 }

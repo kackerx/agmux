@@ -999,7 +999,7 @@ func (m Model) View() string {
 				hint = append(hint, k(a[0])+a[1])
 			}
 		}
-		out = overlay(out, avatarList(m.target, m.pick), m.w)
+		out = overlay(out, avatarList(m.target, m.pick, m.h), m.w)
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+strings.Join(hint, " · "))
 	case m.passThrough():
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · "+m.cfg.First("leave_preview")+" back to the cards")

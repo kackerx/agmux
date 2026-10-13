@@ -475,15 +475,23 @@ func footerFor(c *config.Config) []footerKey {
 	return out
 }
 
-// avatarList is the avatar picker for s: two rows per image set and sprite with its ID (and a sprite's name) beside;
+// avatarList is the avatar picker for s, h rows of screen: two rows per image set and sprite with its ID (and a sprite's name) beside;
 // ▸ marks the cursor, the focus color the avatar s wears now.
-func avatarList(s store.Session, pick int) []string {
+func avatarList(s store.Session, pick, h int) []string {
 	name := s.Name
 	if name == "" {
 		name = s.ID
 	}
 	rows := []string{fg(cMuted, "avatar for ") + fg(cName, name), ""}
-	for i, id := range avatar.Listing() {
+	ids := avatar.Listing()
+	// the box keeps the top bar and the footer: what is left holds the title, a blank row, two rows
+	// per entry and the border; a longer list shows the entries around the cursor
+	first, n := 0, len(ids)
+	if fit := max((h-2-2-2)/2, 1); n > fit {
+		first, n = min(max(pick-fit/2, 0), len(ids)-fit), fit
+	}
+	for i := first; i < first+n; i++ {
+		id := ids[i]
 		mood := avatar.Normal
 		if isSet(id) && useImages { // a picture: its first idle frame
 			mood = avatar.Dim
