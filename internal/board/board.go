@@ -175,6 +175,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case frameMsg:
 		m.frame++
+		if was := m.focus; was != "" { // a poll took the focused card: the focus falls back to the first, and is in view
+			if m.current(); m.focus != was {
+				m.followHidden()
+			}
+		}
 		if m.mode == flashing { // polls move cards: the hits follow, as View draws them
 			m.flashFollow()
 		}
@@ -207,6 +212,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg, tea.MouseMsg:
 		// whatever moved the focus (hjkl, a click, unfolding), the preview follows right away
 		before := m.focus
+		shown := m // the focus the screen shows: current() puts it on the first card when the focused one is gone, or none was set yet
+		shown.current()
 		var tm tea.Model
 		var cmd tea.Cmd
 		if k, ok := msg.(tea.KeyMsg); ok {
@@ -219,8 +226,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return tm, cmd
 		}
 		nm.scroll = 0 // a new card starts at the bottom
-		// the first event sets the focus (current()): that is not the focus moving, and nothing is scrolled yet
-		if before != "" {
+		// only what the event moved counts, not the fallback shown was made for
+		if nm.focus != shown.focus {
 			nm.followHidden()
 		}
 		capture := nm.capture()

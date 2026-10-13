@@ -3616,3 +3616,147 @@ func TestScrollAsFirstEvent(t *testing.T) {
 		}
 	}
 }
+
+func scrollFixture(n int) (*mutSrc, Model) {
+	src := &mutSrc{}
+	for i := range n {
+		src.ss = append(src.ss, store.Session{ID: fmt.Sprintf("s%02d", i), Name: fmt.Sprintf("n%02d", i), GroupKey: "/a", Status: "idle", ContextPct: -1})
+	}
+	m := New(src, &fakeRunner{})
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	return src, tm.(Model)
+}
+
+func wheelOn(m Model, b tea.MouseButton) Model {
+	tm, _ := m.Update(tea.MouseMsg{X: 10, Y: 10, Action: tea.MouseActionPress, Button: b})
+	return tm.(Model)
+}
+
+// layoutOf reads the window of a copy: window() sets a missing focus on the model it is called
+// on, which would hide the very thing the tests below are about.
+func layoutOf(m Model) (rects []rect, off, last, bodyH int) { return m.window() }
+
+// Scrolled to the end with the focus on the last card, a poll takes that card away. The focus
+// falls back to the first card lazily, in the next event: a wheel or ctrl+d there must still
+// scroll from where the view is, not be taken for the focus moving out of view.
+func TestScrollAfterFocusGone(t *testing.T) {
+	for _, ev := range []string{"wheel", "ctrl+u"} {
+		src, m := scrollFixture(22)
+		m, _ = press(t, m, strings.Split(strings.Repeat("j", 21), "")...)
+		_, _, most, bodyH := layoutOf(m)
+		m.top, m.scrolled = most, true
+		src.ss = src.ss[:21]
+		_, _, last, _ := layoutOf(m)
+		want := last - 3
+		if ev == "wheel" {
+			m = wheelOn(m, tea.MouseButtonWheelUp)
+		} else {
+			m, _ = press(t, m, ev)
+			want = last - bodyH/2
+		}
+		if _, got, _, _ := layoutOf(m); !m.scrolled || got != want {
+			t.Errorf("%s after the focused card left: scrolled %v off %d, want %d", ev, m.scrolled, got, want)
+		}
+	}
+}
+
+// A poll that takes the focused card away puts the focus on the first card; if that is out of view
+// the manual scroll ends (the focus is always in view then); if it is in view the scroll stays.
+func TestScrollWhenPollTakesFocus(t *testing.T) {
+	for _, c := range []struct {
+		top        int
+		wantScroll bool
+	}{{40, false}, {0, true}} {
+		src, m := scrollFixture(22)
+		m, _ = press(t, m, strings.Split(strings.Repeat("j", 21), "")...)
+		m.top, m.scrolled = c.top, true
+		src.ss = src.ss[:21]
+		tm, _ := m.Update(frameMsg{})
+		m = tm.(Model)
+		if m.scrolled != c.wantScroll || m.focus != "s00" {
+			t.Errorf("top %d: scrolled %v, focus %q; want scrolled %v on s00", c.top, m.scrolled, m.focus, c.wantScroll)
+		}
+		if !c.wantScroll && !strings.Contains(ansi.Strip(m.View()), "n00") {
+			t.Errorf("top %d: the focused card is not on screen", c.top)
+		}
+	}
+}
+
+// Around every edge of a card: a key that moves the focus onto it keeps the scroll only if the
+// card is wholly in view (one line cut at the top or the bottom counts as out).
+func TestScrollPartialBoundary(t *testing.T) {
+	_, base := scrollFixture(22)
+	rects, _, most, bodyH := layoutOf(base)
+	pos := map[string]rect{}
+	for _, r := range rects {
+		pos[r.id] = r
+	}
+	checked := 0
+	for i := 1; i < 21; i++ {
+		target := pos[fmt.Sprintf("s%02d", i)]
+		var tops []int
+		for _, d := range []int{-1, 0, 1} {
+			tops = append(tops, target.y+d, target.y+target.h-bodyH+d)
+		}
+		for _, top := range tops {
+			if top < 0 || top > most {
+				continue
+			}
+			for _, k := range []string{"j", "k"} {
+				from := i - 1 // j moves onto the target from the card above it, k from below
+				if k == "k" {
+					from = i + 1
+				}
+				m := base
+				m.focus = fmt.Sprintf("s%02d", from)
+				m.top, m.scrolled = top, true
+				m, _ = press(t, m, k)
+				if m.focus != fmt.Sprintf("s%02d", i) {
+					t.Fatalf("%s from s%02d landed on %s", k, from, m.focus)
+				}
+				if in := target.y >= top && target.y+target.h <= top+bodyH; m.scrolled != in {
+					t.Errorf("top %d, %s onto s%02d (lines %d..%d, view %d..%d): scrolled %v", top, k, i, target.y, target.y+target.h, top, top+bodyH, m.scrolled)
+				}
+				checked++
+			}
+		}
+	}
+	if checked < 100 {
+		t.Errorf("only %d cases", checked)
+	}
+}
+
+// While scrolled, a click lands on the card drawn under the pointer.
+func TestScrollClick(t *testing.T) {
+	_, m := scrollFixture(22)
+	for range 3 {
+		m = wheelOn(m, tea.MouseButtonWheelDown)
+	}
+	c := m
+	rects, off, _, _ := layoutOf(c)
+	for _, r := range rects {
+		if r.id == "s06" { // off 9 puts it where s04 sits unscrolled
+			tm, _ := m.Update(tea.MouseMsg{X: r.x + 1, Y: 1 + r.y - off, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+			if got := tm.(Model).focus; got != "s06" {
+				t.Errorf("clicked s06 (screen line %d), focus %q", 1+r.y-off, got)
+			}
+			return
+		}
+	}
+	t.Fatal("no s06")
+}
+
+// Only browsing scrolls the cards: under flash, a kill prompt or the avatar grid the wheel does nothing.
+func TestScrollWheelOtherModes(t *testing.T) {
+	for _, k := range []string{"s", "x", "a"} {
+		_, m := scrollFixture(22)
+		m, _ = press(t, m, "j") // a focus to act on
+		if m, _ = press(t, m, k); m.mode == browsing {
+			t.Fatalf("%s left the browsing mode", k)
+		}
+		if m = wheelOn(m, tea.MouseButtonWheelDown); m.scrolled {
+			t.Errorf("the wheel scrolled the cards in mode %v (after %q)", m.mode, k)
+		}
+	}
+}
