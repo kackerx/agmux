@@ -347,21 +347,57 @@ func status(s store.Session) (word, detail string) {
 	return fg(cMuted, "● "+s.Status), ""
 }
 
-// line2: the branch, and the agent definition at the right edge; the branch is cut when they don't fit.
+// branchIcon is nf-dev-git_branch and a space, before the branch on line 2.
+const branchIcon = "\ue725 "
+
+// branchRoom is the cells line 2 has for the icon and the branch in w: all, less the agent at the
+// right edge and a space.
+func branchRoom(s store.Session, w int) int {
+	if s.Agent == "" {
+		return w
+	}
+	return max(w-ansi.StringWidth(ansi.Truncate(s.Agent, w, "…"))-1, 0)
+}
+
+// shownBranch is the branch as it is drawn in avail cells: whole; or, when it doesn't fit and has
+// "/"s, without its leading segments, one at a time, and a "…" in front of what is left ("…alert-group")
+// until it fits; or, when not even the last segment with the "…" does, the last segment alone
+// (the caller cuts its tail). skip is how many runes of branch are gone from the front, lead how
+// many runes ("…") were put there: a highlight at rune p of the branch is at p-skip+lead.
+func shownBranch(branch string, avail int) (text string, skip, lead int) {
+	if ansi.StringWidth(branch) <= avail || !strings.Contains(branch, "/") {
+		return branch, 0, 0
+	}
+	segs := strings.Split(branch, "/")
+	for k := 1; k < len(segs); k++ {
+		skip += len([]rune(segs[k-1])) + 1
+		if cand := "…" + strings.Join(segs[k:], "/"); ansi.StringWidth(cand) <= avail {
+			return cand, skip, 1
+		}
+	}
+	return segs[len(segs)-1], skip, 0
+}
+
+// line2: the branch (its leading segments left out when it doesn't fit, then its tail cut), and the
+// agent definition at the right edge.
 func line2(s store.Session, w int, hl []int) string {
 	left := ""
+	room := branchRoom(s, w)
 	if s.Branch != "" {
-		shifted := make([]int, len(hl))
-		for i, p := range hl {
-			shifted[i] = p + 2 // past the icon and its space
+		text, skip, lead := shownBranch(s.Branch, room-ansi.StringWidth(branchIcon))
+		var shifted []int
+		for _, p := range hl {
+			if p >= skip {
+				shifted = append(shifted, p-skip+lead+2) // past the icon and its space
+			}
 		}
-		left = hilite("\ue725 "+s.Branch, shifted, cBranch) // nf-dev-git_branch
+		left = hilite(branchIcon+text, shifted, cBranch)
 	}
 	if s.Agent == "" {
 		return ansi.Truncate(left, w, fg(cBranch, "…"))
 	}
 	agent := ansi.Truncate(s.Agent, w, "…")
-	left = ansi.Truncate(left, max(w-ansi.StringWidth(agent)-1, 0), fg(cBranch, "…"))
+	left = ansi.Truncate(left, room, fg(cBranch, "…"))
 	return pad(left, w-ansi.StringWidth(agent)) + fg(cAgent, agent)
 }
 
@@ -746,7 +782,9 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 			}
 			scan(ansi.Truncate(s.Name, max(tw-rw, 0), "…"), x0, y+1, s.ID, false)
 			if s.Branch != "" {
-				scan(strings.TrimPrefix(ansi.Truncate("\ue725 "+s.Branch, tw, "…"), "\ue725 "), x0+icon, y+2, s.ID, false)
+				avail := branchRoom(s, tw) - icon
+				text, _, _ := shownBranch(s.Branch, avail)
+				scan(ansi.Truncate(text, avail, "…"), x0+icon, y+2, s.ID, false)
 			}
 		}
 	}

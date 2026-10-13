@@ -146,7 +146,7 @@ func TestLine2Agent(t *testing.T) {
 	}{
 		{"branch only: as before", "main", "", 30, "\ue725 main"},
 		{"branch and agent", "main", "orchestrator", 30, "\ue725 main" + strings.Repeat(" ", 30-6-12) + "orchestrator"},
-		{"the branch gives way", "feature/long-branch-name", "orchestrator", 24, "\ue725 feature/…" + " " + "orchestrator"},
+		{"the branch gives way: its last segment, tail cut", "feature/long-branch-name", "orchestrator", 24, "\ue725 long-bra…" + " " + "orchestrator"},
 		{"no branch", "", "orchestrator", 20, strings.Repeat(" ", 8) + "orchestrator"},
 		{"no branch, no agent", "", "", 20, ""},
 		{"an agent wider than the card is cut", "main", "a-very-long-agent-definition-name", 12, "a-very-long…"},
@@ -541,5 +541,52 @@ func TestUseConfigFlow(t *testing.T) {
 	c.Flow = "stack"
 	if useConfig(c); !stackFlow {
 		t.Error("flow = stack not used")
+	}
+}
+
+// A branch that doesn't fit loses its leading "/" segments, one at a time, and gets a "…" in front
+// of what is left; only when even the last segment (with the …) doesn't fit is that cut at its tail,
+// without a second ellipsis; a branch without "/" is cut at its tail as ever.
+func TestBranchOmitsPrefix(t *testing.T) {
+	for _, c := range []struct {
+		branch string
+		w      int // the line's width (the icon takes 2)
+		want   string
+	}{
+		{"hotfix/alert-group", 2 + 18, "hotfix/alert-group"}, // just fits: nothing omitted
+		{"hotfix/alert-group", 2 + 17, "…alert-group"},       // one cell short
+		{"hotfix/alert-group", 2 + 12, "…alert-group"},       // …alert-group is 12
+		{"hotfix/alert-group", 2 + 11, "alert-group"},        // the last segment alone: no leading …
+		{"hotfix/alert-group", 2 + 10, "alert-gro…"},         // and cut at its tail
+		{"a/bb/ccc", 2 + 8, "a/bb/ccc"},
+		{"a/bb/ccc", 2 + 7, "…bb/ccc"},
+		{"a/bb/ccc", 2 + 6, "…ccc"},
+		{"a/bb/ccc", 2 + 4, "…ccc"},
+		{"a/bb/ccc", 2 + 3, "ccc"},
+		{"a/bb/ccc", 2 + 2, "c…"},
+		{"feature-permission-dashboard", 2 + 12, "feature-per…"}, // no "/": the tail goes
+		{"main", 2 + 4, "main"},
+	} {
+		got := ansi.Strip(line2(store.Session{Branch: c.branch}, c.w, nil))
+		if want := branchIcon + c.want; got != want {
+			t.Errorf("%q in %d: %q, want %q", c.branch, c.w, got, want)
+		}
+	}
+	// the same with an agent at the right edge: the branch has what is left of it
+	got := ansi.Strip(line2(store.Session{Branch: "hotfix/alert-group", Agent: "orch"}, 2+12+1+4, nil))
+	if got != branchIcon+"…alert-group orch" {
+		t.Errorf("with an agent: %q", got)
+	}
+	// highlights follow the characters that are shown: those in the omitted part are not drawn, the
+	// others move with their text (and the … in front is not one)
+	prevP := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevP) })
+	s := store.Session{Branch: "hotfix/alert-group"}
+	if got, want := line2(s, 2+12, []int{7, 8, 9, 10, 11}), hilite(branchIcon+"…alert-group", []int{3, 4, 5, 6, 7}, cBranch); got != want {
+		t.Errorf("highlight on the shown part: %q, want %q", got, want)
+	}
+	if got, want := line2(s, 2+12, []int{0, 1, 2}), fg(cBranch, branchIcon+"…alert-group"); got != want {
+		t.Errorf("highlight on the omitted part: %q, want %q", got, want)
 	}
 }

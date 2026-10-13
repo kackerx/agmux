@@ -4049,3 +4049,37 @@ func TestRelockAfterPaneChange(t *testing.T) {
 		t.Errorf("pass-through resumed after the pane changed and came back, keys → %q", sentKeys(r))
 	}
 }
+
+// Flash reads the branch as line 2 draws it: what is omitted from the front is not searched, what is
+// shown is.
+func TestFlashBranchOmittedPrefix(t *testing.T) {
+	branch := strings.Repeat("p", 30) + "/" + strings.Repeat("q", 30) + "/leaf-name" // longer than the room: "…qqq…/leaf-name"
+	src := staticSrc{{ID: "x", Name: "n", Branch: branch, GroupKey: "/g", CWD: "/g", ContextPct: -1, TmuxPane: "%1"}}
+	m := psized(src, 60, 30)
+	if !strings.Contains(ansi.Strip(m.View()), "…"+strings.Repeat("q", 30)+"/leaf-name") {
+		t.Fatalf("fixture: branch not shown without its first segment:\n%s", ansi.Strip(m.View()))
+	}
+	if m1 := typed(t, m, "spp"); len(m1.flash.ms) != 0 {
+		t.Errorf("a hit in the omitted segment: %+v", m1.flash.ms)
+	}
+	if m2 := typed(t, m, "sleaf"); len(m2.flash.ms) != 1 {
+		t.Errorf("no hit in the shown part: %+v", m2.flash.ms)
+	}
+}
+
+// With an agent at the right edge the branch has less room, and flash must not find what the
+// agent's room has taken.
+func TestFlashBranchWithAgent(t *testing.T) {
+	branch := strings.Repeat("x", 34) + strings.Repeat("y", 20) // 50 cells wide, 35 of room: x*34 and a …
+	src := staticSrc{{ID: "x", Name: "n", Branch: branch, Agent: "orchestrator", GroupKey: "/g", CWD: "/g", ContextPct: -1, TmuxPane: "%1"}}
+	m := psized(src, 60, 30)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, strings.Repeat("x", 34)+"… orchestrator") {
+		t.Fatalf("fixture:\n%s", v)
+	}
+	if m1 := typed(t, m, "sy"); len(m1.flash.ms) != 0 {
+		t.Errorf("a hit under the agent's room: %+v", m1.flash.ms)
+	}
+	if m2 := typed(t, m, "sxx"); len(m2.flash.ms) != 1 {
+		t.Errorf("no hit in the shown part: %+v", m2.flash.ms)
+	}
+}
