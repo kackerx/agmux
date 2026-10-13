@@ -874,7 +874,7 @@ GROUP_ROWS = [  # T43: name, project, cwd (relative to ~/work), branch, tmuxTarg
 def build_group_fixture(env):
     """T43 fixture: 8 sessions in 3 projects (shopcart = main repo + two worktrees = 3 cwds; 5 cwds in all), tmux sessions alpha / beta / `gamma sess` (a space in the name; window names with `/` and `:`),
     one background session without a pane, and all four states (done = idle + unread). Panes %401.. . Returns the expected membership per group_by:
-    {mode: {title: [names sorted]}} for cwd (titles `~/work/...`), project, session, state; plus `order_state` = the fixed state order and `sessions`."""
+    {mode: {title: [names sorted]}} for cwd (titles `~/work/...`), project, session, state; plus `order` = {mode: [titles in the expected on-screen order]} (alphabetical; `(no pane)` last; state fixed) and `sessions`."""
     now = datetime.datetime.now(datetime.timezone.utc); h = env.home; S = []
     for i, (name, proj, cwd, br, target, (status, att)) in enumerate(GROUP_ROWS):
         wt = "worktrees" in cwd
@@ -888,7 +888,10 @@ def build_group_fixture(env):
     for r in GROUP_ROWS:
         for mode, key in (("cwd", f"~/work/{r[2]}"), ("project", r[1]), ("session", r[4].split(" # ")[0] if r[4] else "(no pane)"), ("state", state_of(r))):
             by[mode].setdefault(key, []).append(r[0])
-    return dict(sessions=S, groups={m: {k: sorted(v) for k, v in d.items()} for m, d in by.items()}, order_state=["working", "waiting", "done", "idle"])
+    order = {m: sorted(d) for m, d in by.items()}
+    order["session"] = sorted(k for k in by["session"] if k != "(no pane)") + ["(no pane)"]  # orchestrator: `(no pane)` is always last
+    order["state"] = ["working", "waiting", "done", "idle"]  # fixed order, not by name
+    return dict(sessions=S, groups={m: {k: sorted(v) for k, v in d.items()} for m, d in by.items()}, order=order)
 
 
 def sample_series(fn, secs, step=0.05):
