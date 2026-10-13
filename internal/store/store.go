@@ -65,7 +65,7 @@ type Poller struct {
 
 	refreshMu sync.Mutex        // serializes Refresh; guards models
 	models    map[string]string // session ID → last model found in its jsonl
-	agents    map[string]string // session ID → agent definition, once known (it never changes)
+	heads     map[string]string // transcript path → agent definition from its head (the head never changes), once known
 
 	avatarErr error // avatars.json could not be read, as of the last poll or bind
 
@@ -190,8 +190,9 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		s.ContextPct, hudModel, s.Effort = readHUD(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
 	}
 	if r.LogPath != "" {
-		s.Model = lastModel(r.LogPath)
-		s.Agent = p.agent(s.ID, r.LogPath)
+		tail := tailLines(r.LogPath)
+		s.Model = modelIn(tail)
+		s.Agent = p.agent(r.LogPath, tail)
 	}
 	// ~8% of transcripts end in a big attachment / long line with no assistant entry in the tail
 	if p.models == nil {
@@ -266,29 +267,36 @@ func readHUD(path string) (pct int, model, effort string) {
 
 const tailBytes = 64 << 10
 
-// lastModel returns message.model of the last assistant entry in the final
-// 64KB of a jsonl transcript (files reach 16MB, so never read it whole).
-// ponytail: an assistant line longer than 64KB is missed; widen tailBytes if models show blank.
-func lastModel(path string) string {
+// tailLines are the lines of the final 64KB of a jsonl transcript (files reach 16MB, so never read
+// them whole): the first, cut line left out. nil when it cannot be read.
+func tailLines(path string) [][]byte {
 	f, err := os.Open(path)
 	if err != nil {
-		return ""
+		return nil
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
-		return ""
+		return nil
 	}
 	// one extra byte: if the cut lands exactly on a line start, the dropped "partial" first line is empty
 	off := max(fi.Size()-tailBytes-1, 0)
 	buf, err := io.ReadAll(io.NewSectionReader(f, off, fi.Size()-off))
 	if err != nil {
-		return ""
+		return nil
 	}
 	lines := bytes.Split(buf, []byte("\n"))
 	if off > 0 {
 		lines = lines[1:] // first line is cut mid-way
 	}
+	return lines
+}
+
+// lastModel returns message.model of the last assistant entry in the final 64KB of a transcript.
+// ponytail: an assistant line longer than 64KB is missed; widen tailBytes if models show blank.
+func lastModel(path string) string { return modelIn(tailLines(path)) }
+
+func modelIn(lines [][]byte) string {
 	for i := len(lines) - 1; i >= 0; i-- {
 		if !bytes.Contains(lines[i], []byte(`"type":"assistant"`)) {
 			continue
@@ -308,29 +316,58 @@ func lastModel(path string) string {
 	return ""
 }
 
-// agent is the session's agent definition. It is read once: Claude Code writes the agent-setting
-// line first (and again on resume, with the same value), so a name found is cached, and so is
-// "none" once the transcript is longer than what is read: the line would be in it by then.
-func (p *Poller) agent(id, path string) string {
-	if a, ok := p.agents[id]; ok {
+// agent is the session's agent definition: the last agent-setting line in the tail that
+// lastModel reads anyway (Claude Code writes the line again on every resume and when the agent is
+// changed, so the last one is the current one, and a session first resumed with --agent long
+// after it started has it near the end); else the first one in the head of the transcript. The
+// head never changes (the file only grows), so what it says is kept per path; the tail is read
+// on every poll and not kept.
+func (p *Poller) agent(path string, tail [][]byte) string {
+	if a := agentIn(tail); a != "" {
+		return a
+	}
+	if a, ok := p.heads[path]; ok {
 		return a
 	}
 	a, final := agentSetting(path)
 	if final {
-		if p.agents == nil {
-			p.agents = map[string]string{}
+		if p.heads == nil {
+			p.heads = map[string]string{}
 		}
-		p.agents[id] = a
+		p.heads[path] = a
 	}
 	return a
 }
 
+// agentIn is the agentSetting of the last agent-setting line among lines, "" if none.
+func agentIn(lines [][]byte) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if a := parseAgent(lines[i]); a != "" {
+			return a
+		}
+	}
+	return ""
+}
+
+func parseAgent(line []byte) string {
+	if !bytes.Contains(line, []byte(`"agent-setting"`)) {
+		return ""
+	}
+	var e struct {
+		Type         string `json:"type"`
+		AgentSetting string `json:"agentSetting"`
+	}
+	if json.Unmarshal(line, &e) == nil && e.Type == "agent-setting" {
+		return e.AgentSetting
+	}
+	return ""
+}
+
 const headBytes = 64 << 10
 
-// agentSetting returns agentSetting of the first {"type":"agent-setting",...} line in the first
-// 64KB of a jsonl transcript. final says whether asking again could change the answer: no, when it
-// was found or when the transcript is longer than what was read (a later line is not looked for).
-// ponytail: a transcript whose agent-setting line is not in its first 64KB shows no agent.
+// agentSetting returns agentSetting of the first agent-setting line in the first 64KB of a
+// transcript. final says whether asking again could change the answer: no, when it was found or
+// when the transcript is longer than what was read.
 func agentSetting(path string) (agent string, final bool) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -342,15 +379,8 @@ func agentSetting(path string) (agent string, final bool) {
 		return "", false
 	}
 	for _, l := range bytes.Split(buf, []byte("\n")) { // a line cut by the 64KB limit does not parse: skipped
-		if !bytes.Contains(l, []byte(`"agent-setting"`)) {
-			continue
-		}
-		var e struct {
-			Type         string `json:"type"`
-			AgentSetting string `json:"agentSetting"`
-		}
-		if json.Unmarshal(l, &e) == nil && e.Type == "agent-setting" && e.AgentSetting != "" {
-			return e.AgentSetting, true
+		if a := parseAgent(l); a != "" {
+			return a, true
 		}
 	}
 	return "", len(buf) == headBytes

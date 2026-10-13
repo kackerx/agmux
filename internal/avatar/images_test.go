@@ -720,6 +720,7 @@ func TestForSets(t *testing.T) {
 			t.Fatal("the hash picked an image set in pixel mode")
 		}
 	}
+	HashImages = true // as pictures, but no sets to pick from: sprites, not an empty pool
 	Sets = nil
 	for i := range 100 {
 		if _, ok := ByID(For(nil, nil, "hash", fmt.Sprintf("session-%d", i))); !ok {

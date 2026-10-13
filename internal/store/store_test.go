@@ -483,24 +483,82 @@ func TestAgentSetting(t *testing.T) {
 	}
 }
 
-// Session.Agent: read once and kept; looked for again while the transcript is short and has none.
-func TestAgentCache(t *testing.T) {
+func TestAgentIn(t *testing.T) {
+	as := func(n string) []byte { return []byte(`{"type":"agent-setting","agentSetting":"` + n + `"}`) }
+	for _, c := range []struct {
+		name  string
+		lines [][]byte
+		want  string
+	}{
+		{"the last one", [][]byte{as("a"), []byte(`{"type":"user"}`), as("b"), []byte(`{"type":"user"}`)}, "b"},
+		{"none", [][]byte{[]byte(`{"type":"user"}`), nil}, ""},
+		{"nothing read", nil, ""},
+		{"empty value: the one before", [][]byte{as("a"), []byte(`{"type":"agent-setting","agentSetting":""}`)}, "a"},
+		{"another type that mentions it", [][]byte{as("real"), []byte(`{"type":"user","note":"agent-setting","agentSetting":"fake"}`)}, "real"},
+		{"a half written last line", [][]byte{as("whole"), []byte(`{"type":"agent-setting","agentSetting":"par`)}, "whole"},
+	} {
+		if got := agentIn(c.lines); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// Session.Agent: the last agent-setting of the tail, else the first of the head (kept per path);
+// the tail is read on every poll, so an agent set after the head (a late --agent resume, a change) shows.
+func TestAgentSources(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "s.jsonl")
 	p := &Poller{Show: func() ([]ccmux.Session, error) { return []ccmux.Session{{ID: "a", LogPath: log}, {ID: "b"}}, nil }, StateDir: dir}
+	as := func(n string) string { return `{"type":"agent-setting","agentSetting":"` + n + `"}` + "\n" }
+	pad := `{"type":"user","pad":"` + strings.Repeat("x", tailBytes) + `"}` + "\n" // longer than the tail
 	write := func(body string) { os.WriteFile(log, []byte(body), 0o644) }
 	agent := func() string { p.Refresh(); return p.Sessions()[0].Agent }
+	for _, c := range []struct{ name, body, want string }{
+		{"neither", `{"type":"user"}` + "\n", ""},
+		{"head only (the file is short: it is the tail too)", as("first") + `{"type":"user"}` + "\n", "first"},
+		{"head only, a long file", as("first") + pad + pad, "first"},
+		{"the tail's last wins over the head", as("first") + pad + as("second") + `{"type":"user"}` + "\n" + as("third"), "third"},
+		{"only in the tail: a late resume with --agent", `{"type":"user"}` + "\n" + pad + pad + as("late"), "late"},
+		{"neither, a long file", pad + pad, ""},
+	} {
+		os.Remove(log)
+		p = &Poller{Show: p.Show, StateDir: dir}
+		write(c.body)
+		if got := agent(); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	// the head is kept per path; the tail is not: a later change shows
+	p = &Poller{Show: p.Show, StateDir: dir}
+	write(as("first") + pad + pad)
+	if a := agent(); a != "first" {
+		t.Fatalf("head: %q", a)
+	}
+	write(as("first") + pad + pad + as("changed"))
+	if a := agent(); a != "changed" {
+		t.Errorf("an agent changed later: %q", a)
+	}
+	// a short file with none is not final: an agent set at 10KB (a late resume) that the file then
+	// grows past is in neither tail but still in the head, and must be found there
+	p = &Poller{Show: p.Show, StateDir: dir}
 	write(`{"type":"user"}` + "\n")
 	if a := agent(); a != "" {
-		t.Fatalf("no agent-setting yet: %q", a)
+		t.Fatalf("none yet: %q", a)
 	}
-	write(`{"type":"agent-setting","agentSetting":"orchestrator"}` + "\n")
-	if a := agent(); a != "orchestrator" {
-		t.Fatalf("written after the first poll: %q", a)
+	write(`{"type":"user"}` + "\n" + as("late-resume"))
+	if a := agent(); a != "late-resume" {
+		t.Fatalf("from the tail: %q", a)
 	}
-	write(`{"type":"user"}` + "\n") // the file changed: the answer does not (it never does)
-	if a := agent(); a != "orchestrator" {
-		t.Errorf("not cached: %q", a)
+	write(`{"type":"user"}` + "\n" + as("late-resume") + pad + pad + pad)
+	if a := agent(); a != "late-resume" {
+		t.Errorf("scrolled out of the tail, still in the head: %q", a)
+	}
+	p = &Poller{Show: p.Show, StateDir: dir}
+	write(as("first") + pad + pad)
+	agent()
+	write(`{"type":"user"}` + "\n") // the head is remembered even if the file is replaced
+	if a := agent(); a != "first" {
+		t.Errorf("head not kept: %q", a)
 	}
 	if b := p.Sessions()[1].Agent; b != "" {
 		t.Errorf("a session without a log: %q", b)

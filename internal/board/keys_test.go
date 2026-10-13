@@ -1796,6 +1796,9 @@ func TestEveryColorWired(t *testing.T) {
 	has("idle word", card(idle, 48, 5, false, 0, now, hit{}), "muted")
 	has("name", card(idle, 48, 5, false, 0, now, hit{}), "name", "nm")
 	has("branch", card(idle, 48, 5, false, 0, now, hit{}), "branch", "\ue725 br")
+	agent := idle
+	agent.Agent = "orchestrator"
+	has("agent", card(agent, 48, 5, false, 0, now, hit{}), "agent", "orchestrator")
 	has("model", card(idle, 48, 5, false, 0, now, hit{}), "model")
 	withEffort := idle
 	withEffort.Effort = "high"
