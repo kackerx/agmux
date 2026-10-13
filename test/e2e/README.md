@@ -44,6 +44,7 @@ AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 | `test_t25.py` | `[layout] max_columns`：232 列 =5 → 一行 5 列（colW = floor((W-2(n-1))/n)）、默认 / =4 → 4 列、180 列 =5 仍 4 列（最小列宽 40）、=1、resize 实时生效、导航按 5 列；0 / 9 / -1 / 字符串 / 小数 / 布尔 / 未知键各一行 stderr 退 1；1 与 8 合法；`agmux config` 打印并回环 |
 | `test_t26.py` | `colors.border`：设了 → 所有非焦点卡（working / done / 告警 / idle）边框都是该色（18;52;86）、焦点卡仍 focus 色（可配）、状态词颜色不变、焦点移动后旧焦点卡回到 border 色；空串 / 不配 = 跟状态；ANSI 索引合法；只有 border 允许空串；`agmux config` 打印并回环 |
 | `test_t27.py` | effort：`effort.level` → 第 3 行 `模型·level`（点 muted、level 用 colors.effort，换色核对 rgb）；缺字段 / null / 空串 / 顶层字符串 / 其它名字的 effort 字段 → 无 `·`，模型和上下文条照常；类型错（数字/数组/对象/布尔/顶层字符串）→ 同样照常（b35eb49 上 8 条 expectedFailure）；窄列时 model·effort 一起从右截、条和状态词保留；statusline 重跑后实时增删 |
+| `test_t28.py` | T28 头像真图：先放夹具自检（PNG 生成、用户目录集 `write_avatar_set`、fake tmux 的 `client_termname` / `allow-passthrough` 应答 `Env.set_term`、kitty 序列解析 `kitty_commands/kitty_images/kitty_deletes`、占位符抓屏解析 `ph_cells`、裸 pty 录原始字节 `PtyRun`）；产品用例待 T28 提交后加 |
 | `test_t7.py` | 固定排序（假 ccmux 每次轮询换数组顺序，卡片不动；同名按 id；组按 cwd 字符串）、`f` 折叠 / 展开（标题 ▾ ↔ ▸、其它组位置不动、折叠标题可获焦点且不响应 H/r/d/s/x、enter 展开、轮询不展开、不跨运行记忆） |
 
 `fixtures/catv.py` 是假 pane 里用的原始模式回显（BSD `cat -v` 会把被拆开的 UTF-8 弄乱码）；`fixtures/paste_probe.py` 是要求 bracketed paste 并回显收到字节的 pane。

@@ -67,8 +67,10 @@ printf '%s\\037' "$@" >> "$d/tmux.log"; printf '\\n' >> "$d/tmux.log"
 perl -MTime::HiRes=time -e 'printf "%.3f\\n", time' >> "$d/tmux.times"
 if [ -e "$d/tmux.fail" ] && [ "$(cat "$d/tmux.fail")" = "$1" ]; then printf 'tmux: boom from fake tmux\\nsecond tmux line\\n' >&2; exit 1; fi
 case "$1" in
-  display-message) case " $* " in *" ; "*) echo "0 0 0 default 50"; exit 0;; esac  # T24: the preview's `display-message <cursor format> ; capture-pane`: cursor hidden, then an empty screen
+  display-message) case " $* " in *" ; "*) echo "0 0 0 default 50"; exit 0;; esac
+    case " $* " in *client_termname*) if [ -e "$d/tmux.termname" ]; then cat "$d/tmux.termname"; else echo xterm-256color; fi; exit 0;; esac  # T28: renderer auto-detect  # T24: the preview's `display-message <cursor format> ; capture-pane`: cursor hidden, then an empty screen
     if [ -e "$d/tmux.session" ]; then cat "$d/tmux.session"; else echo fl-own; fi; exit 0;;
+  show|show-options) case " $* " in *allow-passthrough*) if [ -e "$d/tmux.passthrough" ]; then cat "$d/tmux.passthrough"; else echo on; fi; exit 0;; esac; exit 0;;  # T28
   list-clients) [ -e "$d/tmux.clients" ] && cat "$d/tmux.clients"; exit 0;;
   load-buffer) cat >> "$d/tmux.stdin"; exit 0;;
   show-environment) if [ -e "$d/tmux.env" ]; then cat "$d/tmux.env"; exit 0; else echo "unknown variable: $4" >&2; exit 1; fi;;
@@ -136,6 +138,12 @@ exit 0
     def tmux_times(self):
         p = self.fake / "tmux.times"
         return [float(x) for x in p.read_text().split()] if p.exists() else []
+
+    def set_term(self, termname=None, passthrough=None):
+        """T28: what the fake tmux answers to `display-message -p -c <client> '#{client_termname}'` (default xterm-256color) and `show -gv allow-passthrough` (default on)."""
+        for name, v in (("tmux.termname", termname), ("tmux.passthrough", passthrough)):
+            p = self.fake / name
+            p.unlink(missing_ok=True) if v is None else p.write_text(v + "\n")
 
     def set_tmux(self, session="fl-own", clients=(), fail=None, session_env=None):
         """clients: (activity, client_name, client_session) rows served by `tmux list-clients -F ...`; fail: subcommand that exits 1."""
@@ -520,3 +528,156 @@ def parse_attr(raw):
                     cells.append(("", st["rev"], st["ul"], st["fg"]))
         rows.append(cells)
     return rows
+
+
+# ---------------------------------------------------------------- T28: image avatars (kitty graphics + Unicode placeholders)
+PLACEHOLDER = "\U0010EEEE"
+DIACRITICS = [0x305, 0x30D, 0x30E, 0x310, 0x312, 0x33D, 0x33E, 0x33F]  # kitty's rowcolumn-diacritics, first eight: index = row / column number
+ID_BASE = 0x00C0DE00
+KITTY_ENV = "TMUX=/fake/tmux,1,0 "  # extra_env for Term / ptyrun: agmux believes it runs inside tmux (the fake tmux answers); TERM stays xterm-256color
+
+
+def png(rgb=(200, 60, 60), size=8, noise=False):
+    """A tiny valid PNG (solid colour); different colours make different bytes, so frames are tellable apart."""
+    import struct, zlib
+    def chunk(t, d):
+        c = struct.pack(">I", len(d)) + t + d
+        return c + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    import random
+    rnd = random.Random(sum(rgb))  # noise=True: incompressible pixels, to get an upload that needs several 4096-byte chunks
+    raw = b"".join(b"\x00" + (bytes(rnd.randrange(256) for _ in range(size * 3)) if noise else bytes(rgb) * size) for _ in range(size))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+def write_avatar_set(cfg, name, states, **files):
+    """$XDG_CONFIG_HOME/agmux/avatars/<name>/<state>/NN.png: states = {"idle": 3, "working": 2, ...} (frame counts; frame k of state s has a colour of its own).
+    files = extra raw files {"working/readme.txt": b"..."}. cfg = the XDG_CONFIG_HOME directory. Returns the set directory."""
+    base = pathlib.Path(cfg) / "agmux" / "avatars" / name
+    for si, (st, n) in enumerate(states.items()):
+        (base / st).mkdir(parents=True, exist_ok=True)
+        for k in range(n):
+            (base / st / f"{k + 1:02d}.png").write_bytes(png((40 + 50 * si, 30 + 40 * k, 200 - 30 * k)))
+    for rel, data in files.items():
+        (base / rel).parent.mkdir(parents=True, exist_ok=True); (base / rel).write_bytes(data if isinstance(data, bytes) else data.encode())
+    return base
+
+
+def ph_cells(raw):
+    """Placeholder cells of a `capture-pane -p -e` dump: [(row, x, id, row_diacritic_index, col_diacritic_index)], x = display column, id = the 24-bit value of the
+    38;2;r;g;b foreground. A cell that lacks its diacritics (the short form) has index None."""
+    out = []
+    for r, line in enumerate(raw.split("\n")):
+        st, x = dict(fg=None, bg=None, dim=False, bold=False, rev=False), 0
+        toks = _TOK.split(line)
+        for tok in toks:
+            m = _TOK.fullmatch(tok)
+            if m:
+                _sgr(m.group(1)[2:-1], st); continue
+            i = 0
+            while i < len(tok):
+                ch = tok[i]; i += 1
+                if ch == PLACEHOLDER:
+                    dia = []
+                    while i < len(tok) and unicodedata.combining(tok[i]):
+                        dia.append(ord(tok[i])); i += 1
+                    f = st["fg"]; idv = (f[1] << 16 | f[2] << 8 | f[3]) if f and f[0] == "rgb" else None
+                    ix = lambda k: DIACRITICS.index(dia[k]) if len(dia) > k and dia[k] in DIACRITICS else None
+                    out.append((r, x, idv, ix(0), ix(1))); x += 1
+                else:
+                    x += cw(ch)
+    return out
+
+
+def kitty_commands(data):
+    """Kitty graphics APCs found in a raw byte stream written by agmux, tmux passthrough wrappers (\\ePtmux;<ESC doubled>\\e\\\\) undone:
+    [{"ctl": {"a": "T", "i": "12632576", ...}, "payload": bytes, "wrapped": bool, "chunk_len": n}] in stream order, plus nothing for non-graphics bytes.
+    Chunks of one image (m=1 ... m=0) stay separate entries: callers join them."""
+    b = data if isinstance(data, bytes) else data.encode("latin-1")
+    out, i = [], 0
+    def apc(body, wrapped):
+        m = re.fullmatch(rb"\x1b_G([^;]*)(?:;(.*))?\x1b\\", body, re.S)
+        if m:
+            ctl = dict(kv.split("=", 1) for kv in m.group(1).decode().split(",") if "=" in kv)
+            out.append(dict(ctl=ctl, payload=m.group(2) or b"", wrapped=wrapped, raw=body))
+    while i < len(b):
+        if b.startswith(b"\x1bPtmux;", i):
+            j, body = i + 7, bytearray()
+            while j < len(b):
+                if b[j] == 0x1B and j + 1 < len(b) and b[j + 1] == 0x1B:
+                    body.append(0x1B); j += 2
+                elif b[j] == 0x1B and j + 1 < len(b) and b[j + 1] == 0x5C:  # ESC \ undoubled = end of the wrapper
+                    j += 2; break
+                else:
+                    body.append(b[j]); j += 1
+            apc(bytes(body), True); i = j
+        elif b.startswith(b"\x1b_G", i):
+            j = b.find(b"\x1b\\", i)
+            if j < 0: break
+            apc(b[i:j + 2], False); i = j + 2
+        else:
+            i += 1
+    return out
+
+
+def kitty_images(cmds):
+    """Join chunked uploads: {id: dict(ctl=first chunk's keys, data=decoded bytes, chunks=[payload lengths])}; deletions: kitty_deletes(cmds)."""
+    import base64
+    imgs, cur = {}, None
+    for c in cmds:
+        ctl = c["ctl"]
+        if ctl.get("a") == "d": continue
+        if cur is None:
+            cur = dict(ctl=ctl, b64=b"", chunks=[])
+        cur["b64"] += c["payload"]; cur["chunks"].append(len(c["payload"]))
+        if ctl.get("m", "0") == "0":
+            cur["data"] = base64.b64decode(cur["b64"]); imgs[int(cur["ctl"]["i"])] = cur; cur = None
+    return imgs
+
+
+def kitty_deletes(cmds):
+    return [int(c["ctl"]["i"]) for c in cmds if c["ctl"].get("a") == "d" and "i" in c["ctl"]]
+
+
+class PtyRun:
+    """agmux on a bare pty (no tmux, no terminal emulator): records every byte it writes, so upload / delete sequences can be checked.
+    Environment = Env.prefix-style (fake ccmux and fake tmux first on PATH); extra = dict overriding it. Always close()."""
+
+    def __init__(self, env, args="board", w=200, h=50, extra=None, binary=None):
+        import fcntl, pty, struct, termios
+        e = {"PATH": f"{env.bin}:/usr/bin:/bin", "HOME": str(env.home), "XDG_STATE_HOME": str(env.state), "TERM": "xterm-256color",
+             "COLORTERM": "truecolor", "LANG": "en_US.UTF-8", **(extra or {})}
+        e = {k: v for k, v in e.items() if v is not None}
+        self.data, self._os = bytearray(), os
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execve(binary or BIN, [binary or BIN, *args.split()], e)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", h, w, 0, 0))
+        self.pid, self.fd, self.status = pid, fd, None
+        self._th = __import__("threading").Thread(target=self._pump, daemon=True); self._th.start()
+
+    def _pump(self):
+        while True:
+            try:
+                d = os.read(self.fd, 65536)
+            except OSError:
+                break
+            if not d: break
+            self.data += d
+
+    def send(self, s):
+        os.write(self.fd, s if isinstance(s, bytes) else s.encode())
+
+    def exited(self, timeout=5):
+        end = time.time() + timeout
+        while time.time() < end:
+            r, st = os.waitpid(self.pid, os.WNOHANG)
+            if r: self.status = os.waitstatus_to_exitcode(st); self._th.join(1); return True
+            time.sleep(0.05)
+        return False
+
+    def close(self):
+        if self.status is None:
+            try: os.kill(self.pid, 9); os.waitpid(self.pid, 0)
+            except OSError: pass
+        try: os.close(self.fd)
+        except OSError: pass
