@@ -4397,3 +4397,37 @@ func TestStayFooter(t *testing.T) {
 		t.Errorf("footer: %q", f)
 	}
 }
+
+// A tmux client attached to another session (another float, a nested outer terminal) is not the
+// board's popup: q under --stay detaches only the one on the board's own session.
+func TestStayOnlyOwnSessionPopups(t *testing.T) {
+	clients := stayClients + "3\t/dev/otherfloat\tfl-2\ttmux-256color\t/dev/otherfloat\n"
+	m, r := stayModel(clients)
+	if _, quit := press(t, m, "q"); quit {
+		t.Error("quit")
+	}
+	if d := tmuxCalls(r, "detach-client"); !reflect.DeepEqual(d, [][]string{{"tmux", "detach-client", "-t", "/dev/popup"}}) {
+		t.Errorf("detached %q, want only the popup on fl-1", d)
+	}
+}
+
+// detach-client fails, or tmux can't list its clients: the board keeps running and says so (it must
+// not quit, nor claim it hid).
+func TestStayTmuxFails(t *testing.T) {
+	for _, c := range []struct{ sub, msg string }{
+		{"detach-client", "can't find client: /dev/popup"},
+		{"list-clients", "no server running"},
+	} {
+		for _, k := range []string{"q", "enter"} {
+			m, r := stayModel(stayClients)
+			r.tmuxFail = map[string]error{c.sub: errors.New(c.msg)}
+			m2, quit := press(t, m, k)
+			if quit {
+				t.Errorf("%s fails, %s: the board quit", c.sub, k)
+			}
+			if !strings.Contains(m2.msg, c.msg) {
+				t.Errorf("%s fails, %s: said %q", c.sub, k, m2.msg)
+			}
+		}
+	}
+}

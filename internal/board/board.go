@@ -891,6 +891,8 @@ type pickedClient struct {
 	clients []tmuxClient
 }
 
+var errNoClient = errors.New("no tmux client to switch: set AGMUX_CLIENT=<client> (a name from tmux list-clients)")
+
 // chooseClient picks the user's tmux client by the rules in switchTo's comment.
 func chooseClient(r Runner, getenv func(string) string) (pickedClient, error) {
 	own := ""
@@ -962,7 +964,7 @@ func chooseClient(r Runner, getenv func(string) string) (pickedClient, error) {
 		}
 	}
 	if client == "" {
-		return pickedClient{}, errors.New("no tmux client to switch: set AGMUX_CLIENT=<client> (a name from tmux list-clients)")
+		return pickedClient{}, errNoClient
 	}
 	return pickedClient{client, exact != "", own, clients}, nil
 }
@@ -1027,8 +1029,11 @@ func detachAll(r Runner, cs []tmuxClient) (hidden bool, err error) {
 // is for): the caller then ends the board as quit always did.
 func hideBoard(r Runner, getenv func(string) string) (hidden bool, err error) {
 	pc, err := chooseClient(r, getenv)
-	if err != nil {
+	if errors.Is(err, errNoClient) {
 		return false, nil // no client at all: nothing to hide from
+	}
+	if err != nil {
+		return false, err // tmux can't say who is attached: the board stays, and says why
 	}
 	return detachAll(r, popupClients(pc))
 }

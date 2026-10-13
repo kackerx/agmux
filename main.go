@@ -56,8 +56,6 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
-	case "board":
-		err = runBoard(false)
 	case "show":
 		var p *store.Poller
 		if p, err = store.NewPoller(); err == nil {
