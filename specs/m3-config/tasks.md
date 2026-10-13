@@ -149,13 +149,13 @@
 
 ## 第六批（用户 2026-10-13 下午：22 张卡时底部被截、没法滚；要生成头像的 prompt）
 
-### T34 卡片区可滚动（dev @6bdad7a；tester 黑盒退回 1 条：开板后第一个滚轮 / ctrl+d 被吞（m.focus 初始空串被当成焦点移动 → followHidden 撤销滚动），修复 @b8c0a36；审查再退 4 必改：同根因在轮询删焦点卡后复现（改比「屏上显示的焦点」）、部分可见边界 / 滚动态点击 / 滚轮 mode 守卫无测试；定稿：过滤态顶栏无 more 提示接受；轮询回落焦点也算移出 → 回到跟随；修复 @e1a6ff0 + 测试 @656a036 复审通过（5 条必改全关闭）。**tester 整套退回 1 条**：e1a6ff0 的 frameMsg 每 tick 调持久 current()，零命中过滤时把记住的焦点置空，Esc 后回第一张（test_t19 第三轮用例红，二分到 e1a6ff0）→ reviewer 查明范围更大：capture()（预览开）和所有按键路径都经持久 current() 清 focus，T19 起就有；定稿在 current() 的 len(gs)==0 分支不清 focus 一处修掉（T19 存量 bug 并入 T34 修复），修复 @d391fb7 复审通过（零命中探针预览关 / 开、8 个键全过）。已知窗口：轮询删卡到下一帧之间来滚轮，焦点回落后不跟随直到下次按键，接受）
+### T34 卡片区可滚动（通过 @6997705 / test_t34；历程 6bdad7a → b8c0a36 → e1a6ff0 → 656a036 → d391fb7 → 6997705；tester 黑盒退回 1 条：开板后第一个滚轮 / ctrl+d 被吞（m.focus 初始空串被当成焦点移动 → followHidden 撤销滚动），修复 @b8c0a36；审查再退 4 必改：同根因在轮询删焦点卡后复现（改比「屏上显示的焦点」）、部分可见边界 / 滚动态点击 / 滚轮 mode 守卫无测试；定稿：过滤态顶栏无 more 提示接受；轮询回落焦点也算移出 → 回到跟随；修复 @e1a6ff0 + 测试 @656a036 复审通过（5 条必改全关闭）。**tester 整套退回 1 条**：e1a6ff0 的 frameMsg 每 tick 调持久 current()，零命中过滤时把记住的焦点置空，Esc 后回第一张（test_t19 第三轮用例红，二分到 e1a6ff0）→ reviewer 查明范围更大：capture()（预览开）和所有按键路径都经持久 current() 清 focus，T19 起就有；定稿在 current() 的 len(gs)==0 分支不清 focus 一处修掉（T19 存量 bug 并入 T34 修复），修复 @d391fb7 复审通过（零命中探针预览关 / 开、8 个键全过）。已知窗口：轮询删卡到下一帧之间来滚轮，焦点回落后不跟随直到下次按键，接受）
 - dev 自报：搜索过滤态顶栏被过滤框替换看不到 more 提示；滚动中焦点卡被轮询删掉时焦点悄悄换到第一张、视图停在原偏移直到下次按键；单卡高于正文高的极窄终端没处理。
 - 现状：正文只跟着焦点滚（scrollOff），鼠标滚轮只滚预览，底部被截的卡没有任何提示；用户以为是 bug。
 - 做法：鼠标滚轮在卡片区（x < cardsW）每格滚 3 行，不动焦点；新增动作 `page_down` / `page_up`（默认 ctrl+d / ctrl+u）滚半个正文高度；手动滚过的偏移保留，直到按键移动焦点把焦点移出可见区才回到「跟着焦点」；顶栏在被截时加提示：下方还有内容 ` · ↓ more`、上方被滚走 ` · ↑ more`（都有就两个）。`agmux config` 打印新动作，README 键位表加一行。
 - 验收：单测 滚轮 3 行 / 到底停 / 到顶停；ctrl+d/u 半页；手动滚后 j 把焦点移出可见区则重新跟随；顶栏提示三态。黑盒 120×30 放 22 张卡：滚轮向下后最后一张可见、顶栏 `↑ more`；再按 j 若焦点在屏外则视图跟随。
 
-### T35 `agmux avatars import <sheet.png> --name <id>`（dev @4aab625 送审 / 送测）
+### T35 `agmux avatars import <sheet.png> --name <id>`（通过 @4aab625+8fa4f3d / test_t35）
 - dev 定稿：深色阈值三通道均值 ≤200 定边界，每格取 97% 中间正方形；--force 先移开旧集、换进失败还原；id 不能为空 / hash / 以 . 开头 / 含 /；目录 0755；退出码用法错 2、已存在 1。
 - 审查退回 2 必改：--force 换入失败会删掉旧集（bak 只在成功后删、还原失败报 bak 路径）、深色阈值无测试（页边改 201 灰）；采纳：NRGBA 读像素、id 正则同上游 `[A-Za-z0-9][A-Za-z0-9._-]*`、-h usage。不做：边缘杂点加固、layout 错配检测。reviewer 用上游 2-sheet.png 对照过切块一致。修复 @8fa4f3d 复审通过（300 轮竞争 0 丢失）。
 - 用户用 GPT 按 pi-agent-portrait 的 6×5 格式生成一张 sheet（prompt 由 orchestrator 给），导入成一个用户图集，文件名沿用 pi 的（idle/idle.png、idle/idle_blink.png、hi/hi1.png … 共 30 格，见 pi-agent-portrait scripts/draw-portrait 的 FRAMES + NEW_FRAMES），这样同一套在 pi 里也能用；我们只读其中七个状态。
@@ -164,19 +164,19 @@
 
 ## 第七批（用户 2026-10-13 下午：agents / shell 要醒目；显示 agent 角色定义；默认头像仍是像素）
 
-### T36 后台 agents / shell 醒目 + 图片模式默认头像只在图集里挑（审查通过 @c464e31+47bde68；等整套回归）
+### T36 后台 agents / shell 醒目 + 图片模式默认头像只在图集里挑（通过 @c464e31+47bde68 / test_t36）
 - dev 定稿（照准）：` · Bash` 这类工具名详情仍 muted；Sets 为空时池回落 sprite。
 - 用户截图：`⏵ working · agents ⚇ 1` 里 `agents` 和 `⚇ 1` 是 muted 灰，看不出有东西在跑。改：状态行的 ` · agents` 详情和 `⚇ n` / `⚙ n` 计数段都用 `working` 色（和状态词同色），不新增颜色项；让位顺序不变。
 - 用户以为新版没装：装了（13:02，c2b26dd），但没绑定的会话按 hash 在「5 个像素 + 10 个图集」里挑，三分之一还是像素。改：**图片模式下 hash 池只含图集**，像素头像只能按 `a` 手选；像素模式照旧只含 sprite。design.md「选择与绑定」那句同步改。
 - 验收：单测 agents 详情 / 计数的转义码是 working 色；图片模式 Choices 不含 sprite、像素模式不含集。黑盒 带 subagents 的卡第 3 行 `agents` 和 `⚇` 段是 working 色；图片模式 100 个无绑定会话全是占位符头像。
 
-### T37 卡片显示 agent 角色定义（dev @ebcc6db 审查退回 1 必改（colors.agent 未入 TestEveryColorWired）+ spec 改：来源改为尾部 64KB 最后一条 agent-setting、无则看开头（reviewer 实测 39 个 jsonl：1 个首条在 8.6MB 处、该行反复写且最后一条离末尾 ≤34KB），补丁 @47bde68 复审通过——reviewer 用本机 39 个真实 transcript 逐个比对 0 不一致；等整套回归）
+### T37 卡片显示 agent 角色定义（dev @ebcc6db 审查退回 1 必改（colors.agent 未入 TestEveryColorWired）+ spec 改：来源改为尾部 64KB 最后一条 agent-setting、无则看开头（reviewer 实测 39 个 jsonl：1 个首条在 8.6MB 处、该行反复写且最后一条离末尾 ≤34KB），补丁 @47bde68 复审通过——reviewer 用本机 39 个真实 transcript 逐个比对 0 不一致；通过 / test_t37）
 - dev 定稿（照准）：缓存规则——找到即缓存；文件 >64KB 仍无也缓存「无」；短文件无则下次轮询再看。无分支时第 2 行只显示右侧 agent。
 - 用户问能不能拿到会话用的哪个 agent 定义（`claude --agent orchestrator` 那个）。能：Claude Code 的 transcript jsonl 里有 `{"type":"agent-setting","agentSetting":"orchestrator",...}` 行（第 1 行，resume 时再写一次）；statusline payload 和 ccmux 都没有。
 - 做法：store 读 jsonl **开头 64KB**（现在读尾部 64KB 取模型的逻辑旁边再加一次读头），取第一条 agent-setting 的值存 `Session.Agent`，按 session ID 缓存（不会变）；没有就空。卡片第 2 行右侧靠右显示它（和第 1 行的时间同一规则：始终显示，分支放不下才截），新颜色项 `colors.agent` 默认 `#bd93f9`；`agmux show` 也多一列。README 颜色表加行。
 - 验收：单测 jsonl 第 1 行有 agent-setting → Agent="orchestrator"；没有 → ""；只在尾部有（头 64KB 外）不要求读到（写进注释）；第 2 行布局：分支 + 右侧 agent，窄时分支截断 agent 保留。黑盒 夹具 jsonl 带 agent-setting 的卡第 2 行右侧出现 `orchestrator` 且是 colors.agent 色；无的卡第 2 行照旧。
 
-### T38 浮窗（嵌套 tmux client）里图片模式失效（dev 查完，定稿 A–E，实现中）
+### T38 浮窗（嵌套 tmux client）里图片模式失效（通过 @8f4217d+4d9651f+df3002b / test_t38，真 pty 当 client tty）
 - dev 实测（kitty + tmux 3.8，用户的 tmux.conf 与 fl-toggle.sh 原样）：1. chooseClient 选对（外层 kitty client），错在 imageMode 用 `display-message -p -c <client>` 查 termname——**tmux 3.8 里 display-message 不带 -t 时 -c 不生效**，按最近活动 client 展开 → 拿到嵌套的 tmux-256color；2. 单层 passthrough 经嵌套 client 到不了 kitty（被 popup pty 再解析一次）；3. 包两层能到，但常驻 session 先起、popup 后 attach 时上传无处可写全丢。
 - 定稿：A termname 并进 list-clients 字段；B 选中 client 是 tmux-/screen- 时改看最近活动的非 tmux client；**C tmux 里上传直写选中 client 的 tty（#{client_tty}），不再要求 allow-passthrough，打不开 tty 回落 passthrough 单层并底栏提示，写完 refresh-client，单次 write ≤ 一块**；D auto 判 off 底栏给原因；E 接受非 -h 的 AGMUX_CLIENT（-h 优先）。design.md 上传一节由 dev 改写。
 - dev @8f4217d 送审 / 送测：真机（用户脚本布局、先起后 attach）图集头像全显示；旧代码单层 / 两层包装都是空占位。用户之前偶尔能看到图 = 旧探测恰好选到 kitty client + 同 id 的图早留在 kitty 窗口里。
@@ -187,13 +187,13 @@
 - 改：a. 嵌套识别——选中的 client termname 以 tmux- / screen- 开头时，视为嵌套一层，终端类型改看同 server 上最近活动、termname 不是 tmux-/screen- 的 client，上传按实测结果决定包装层数；b. **auto 判 off 时底栏给一行原因**（哪个 client、它的 termname / passthrough），用户能自诊；c. chooseClient 同时接受 `show-environment -t <own>`（非 -h）的 AGMUX_CLIENT（优先 -h），README 两种写法都写明。
 - 验收：单测 嵌套 client 的探测表、note 文案、非 -h 的 AGMUX_CLIENT；黑盒 fake tmux 给两 client（kitty + tmux-256color，后者更新且在自己 session）→ 图片模式 on、上传包装层数符合定稿；只有 tmux-256color client → off 且底栏有原因。真机：dev 用用户脚本在浮窗里看到图。
 
-### T39 卡片更紧凑一点（dev @3b5c86b 审查退回 1 条缺测试：flash tw 偏窄侧无断言，补丁 @df3002b 送复审（两侧夹住））
+### T39 卡片更紧凑一点（通过 @3b5c86b+df3002b / 全套几何适配）
 - dev 实查：同列相邻卡之间本来就没有空行（截图里的缝是字体行距），该项无可减；只改 colGap 2→1 和卡内左右边距 1→0。2 列阈值变为 ≥81 列。
 - 用户 2026-10-13（浮窗 OK 后）：卡片的 margin 和 padding 都再少一点点。定稿三处各减 1：列间距 colGap 2 → 1；同列相邻卡片之间的空行 1 → 0（圆角边框相接）；边框内左右各 1 格的留白 → 0（头像紧贴左边框，头像和文字之间的 2 格不动，右侧时间 / 模型紧贴右边框）。最小列宽 40 不动（文字区因此多 2 格）；组标题行、顶栏、底栏不动。
 - 牵连：rects / 鼠标命中 / flash 标签坐标 / `a` 格子定位 / 滚动的 scrollOff 都按新几何；相关单测和 e2e 的坐标断言要跟着改。README 若有画卡片示意图同步。
 - 验收：单测 两张同列卡 rect.y 相差 cardH；列 x 相差 colW+1；卡片第 1 行 `│` 后紧跟头像格、末尾时间后紧跟 `│`；黑盒 抓屏对比：120 列 2 列布局下第二列起始列号、22 张卡在 30 行里比之前多显示一张。
 
-### T40 组排布可配：`[layout] flow = "bands" | "stack"` + 组标题横线（审查通过 @629e877：bands 8 宽度 × 折叠抓屏逐字节一致（仅 ━ 段）；收 stack 导航探针 14 例；等整套回归）
+### T40 组排布可配：`[layout] flow = "bands" | "stack"` + 组标题横线（通过 @629e877+df3002b / test_t40；bands 8 宽度 × 折叠抓屏逐字节一致（仅 ━ 段））
 - dev 定稿（照准）：stack 下所有 rect band=0、只有 min(n, 组数) 列；标题被 midTrunc 后占满整列就不画线；焦点在标题时文字 focus 色。
 - 用户 2026-10-13 看了对比页（artifact 8xRhqcZ7B5Nm5AVap3TUx6）：选方案一，但要保留现在的分层风格、加配置切换；组之间用标题行 + **粗实线**（`━`，U+2501）拉满列宽分隔，不要虚线、不要组边框。
 - 做法：`[layout] flow`，默认 `"bands"`（现状不变），`"stack"` = 第 k 个组进第 k mod n 列、每列独立往下堆（不做瀑布流）；非法值报错一行。组标题行两种模式都改成 `▾ ~/路径 (n) ━━━━━━` ——标题后空一格、`━` 画到列的右边缘、颜色 `muted`，标题文字仍 `dir` 色；折叠的组同样画线。`agmux config` 打印 flow，README 配置示例和布局说明加一段；m1 design「放不下的组折到下一行」加 stack 的说明。
@@ -213,3 +213,7 @@
 - T34–T40 全部通过，无遗留必改；各任务关键变异在 df3002b 上整套重跑全被杀。
 - 不阻塞的遗留：T34 轮询删卡到下一帧之间（≤500ms）来滚轮，焦点停屏外直到下次按键；T35 页边杂点使网格漂移、`--layout 19` 用于 30 格 sheet 静默错切（照搬上游）；T38 外层终端停读 2s 后回落 passthrough 只有单测 / pipe 验证，未在真机试；T40 ruleGE / foldedRectH2 视觉等价。
 - tester 整套退回：d391fb7 的「零命中不清 focus」把会话列表真空也一并保留，透传锁（T21「session is gone」）不再判丢（test_t12 红，二分到 d391fb7）→ 定稿显式锁存（reviewer：「只在 query 非空时保留」修不全，保留过滤时照样复现）：frameMsg 和按键入口处 pvFocus 为真而目标不在 Sessions() 里就置空 pvID，之后 passThrough 为假直到 tab / esc 重锁；d391fb7 不回退。reviewer 查过其它靠 focus 变空的逻辑只有透传锁。修复 @6997705（dropLostLock，帧与按键入口各一次）复审通过：relock 三探针 + 零命中两探针全过；锁存是采样式（帧 / 按键），和以前同一采样点；pane 变了又变回也保持锁住（比 T21 更严，照准）。等整套回归。
+
+## 第六 + 七批整批回归（tester 2026-10-13，6997705，套件 42c0edf）
+- go vet / go test -race 全绿；e2e 701 条全过（tmux 3.8）。两条红均为测试侧（几何适配期望列写错；眨眼换帧间隔被 capture-pane 采样停顿晚记，断言改成均值 0.4–0.6s 且不漏拍），已改。有一轮出过 2 个 error 未留输出、未复现（当时 load≈7.5），记为未复现。
+- 没覆盖：真 kitty / ghostty 观感与 q=2 是否静默、?1049l 失败兜底、真 pi sheet、≥100 用户图集耗时、flash 叠在占位符上、--force 竞态稳定复现。
