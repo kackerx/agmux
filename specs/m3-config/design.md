@@ -77,3 +77,14 @@
 - 打一个字符就出标签。继续打字缩小范围、标签重新分配；轮询后按新布局重扫位置和跳过集合，但「卡 → 标签」保留：这张卡还有命中且它的标签没进新的跳过集合就沿用原标签（用户正要按的字母不在手底下变掉），否则重新分配；退格（含 ctrl+h）删一个字符；无命中时没有标签，可以继续打或 esc；按到标签：焦点移到那张卡、退出 JUMP（只移焦点不跳转）；esc 退出、焦点不动；按了既不是标签也不是可打印字符的键忽略不退出；按到的标签对应的卡已在轮询中消失 → 忽略、留在 JUMP（重扫时把消失命中的字母记为「刚空出」：按它忽略、也不分给新命中，直到打字 / 退格 / 重新按 s）。消息行显示配置的 flash 键名。JUMP 态下鼠标点击和滚轮一律吞掉。
 - 标签字色按 focus 色的亮度自动选深（#282a36）或浅（#f8f8f2），不写死。
 - 这和 T14 的 `s`（回复）冲突：回复改成 `i`（insert），T17 的配置里都可改。
+
+## 头像用真图（T28，2026-10-13）
+用户：头像保持现在 6 列 × 2 行的大小，只要更清晰、可以不像素，参考 pi-emote / pi-agent-portrait 直接贴图，支持自定义和动画。spike 结论（dev 在本机 kitty 0.49 + tmux 3.7c 浮窗里截图核实）：kitty graphics 的 **Unicode 占位符**可行——图先上传，卡片里放占位符字符，tmux 当普通文字处理，裁剪 / 重绘 / 截断都正常；c、r 同时给时 kitty **保持长宽比居中**（正方形图在 6×2 里实际占中间 4 列，两边留白，不用自己补边）。
+
+- **图片集**：一个目录 = 一个头像，目录名就是它的 id（和 sprite id 同一命名空间，重名以用户目录为准）。结构 `<id>/<状态>/*.png`，状态 = `idle` / `working` / `attention` / `done`，对应卡片现在的 Dim / Scan / Alert / Normal 四种神态；一个状态下多张 PNG 按文件名排序就是帧，随 500ms 的 frame tick 循环；状态目录缺了用 `idle` 的帧，`idle` 也没有的集不算（启动时报一行到底栏，不退出）。只认 `.png`。图不做变暗 / 闪红处理，神态全靠作者画。
+- **来源**：内置集 go:embed（第一套 `aza_choi`，来自 pi-emote，MIT，README 署名；帧映射：idle → idle.png，working → think_1..4，attention → hi_1..4，done → talk 四帧；预缩到 64×64 减小上传量）；用户集在 `$XDG_CONFIG_HOME/agmux/avatars/<id>/`。启动时**一次性上传所有集的所有帧**（内置 + 用户，spike 实测 12 张 12ms），运行中不再上传——所以 `a` 换头像不需要新传；看板开着时新建的用户目录下次启动才生效。
+- **上传**：bubbletea 启动之前写 stdout：每帧一个固定 id（基数 0x00c0de00 起按加载顺序编号，重启覆盖同 id），`a=T,U=1,f=100,q=2,i=,c=6,r=2`，base64 按 ≤4096 分块 `m=1/0`；tmux 里每块各包一层 `\ePtmux;…\e\\`、里面 ESC 加倍；tmux 外直接写。`q=2` 必带（否则 kitty 的回复进 tmux 变成按键）。退出时每个 id `a=d,d=I`。
+- **渲染**：Render 的图片路径输出 2 行 × 6 格，每格 U+10EEEE + 行变音符 + 列变音符（每格都带全，不用省略写法，这样被截断后剩下的格子仍自带位置），前景色 `38;2;r;g;b` = 帧 id 的 24 位。ansi.StringWidth 算出来 = 6，版面代码不用改。
+- **探测**：`renderer = "auto"`（默认）时：tmux 里 `tmux display-message -p -c <client> '#{client_termname}'`（client 同 enter 跳转用的那个，AGMUX_CLIENT 优先）为 `xterm-kitty` / `xterm-ghostty` 且 `allow-passthrough` 不是 off → 图片；tmux 外看 `TERM=xterm-kitty` 或 `TERM_PROGRAM=ghostty`。**不用 `tmux show-environment TERM_PROGRAM`**（server 在 tmux 里起的会得到 tmux，pi-emote 的方法会误判）。不满足就走现在的像素头像；`renderer = "pixel"` 强制像素、`"image"` 强制图片（不满足时底栏报一行并回落）。回落时图片集绑定的会话显示按集 id hash 出的 sprite。
+- **选择与绑定**：`[avatars] default` / `[avatars.bind]` / avatars.json 的值都可以是集 id 或 sprite id；`hash` 在「所有集 + 所有 sprite」里挑。`a` 列表先列图片集（每行 2 行占位符 + id），再列 sprite；像素模式下集那几行用 hash 出的 sprite 代画。`agmux avatars` 打印集（id、来源 builtin/user、各状态帧数）和 sprite。
+- 不做：运行中热加载用户目录；ghostty / WezTerm / iTerm2 实测（WezTerm、iTerm2 不支持占位符，走像素）；多 client 同时看同一个 session 的图片 id 冲突（同图同 id，无害）；kill -9 残留的图（下次启动同 id 覆盖）。

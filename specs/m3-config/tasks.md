@@ -100,4 +100,11 @@
 - 阶段一 b（用户 2026-10-13 看了 20 个样张：像素块还是太大，要像素游戏那种细腻）：终端一格只能用字符拼，再细只有两条路——**四分块**（▘▝▀▖▌▞▛▗▚▐▜▄▙▟█，一格 2×2 像素，但一格只能有前景 / 背景两色，像素是 1:2 的竖长方形）和**更多格**（半块 12×12 像素 = 12 列 × 6 行，卡片 8 行）。图形协议（kitty / sixel）在 tmux 浮窗里直通不稳、终端不一定支持，不走。第二张样张：同三个角色（人像 Mina、二次元 Hana、机器人 Beep）各画三版并排——A 现在的 8×8 半块（对照）、B 四分块 16×8 在同样 8 列 × 4 行、C 半块 12×12 在 12 列 × 6 行；B 画的时候每个 2×2 块内不超过两色。用户挑一版再决定全套。
 - 阶段一 c（用户 2026-10-13 看了对比样张：C 够细但太大；**尺寸要保持现在的大小，只要更清晰**，可以不像素风；参考 pi 的 pi-agent-portrait / pi-emote 直接贴图，并支持用户自定义和动态）：改走**终端图片协议**。两个参考项目都是 MIT，在 tmux 里用 **kitty graphics 的 Unicode 占位符**（U+10EEEE + 行列变音符，前景色编图片 id；图片用 `\ePtmux;…\e\\` 直通上传），占位符对 tmux 是普通文字，跟着 pane / 浮窗裁剪和重绘，所以是「pane-safe」。用户终端：kitty 0.49、tmux 3.7c、allow-passthrough 已开。非 kitty 系终端（无 kitty graphics 的）和没开直通时回落到现在的半块像素头像，不删现有代码。
   - 先做**可行性 spike**（dev，scratchpad，不进产品代码）：一个 bubbletea 全屏程序，在 tmux 浮窗里上传 PNG（可拿 pi-emote 的 aza_choi 帧，MIT）并以 4×2、6×2、8×4 格三种框显示；每 200ms 重绘周围文字、每 500ms 换一张图片 id（动画）；验证：浮窗里能显示、不残影、不闪、重绘不丢；占位符行经 ansi.StringWidth 算出的宽度 = 列数（版面代码不用改）；长宽比是保持还是拉伸；退出时 a=d 删图，重开再传同 id 正常；一张 128×128 PNG 直通上传的耗时。用户在自己的 kitty 里跑看结果。
-  - 阶段二（spike 通过后再写）：头像来源改成「图片集」：内置集 + 用户目录 `~/.config/agmux/avatars/<名字>/` 下按状态放 PNG（idle / working / attention / done，多帧编号 = 动画），按 Mood 选帧、按 poll tick 换帧；检测 kitty 系终端（KITTY_WINDOW_ID / TERM_PROGRAM，tmux 里用 show-environment）+ `[avatars] renderer = auto|image|pixel`；`a` 列表列出图片集和像素头像；内置图的来源要能署名（aza_choi 来自 pi-emote，MIT）。
+  - spike 结论（dev，aspike）：可行。c/r 同给时 kitty 保持比例居中；动画 25 张截图无空白、无错位；StringWidth = 列数；a=d 删图有效；12 张 435KB 写出 12ms；直通在浮窗里可用。坑：别用 show-environment 探测终端，用 client_termname；q=2 必带；先上传再进 bubbletea。设计定稿见 design.md「头像用真图」。
+
+### T28 头像用真图（待开工；设计 design.md「头像用真图」）
+- 范围：avatar 包加图片集加载（内置 embed + 用户目录）、占位符渲染、启动上传 / 退出删除、探测与 `renderer` 配置、回落；store / board 的头像赋值接受集 id；现有 sprite 代码保留。`a` 列表、`agmux avatars`、README 放 T29。
+- 验收：单测 占位符行 StringWidth=6 且每格带行列变音符、前景色 = id；集加载（缺状态回 idle、无 idle 不算、非 png 忽略、帧按名排序）；探测表（termname × passthrough × renderer）；上传序列分块 ≤4096、tmux 里 ESC 加倍、q=2；退出删除每个 id。黑盒（tester）：夹具 tmux 的 client_termname 给 xterm-kitty 时抓屏里头像格是 U+10EEEE 且 SGR 前景是对应 id、随帧 tick 换 id；给 xterm-256color 时仍是像素头像；renderer=pixel 强制像素；用户目录放一套 PNG 后被认出；缺 idle 的集报底栏不退出。真 kitty 观感由用户验收。
+
+### T29 头像图片集的入口（待开工，T28 之后）
+- `a` 列表先列图片集再列 sprite；`agmux avatars` 打印集与 sprite；config `[avatars] renderer`、`default` 可填集 id；README 新节：目录结构、状态与帧、aza_choi 署名（pi-emote，MIT）、kitty/ghostty + allow-passthrough 要求。
