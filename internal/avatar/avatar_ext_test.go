@@ -157,21 +157,21 @@ func TestExtFallbackAndHash(t *testing.T) {
 	}
 	empty, _ := avatar.LoadBindings(filepath.Join(t.TempDir(), "none.json"))
 	for _, s := range []string{"s1", "s3"} {
-		if got, want := avatar.For(b, nil, "hash", s), avatar.For(empty, nil, "hash", s); got.ID != want.ID {
-			t.Errorf("%s bound to a nonexistent id: got %s, want hash default %s", s, got.ID, want.ID)
+		if got, want := avatar.For(b, nil, "hash", s), avatar.For(empty, nil, "hash", s); got != want {
+			t.Errorf("%s bound to a nonexistent id: got %s, want hash default %s", s, got, want)
 		}
 	}
-	if got := avatar.For(b, nil, "hash", "s2"); got.ID != "bot-04" {
-		t.Errorf("bound id ignored: %s", got.ID)
+	if got := avatar.For(b, nil, "hash", "s2"); got != "bot-04" {
+		t.Errorf("bound id ignored: %s", got)
 	}
 	count := map[string]int{}
 	for i := 0; i < 600; i++ {
 		id := fmt.Sprintf("%08x-%04x-4000-8000-%012x", i*2654435761, i, i*40503)
 		a, c := avatar.For(empty, nil, "hash", id), avatar.For(empty, nil, "hash", id)
-		if a.ID != c.ID {
+		if a != c {
 			t.Fatalf("hash default not stable for %s", id)
 		}
-		count[a.ID]++
+		count[a]++
 	}
 	t.Logf("600 uuid-like ids over sprites: %v", count)
 	if len(count) != 6 {

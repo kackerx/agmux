@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/kackerx/agmux/internal/avatar"
 )
 
 func TestLoadDefaultsAndPath(t *testing.T) {
@@ -87,12 +89,13 @@ func TestParseErrors(t *testing.T) {
 		{"[colors]\nworking = \"256\"\n", `"256" is neither`},
 		{"[colors]\nworking = \"red\"\n", `"red" is neither`},
 		{"[colors]\npink = \"#ffffff\"\n", "cfg: colors.pink: unknown color"},
-		{"[avatars]\ndefault = \"bot-99\"\n", `cfg: avatars.default: "bot-99" is neither hash nor a sprite id (bot-01, `},
-		{"[avatars.bind]\n\"sql mux\" = \"Clawd\"\n", `cfg: avatars.bind."sql mux": "Clawd" is not a sprite id`},
+		{"[avatars]\ndefault = \"bot-99\"\n", `cfg: avatars.default: "bot-99" is neither hash nor an avatar id (bot-01, `},
+		{"[avatars.bind]\n\"sql mux\" = \"Clawd\"\n", `cfg: avatars.bind."sql mux": "Clawd" is not an avatar id`},
 		{"[avatars]\nbind = \"x\"\n", "cfg: avatars.bind: must be a table, [avatars.bind]"},
 		{"keys = 3\n", "cfg: keys: must be a table, [keys]"},
 		{"colors = \"x\"\n", "cfg: colors: must be a table"},
 		{"[avatars]\nsize = 2\n", "cfg: avatars.size: unknown setting"},
+		{"[avatars]\nrenderer = \"sixel\"\n", `cfg: avatars.renderer: "sixel" is not auto, image or pixel`},
 	} {
 		_, err := Parse("cfg", []byte(c.toml))
 		if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), "\n") {
@@ -135,6 +138,31 @@ func TestAvatars(t *testing.T) {
 	}
 	if c, err := Parse("cfg", []byte("[avatars]\ndefault = \"bot-06\"\nbind = { x = \"bot-01\" }\n")); err != nil || c.AvatarDefault != "bot-06" || c.AvatarBind["x"] != "bot-01" {
 		t.Errorf("a sprite as default: %v", err)
+	}
+}
+
+// renderer is auto, image or pixel; default and bind may name an image set as well as a sprite.
+func TestAvatarRendererAndSets(t *testing.T) {
+	t.Cleanup(func() { avatar.Sets = nil })
+	avatar.Sets = []*avatar.Set{{ID: "aza_choi"}}
+	if got := Default().AvatarRenderer; got != "auto" || !strings.Contains(Default().String(), "[avatars]\nrenderer = \"auto\"\ndefault = \"hash\"\n") {
+		t.Errorf("default renderer %q:\n%s", got, Default())
+	}
+	for _, r := range []string{"auto", "image", "pixel"} {
+		if c, err := Parse("cfg", []byte("[avatars]\nrenderer = \""+r+"\"\n")); err != nil || c.AvatarRenderer != r {
+			t.Errorf("renderer %s: %v", r, err)
+		}
+	}
+	c, err := Parse("cfg", []byte("[avatars]\ndefault = \"aza_choi\"\n[avatars.bind]\nx = \"aza_choi\"\ny = \"bot-02\"\n"))
+	if err != nil || c.AvatarDefault != "aza_choi" || c.AvatarBind["x"] != "aza_choi" || c.AvatarBind["y"] != "bot-02" {
+		t.Fatalf("set ids: %v", err)
+	}
+	if back, err := Parse("cfg", []byte(c.String())); err != nil || !reflect.DeepEqual(back, c) {
+		t.Errorf("round trip: %v", err)
+	}
+	avatar.Sets = nil // the set is gone: its name is an error again, and the message lists what is there
+	if _, err := Parse("cfg", []byte("[avatars]\ndefault = \"aza_choi\"\n")); err == nil || !strings.Contains(err.Error(), "neither hash nor an avatar id") {
+		t.Errorf("unknown set: %v", err)
 	}
 }
 

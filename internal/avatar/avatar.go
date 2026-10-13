@@ -285,23 +285,48 @@ func ByID(id string) (Sprite, bool) {
 	return Sprite{}, false
 }
 
-// For picks the sprite for a session key: the state file's binding (b, nil = none), then
-// config.toml's (conf), then def — a sprite ID, or "hash" for a stable pick from the key.
-// An ID naming no sprite falls through to the next.
-func For(b Bindings, conf map[string]string, def, key string) Sprite {
+// Choices are what a hash picks from: the sprites, then the image sets (a set shadows a sprite
+// of the same ID).
+func Choices() []string {
+	var ids []string
+	for _, s := range Sprites {
+		if _, shadowed := SetByID(s.ID); !shadowed {
+			ids = append(ids, s.ID)
+		}
+	}
+	for _, s := range Sets {
+		ids = append(ids, s.ID)
+	}
+	return ids
+}
+
+// For picks the avatar for a session key: the state file's binding (b, nil = none), then
+// config.toml's (conf), then def — a sprite or image set ID, or "hash" for a stable pick from the
+// key. An ID naming neither falls through to the next.
+func For(b Bindings, conf map[string]string, def, key string) string {
 	if b != nil {
-		if id, ok := b.Get(key); ok {
-			if s, ok := ByID(id); ok {
-				return s
-			}
+		if id, ok := b.Get(key); ok && Known(id) {
+			return id
 		}
 	}
 	for _, id := range []string{conf[key], def} {
-		if s, ok := ByID(id); ok {
-			return s
+		if Known(id) {
+			return id
 		}
 	}
+	ids := Choices()
 	h := fnv.New32a()
 	h.Write([]byte(key))
+	return ids[h.Sum32()%uint32(len(ids))]
+}
+
+// SpriteFor is the sprite to draw for an avatar ID when no picture is drawn: the sprite itself, or
+// for an image set one picked by hashing its ID.
+func SpriteFor(id string) Sprite {
+	if s, ok := ByID(id); ok {
+		return s
+	}
+	h := fnv.New32a()
+	h.Write([]byte(id))
 	return Sprites[h.Sum32()%uint32(len(Sprites))]
 }

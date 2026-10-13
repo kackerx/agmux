@@ -270,8 +270,7 @@ func card(s store.Session, w, h int, focused bool, frame int, now time.Time, hl 
 	if focused { // a thick line in its own color: a status-colored thick line was too easy to miss
 		bs, border = lipgloss.ThickBorder(), cFocus
 	}
-	sp, _ := avatar.ByID(s.AvatarID)
-	face := strings.Split(avatar.Render(sp, s.AgentType, mood, frame), "\n")
+	face := avatarFace(s, mood, frame)
 
 	x := w - 4                 // inside the border and its one-cell margins
 	tw := x - avatar.Width - 2 // right of the avatar

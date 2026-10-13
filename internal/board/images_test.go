@@ -1,0 +1,140 @@
+package board
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+	"testing/fstest"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/kackerx/agmux/internal/avatar"
+	"github.com/kackerx/agmux/internal/store"
+)
+
+func png(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
+
+// useKit loads one set: two idle frames, two working, one attention, nothing for done.
+func useKit(t *testing.T) {
+	t.Helper()
+	avatar.UseSets(fstest.MapFS{
+		"kit/idle/1.png": png("i1"), "kit/idle/2.png": png("i2"),
+		"kit/working/1.png": png("w1"), "kit/working/2.png": png("w2"),
+		"kit/attention/1.png": png("a1"),
+	})
+	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
+}
+
+func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+
+// Pictures are drawn only when [avatars] renderer and the terminal say so: pixel never; auto for
+// kitty / ghostty (in tmux the attached client's TERM, with allow-passthrough on); image skips the
+// terminal check but not the passthrough.
+func TestImageMode(t *testing.T) {
+	useKit(t)
+	inTmux := map[string]string{"TMUX": "/tmp/tmux-1/default,1,0"}
+	for _, c := range []struct {
+		name     string
+		renderer string
+		env      map[string]string
+		term     string // tmux's #{client_termname}
+		pass     string // allow-passthrough, "" = the option doesn't exist
+		on       bool
+		note     string
+	}{
+		{"kitty client", "auto", inTmux, "xterm-kitty", "on", true, ""},
+		{"ghostty client, passthrough all", "auto", inTmux, "xterm-ghostty", "all", true, ""},
+		{"other client", "auto", inTmux, "xterm-256color", "on", false, ""},
+		{"kitty, passthrough off", "auto", inTmux, "xterm-kitty", "off", false, ""},
+		{"kitty, no such option (tmux < 3.3)", "auto", inTmux, "xterm-kitty", "", false, ""},
+		{"TERM_PROGRAM says kitty but the client does not", "auto", map[string]string{"TMUX": "x", "TERM_PROGRAM": "kitty"}, "xterm-256color", "on", false, ""},
+		{"pixel is never pictures", "pixel", inTmux, "xterm-kitty", "on", false, ""},
+		{"image on a plain client", "image", inTmux, "xterm-256color", "on", true, ""},
+		{"image, passthrough off: says so", "image", inTmux, "xterm-256color", "off", false, "allow-passthrough"},
+		{"outside tmux: kitty TERM", "auto", map[string]string{"TERM": "xterm-kitty"}, "", "", true, ""},
+		{"outside tmux: ghostty", "auto", map[string]string{"TERM": "xterm-256color", "TERM_PROGRAM": "ghostty"}, "", "", true, ""},
+		{"outside tmux: other", "auto", map[string]string{"TERM": "xterm-256color", "TERM_PROGRAM": "iTerm.app"}, "", "", false, ""},
+		{"outside tmux: image forced", "image", map[string]string{"TERM": "xterm-256color"}, "", "", true, ""},
+	} {
+		r := &fakeRunner{tmuxOut: map[string]string{"display-message": c.term + "\n", "show-options": c.pass + "\n"}}
+		if c.pass == "" {
+			r.tmuxFail = map[string]error{"show-options": errors.New("unknown option: allow-passthrough")}
+		}
+		on, note := imageMode(r, env(c.env), c.renderer)
+		if on != c.on || (c.note == "") != (note == "") || !strings.Contains(note, c.note) {
+			t.Errorf("%s: on=%v note=%q, want on=%v note containing %q", c.name, on, note, c.on, c.note)
+		}
+		if c.env["TMUX"] != "" && c.renderer == "auto" && c.term != "" { // the client is the one a jump would use, asked by name
+			found := false
+			for _, call := range r.calls {
+				found = found || strings.Join(call, " ") == "tmux display-message -p -c /dev/c #{client_termname}"
+			}
+			if !found {
+				t.Errorf("%s: client_termname not asked of the chosen client: %q", c.name, r.calls)
+			}
+		}
+	}
+	avatar.UseSets(fstest.MapFS{}) // no sets: nothing to draw
+	if on, _ := imageMode(&fakeRunner{}, env(map[string]string{"TERM": "xterm-kitty"}), "auto"); on {
+		t.Error("pictures with no image sets")
+	}
+}
+
+func kitSession(status string) store.Session {
+	return store.Session{ID: "a", Name: "n", AvatarID: "kit", Status: status, ContextPct: -1, TmuxPane: "%1"}
+}
+
+// A set's card holds placeholders (U+10EEEE, foreground = the frame's image id) and is exactly as
+// wide as one with a sprite; the state picks the frames, which cycle with the frame tick.
+func TestImageCard(t *testing.T) {
+	useKit(t)
+	useImages = true
+	id := func(s store.Session, frame int) string {
+		out := card(s, 48, 5, false, frame, now, hit{})
+		if !strings.Contains(out, "\U0010EEEE") {
+			t.Fatalf("no placeholders in %q", out)
+		}
+		for i, l := range strings.Split(out, "\n") {
+			if w := ansi.StringWidth(l); w != 48 {
+				t.Errorf("line %d is %d wide, want 48: %q", i, w, l)
+			}
+		}
+		at := strings.Index(out, "\U0010EEEE")
+		rgb, _, _ := strings.Cut(out[strings.LastIndex(out[:at], "38;2;")+len("38;2;"):], "m") // the color the placeholder is in
+		var r, g, b uint32
+		fmt.Sscanf(rgb, "%d;%d;%d", &r, &g, &b)
+		return fmt.Sprintf("%x", r<<16|g<<8|b)
+	}
+	idle, working, attention := kitSession("idle"), kitSession("working"), kitSession("waiting")
+	if a, b, c := id(idle, 0), id(idle, 1), id(idle, 2); a != "c0de00" || b != "c0de01" || c != a {
+		t.Errorf("idle frames: %s %s %s", a, b, c)
+	}
+	if a, b := id(working, 0), id(working, 1); a != "c0de02" || b != "c0de03" {
+		t.Errorf("working frames: %s %s", a, b)
+	}
+	if a, b := id(attention, 0), id(attention, 3); a != "c0de04" || b != a {
+		t.Errorf("attention frames: %s %s", a, b)
+	}
+	done := kitSession("idle")
+	done.Done = true
+	if a := id(done, 0); a != "c0de00" { // the set has no done frames: idle's
+		t.Errorf("done falls back to idle: %s", a)
+	}
+}
+
+// With no pictures (the terminal can't, or renderer = pixel) a set's card shows the sprite hashed
+// from its ID: same width, no placeholders, no escape sequences for a terminal that can't take them.
+func TestImageCardFallsBackToSprite(t *testing.T) {
+	useKit(t)
+	useImages = false
+	out := card(kitSession("idle"), 48, 5, false, 0, now, hit{})
+	if strings.Contains(out, "\U0010EEEE") {
+		t.Errorf("placeholders without pictures: %q", out)
+	}
+	want := avatar.SpriteFor("kit")
+	face := strings.Split(avatar.Render(want, "", avatar.Dim, 0), "\n")
+	if !strings.Contains(out, face[0]) || !strings.Contains(out, face[1]) {
+		t.Errorf("not the hashed sprite %s: %q", want.ID, out)
+	}
+}

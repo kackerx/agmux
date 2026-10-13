@@ -125,6 +125,22 @@ func Run(p *store.Poller, cfg *config.Config) error {
 	go p.Run(ctx)
 	m := New(p, realRunner{})
 	m.cfg, m.keymap = cfg, cfg.KeyMap()
+	on, note := imageMode(m.run, os.Getenv, cfg.AvatarRenderer)
+	if on { // before the screen is taken over: bubbletea must not interleave with the upload
+		inTmux := os.Getenv("TMUX") != ""
+		if err := avatar.Upload(os.Stdout, avatar.Sets, inTmux); err != nil {
+			return err
+		}
+		defer avatar.Delete(os.Stdout, avatar.Sets, inTmux)
+		useImages = true
+	}
+	lines := slices.Clone(avatar.Problems())
+	if note != "" {
+		lines = append(lines, note)
+	}
+	if len(lines) > 0 {
+		m = m.say(cRed, strings.Join(lines, "; "))
+	}
 	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }
@@ -719,15 +735,24 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg { return doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true} }
 }
 
-// switchTo points the user's tmux client at pane. Inside a popup tmux has no current client
-// (a bare switch-client moves whichever was active last, and in a nested fl-* float that is the
-// float's own client), so the client is chosen explicitly: $AGMUX_CLIENT, else the most recently
-// active client not attached to agmux's own session (or, when that leaves none, agmux runs in an
-// ordinary pane: the most recent client of its own session). AGMUX_CLIENT comes from agmux's
-// environment, else from its tmux session's environment.
 const clientsFormat = "#{client_activity}\t#{client_name}\t#{client_session}"
 
-func switchTo(r Runner, getenv func(string) string, pane string) error {
+type tmuxClient struct {
+	activity      int
+	name, session string
+}
+
+// pickedClient is chooseClient's answer: the client, whether the launcher named it exactly, agmux's
+// own session ("" in an ordinary pane) and every client.
+type pickedClient struct {
+	name    string
+	exact   bool
+	own     string
+	clients []tmuxClient
+}
+
+// chooseClient picks the user's tmux client by the rules in switchTo's comment.
+func chooseClient(r Runner, getenv func(string) string) (pickedClient, error) {
 	own := ""
 	if p := getenv("TMUX_PANE"); p != "" {
 		// a stale TMUX_PANE (e.g. left in the server's global environment) just means "no own session"
@@ -737,18 +762,14 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 	}
 	out, err := r.Tmux("list-clients", "-F", clientsFormat)
 	if err != nil {
-		return err
+		return pickedClient{}, err
 	}
-	type cl struct {
-		activity      int
-		name, session string
-	}
-	var clients []cl
+	var clients []tmuxClient
 	for l := range strings.Lines(out) {
 		f := strings.SplitN(strings.TrimRight(l, "\n"), "\t", 3)
 		if len(f) == 3 {
 			n, _ := strconv.Atoi(f[0])
-			clients = append(clients, cl{n, f[1], f[2]})
+			clients = append(clients, tmuxClient{n, f[1], f[2]})
 		}
 	}
 	exact := getenv("AGMUX_CLIENT")
@@ -790,15 +811,30 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 		}
 	}
 	if client == "" {
-		return errors.New("no tmux client to switch: set AGMUX_CLIENT=<client> (a name from tmux list-clients)")
+		return pickedClient{}, errors.New("no tmux client to switch: set AGMUX_CLIENT=<client> (a name from tmux list-clients)")
 	}
+	return pickedClient{client, exact != "", own, clients}, nil
+}
+
+// switchTo points the user's tmux client at pane. Inside a popup tmux has no current client
+// (a bare switch-client moves whichever was active last, and in a nested fl-* float that is the
+// float's own client), so the client is chosen explicitly: $AGMUX_CLIENT, else the most recently
+// active client not attached to agmux's own session (or, when that leaves none, agmux runs in an
+// ordinary pane: the most recent client of its own session). AGMUX_CLIENT comes from agmux's
+// environment, else from its tmux session's environment.
+func switchTo(r Runner, getenv func(string) string, pane string) error {
+	pc, err := chooseClient(r, getenv)
+	if err != nil {
+		return err
+	}
+	client, exact, own, clients := pc.name, pc.exact, pc.own, pc.clients
 	if _, err := r.Tmux("switch-client", "-c", client, "-t", pane); err != nil {
 		return err
 	}
 	// Close the nested float only when the launcher said exactly which client is the user's: a
 	// guessed client might be the float's own. Detach the other clients of agmux's session one by
 	// one (-s would also kick the user's client off when the target pane is in that same session).
-	if exact == "" || own == "" {
+	if !exact || own == "" {
 		return nil
 	}
 	for _, c := range clients {

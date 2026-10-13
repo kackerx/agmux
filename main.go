@@ -99,6 +99,7 @@ func configCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: agmux config [--path]")
 		return 2
 	}
+	avatar.LoadSets() // config.toml may name image sets
 	c, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "agmux:", err)
@@ -109,6 +110,7 @@ func configCmd(args []string) int {
 }
 
 func runBoard() error {
+	avatar.LoadSets()         // before the config: it may name image sets
 	cfg, err := config.Load() // a broken config stops here, before the screen is taken over
 	if err != nil {
 		return err

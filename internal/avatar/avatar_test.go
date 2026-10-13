@@ -66,13 +66,13 @@ func TestBindings(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, id := range []string{"s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"} {
-		seen[For(b, nil, "hash", id).ID] = true
+		seen[For(b, nil, "hash", id)] = true
 	}
 	if len(seen) < 2 {
 		t.Fatalf("hash default gave every session the same avatar: %v", seen)
 	}
 	bound := "bot-01" // anything but s1's hash default, so reading the binding is observable
-	if For(nil, nil, "hash", "s1").ID == bound {
+	if For(nil, nil, "hash", "s1") == bound {
 		bound = "bot-02"
 	}
 	if err := b.Set("s1", bound); err != nil {
@@ -82,8 +82,8 @@ func TestBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id, ok := b2.Get("s1"); !ok || id != bound || For(b2, nil, "hash", "s1").ID != bound || For(b2, nil, "hash", "s1").ID == For(nil, nil, "hash", "s1").ID {
-		t.Fatalf("read back: %q %v, For=%s", id, ok, For(b2, nil, "hash", "s1").ID)
+	if id, ok := b2.Get("s1"); !ok || id != bound || For(b2, nil, "hash", "s1") != bound || For(b2, nil, "hash", "s1") == For(nil, nil, "hash", "s1") {
+		t.Fatalf("read back: %q %v, For=%s", id, ok, For(b2, nil, "hash", "s1"))
 	}
 	if data, _ := os.ReadFile(path); strings.TrimSpace(string(data)) != "{\n  \"s1\": \""+bound+"\"\n}" {
 		t.Errorf("file format: %s", data)
@@ -91,7 +91,7 @@ func TestBindings(t *testing.T) {
 	if err := b2.Set("s2", "no-such-bot"); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := For(b2, nil, "hash", "s2").ID, For(nil, nil, "hash", "s2").ID; got != want {
+	if got, want := For(b2, nil, "hash", "s2"), For(nil, nil, "hash", "s2"); got != want {
 		t.Errorf("unknown bound id: got %s, want the hash default %s", got, want)
 	}
 	if err := os.WriteFile(path, []byte("{oops"), 0o644); err != nil {
@@ -117,18 +117,18 @@ func TestForPrecedence(t *testing.T) {
 	b.Set("bad", "nope")
 	conf := map[string]string{"a": "bot-02", "c": "bot-03", "bad": "bot-04", "badconf": "nope"}
 	for _, c := range []struct{ def, key, want string }{
-		{"bot-05", "a", "bot-01"},                          // state wins
-		{"bot-05", "c", "bot-03"},                          // then config
-		{"bot-05", "bad", "bot-04"},                        // unknown state ID: config
-		{"bot-05", "badconf", "bot-05"},                    // unknown config ID: default
-		{"bot-05", "none", "bot-05"},                       // default sprite
-		{"hash", "none", For(nil, nil, "hash", "none").ID}, // hash of the key
+		{"bot-05", "a", "bot-01"},                       // state wins
+		{"bot-05", "c", "bot-03"},                       // then config
+		{"bot-05", "bad", "bot-04"},                     // unknown state ID: config
+		{"bot-05", "badconf", "bot-05"},                 // unknown config ID: default
+		{"bot-05", "none", "bot-05"},                    // default sprite
+		{"hash", "none", For(nil, nil, "hash", "none")}, // hash of the key
 	} {
-		if got := For(b, conf, c.def, c.key).ID; got != c.want {
+		if got := For(b, conf, c.def, c.key); got != c.want {
 			t.Errorf("For(%q, def %q) = %s, want %s", c.key, c.def, got, c.want)
 		}
 	}
-	if For(nil, nil, "hash", "x").ID != For(nil, nil, "nope", "x").ID {
+	if For(nil, nil, "hash", "x") != For(nil, nil, "nope", "x") {
 		t.Error("an unknown default is the hash pick")
 	}
 }

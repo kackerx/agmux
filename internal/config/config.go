@@ -55,13 +55,14 @@ type Config struct {
 
 	MaxColumns int // [layout] max_columns: the most columns of cards, if the terminal is wide enough
 
-	AvatarDefault string            // [avatars] default: "hash" or a sprite ID
-	AvatarBind    map[string]string // [avatars.bind]: session name → sprite ID
+	AvatarRenderer string            // [avatars] renderer: "auto", "image" or "pixel"
+	AvatarDefault  string            // [avatars] default: "hash" or an avatar ID (sprite or image set)
+	AvatarBind     map[string]string // [avatars.bind]: session name → avatar ID
 }
 
 // Default is the configuration with no file.
 func Default() *Config {
-	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, AvatarDefault: "hash", AvatarBind: map[string]string{}}
+	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
 	for k, v := range defaultKeys {
 		c.Keys[k] = slices.Clone(v) // callers may change c; the defaults stay
 	}
@@ -113,8 +114,9 @@ func Parse(path string, data []byte) (*Config, error) {
 			MaxColumns int `toml:"max_columns"`
 		} `toml:"layout"`
 		Avatars struct {
-			Default string            `toml:"default"`
-			Bind    map[string]string `toml:"bind"`
+			Renderer string            `toml:"renderer"`
+			Default  string            `toml:"default"`
+			Bind     map[string]string `toml:"bind"`
 		} `toml:"avatars"`
 	}
 	oneLine := func(err error) error {
@@ -193,15 +195,21 @@ func Parse(path string, data []byte) (*Config, error) {
 		}
 		c.MaxColumns = raw.Layout.MaxColumns
 	}
+	if r := raw.Avatars.Renderer; r != "" {
+		if r != "auto" && r != "image" && r != "pixel" {
+			return nil, fmt.Errorf("%s: avatars.renderer: %q is not auto, image or pixel", path, r)
+		}
+		c.AvatarRenderer = r
+	}
 	if d := raw.Avatars.Default; d != "" {
-		if d != "hash" && !isSprite(d) {
-			return nil, fmt.Errorf("%s: avatars.default: %q is neither hash nor a sprite id (%s; see agmux avatars)", path, d, spriteIDs())
+		if d != "hash" && !avatar.Known(d) {
+			return nil, fmt.Errorf("%s: avatars.default: %q is neither hash nor an avatar id (%s; see agmux avatars)", path, d, avatarIDs())
 		}
 		c.AvatarDefault = d
 	}
 	for name, id := range raw.Avatars.Bind {
-		if !isSprite(id) {
-			return nil, fmt.Errorf("%s: avatars.bind.%q: %q is not a sprite id (%s; see agmux avatars)", path, name, id, spriteIDs())
+		if !avatar.Known(id) {
+			return nil, fmt.Errorf("%s: avatars.bind.%q: %q is not an avatar id (%s; see agmux avatars)", path, name, id, avatarIDs())
 		}
 		c.AvatarBind[name] = id
 	}
@@ -283,7 +291,7 @@ func (c *Config) String() string {
 		fmt.Fprintf(&b, "%s = %q\n", n, c.Colors[n])
 	}
 	fmt.Fprintf(&b, "\n[layout]\nmax_columns = %d\n", c.MaxColumns)
-	fmt.Fprintf(&b, "\n[avatars]\ndefault = %q\n\n[avatars.bind]\n", c.AvatarDefault)
+	fmt.Fprintf(&b, "\n[avatars]\nrenderer = %q\ndefault = %q\n\n[avatars.bind]\n", c.AvatarRenderer, c.AvatarDefault)
 	names := slices.Sorted(maps.Keys(c.AvatarBind))
 	for _, n := range names {
 		fmt.Fprintf(&b, "%q = %q\n", n, c.AvatarBind[n])
@@ -291,15 +299,7 @@ func (c *Config) String() string {
 	return b.String()
 }
 
-func isSprite(id string) bool { _, ok := avatar.ByID(id); return ok }
-
-func spriteIDs() string {
-	ids := make([]string, len(avatar.Sprites))
-	for i, s := range avatar.Sprites {
-		ids[i] = s.ID
-	}
-	return strings.Join(ids, ", ")
-}
+func avatarIDs() string { return strings.Join(avatar.Choices(), ", ") }
 
 // norm spells a configured key the way bubbletea's KeyMsg.String() does: "space" is " ",
 // with alt+ too.

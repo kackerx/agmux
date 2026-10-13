@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/kackerx/agmux/internal/avatar"
@@ -371,5 +372,26 @@ func TestSetAvatarWriteErrorNotAvatarErr(t *testing.T) {
 	defer os.Chmod(dir, 0o755)
 	if err := p.SetAvatar(Session{ID: "a", Name: "n"}, "bot-01"); err == nil || p.Err() != nil {
 		t.Errorf("err %v, Err() %v", err, p.Err())
+	}
+}
+
+// An image set's ID is as good as a sprite's in a binding, [avatars.bind] or default.
+func TestAvatarImageSetIDs(t *testing.T) {
+	avatar.UseSets(fstest.MapFS{"kit/idle/1.png": &fstest.MapFile{Data: []byte("x")}})
+	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}) })
+	dir := t.TempDir()
+	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
+	b.Set("orch", "kit")
+	p := &Poller{StateDir: dir, Avatars: b, AvatarDefault: "kit", AvatarBind: map[string]string{"dev": "kit", "gone": "no-such-set"},
+		Show: func() ([]ccmux.Session, error) {
+			return []ccmux.Session{{ID: "1", Summary: "orch"}, {ID: "2", Summary: "dev"}, {ID: "3", Summary: "gone"}}, nil
+		}}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"1", "2", "3"} { // "gone": the unknown ID falls through to the default
+		if got := byID(t, p.Sessions(), id).AvatarID; got != "kit" {
+			t.Errorf("%s: %s, want kit", id, got)
+		}
 	}
 }

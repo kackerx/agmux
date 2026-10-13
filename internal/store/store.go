@@ -180,7 +180,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 	}
 	s.Done = s.Status == "idle" && r.AttentionState != ""
 	s.GroupKey = groupKey(s)
-	s.AvatarID = avatar.For(p.Avatars, p.AvatarBind, p.AvatarDefault, s.AvatarKey()).ID
+	s.AvatarID = avatar.For(p.Avatars, p.AvatarBind, p.AvatarDefault, s.AvatarKey())
 	hudModel := ""
 	if r.NativeSessionID != "" {
 		s.ContextPct, hudModel, s.Effort = readHUD(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
