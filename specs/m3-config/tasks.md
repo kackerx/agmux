@@ -212,4 +212,4 @@
 ## 第六 + 七批审查最终结论（reviewer 2026-10-13，df3002b）
 - T34–T40 全部通过，无遗留必改；各任务关键变异在 df3002b 上整套重跑全被杀。
 - 不阻塞的遗留：T34 轮询删卡到下一帧之间（≤500ms）来滚轮，焦点停屏外直到下次按键；T35 页边杂点使网格漂移、`--layout 19` 用于 30 格 sheet 静默错切（照搬上游）；T38 外层终端停读 2s 后回落 passthrough 只有单测 / pipe 验证，未在真机试；T40 ruleGE / foldedRectH2 视觉等价。
-- tester 整套退回：d391fb7 的「零命中不清 focus」把会话列表真空也一并保留，透传锁（T21「session is gone」）不再判丢（test_t12 红，二分到 d391fb7）→ 定稿显式锁存（reviewer：「只在 query 非空时保留」修不全，保留过滤时照样复现）：frameMsg 和按键入口处 pvFocus 为真而目标不在 Sessions() 里就置空 pvID，之后 passThrough 为假直到 tab / esc 重锁；d391fb7 不回退。reviewer 查过其它靠 focus 变空的逻辑只有透传锁。修复 @6997705（dropLostLock，帧与按键入口各一次）送复审 / 送测。
+- tester 整套退回：d391fb7 的「零命中不清 focus」把会话列表真空也一并保留，透传锁（T21「session is gone」）不再判丢（test_t12 红，二分到 d391fb7）→ 定稿显式锁存（reviewer：「只在 query 非空时保留」修不全，保留过滤时照样复现）：frameMsg 和按键入口处 pvFocus 为真而目标不在 Sessions() 里就置空 pvID，之后 passThrough 为假直到 tab / esc 重锁；d391fb7 不回退。reviewer 查过其它靠 focus 变空的逻辑只有透传锁。修复 @6997705（dropLostLock，帧与按键入口各一次）复审通过：relock 三探针 + 零命中两探针全过；锁存是采样式（帧 / 按键），和以前同一采样点；pane 变了又变回也保持锁住（比 T21 更严，照准）。等整套回归。
