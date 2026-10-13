@@ -177,6 +177,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case frameMsg:
 		m.frame++
+		m.dropLostLock()
 		if was := m.focus; was != "" { // a poll took the focused card: the focus falls back to the first, and is in view
 			if m.current(); m.focus != was {
 				m.followHidden()
@@ -212,6 +213,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.EnableMouseCellMotion
 		}
 	case tea.KeyMsg, tea.MouseMsg:
+		m.dropLostLock()
 		// whatever moved the focus (hjkl, a click, unfolding), the preview follows right away
 		before := m.focus
 		shown := m // the focus the screen shows: current() puts it on the first card when the focused one is gone, or none was set yet
@@ -360,6 +362,22 @@ func (m Model) passThrough() bool {
 		}
 	}
 	return false
+}
+
+// dropLostLock ends a pass-through lock whose target (session and pane) is not in the poll any
+// more: pvID is forgotten, so that passThrough stays false, however the focus moves or the session
+// comes back, until the user takes the keys back (tab / esc) and locks again. Asked on every frame
+// and key, where the lock is used.
+func (m *Model) dropLostLock() {
+	if !m.pvFocus || m.pvID == "" {
+		return
+	}
+	for _, s := range m.src.Sessions() {
+		if s.ID == m.pvID && s.TmuxPane == m.pvPane {
+			return
+		}
+	}
+	m.pvID = ""
 }
 
 // lock enters pass-through on session s.

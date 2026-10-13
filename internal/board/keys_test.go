@@ -3950,3 +3950,102 @@ func TestStackNav(t *testing.T) {
 		}
 	}
 }
+
+// Locked on a session's pane; ccmux returns [] for a poll (a frame and a key pass), then the same
+// sessions come back. T21: "session is gone" holds until tab, and keys never reach the pane.
+func relock(t *testing.T, all []store.Session, pre ...string) (Model, *fakeRunner) {
+	t.Helper()
+	return relockWith(t, true, true, all, pre...)
+}
+
+// relockWith: which of a frame and a key the empty poll is seen by.
+func relockWith(t *testing.T, frame, keyToo bool, all []store.Session, pre ...string) (Model, *fakeRunner) {
+	t.Helper()
+	src := &mutSrc{ss: all}
+	r := &fakeRunner{}
+	m := New(src, r)
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	m, _ = press(t, tm.(Model), pre...)
+	m.capturing = false
+	src.ss = nil
+	if frame {
+		tm, _ = m.Update(frameMsg{})
+		m = tm.(Model)
+	}
+	if keyToo {
+		m, _ = press(t, m, "x")
+	}
+	src.ss = all
+	r.reset()
+	m, _ = press(t, m, "hi")
+	return m, r
+}
+
+// Whichever of the two sees the empty poll — a frame with no key after it, or a key with no frame
+// before it — ends the lock.
+func TestRelockSeenByFrameOrKey(t *testing.T) {
+	for _, c := range []struct {
+		name         string
+		frame, keyIn bool
+	}{{"frame only", true, false}, {"key only", false, true}} {
+		m, r := relockWith(t, c.frame, c.keyIn, sessions, "l", "i")
+		if m.passThrough() || len(sentKeys(r)) != 0 {
+			t.Errorf("%s: pass-through resumed, keys → %q", c.name, sentKeys(r))
+		}
+	}
+}
+
+func TestRelockAfterEmptyList(t *testing.T) {
+	m, r := relock(t, sessions, "l", "i") // locked on b1, not the first card
+	if m.passThrough() || len(sentKeys(r)) != 0 || !m.pvFocus {
+		t.Errorf("several sessions: pass-through resumed (%v), keys → %q", m.passThrough(), sentKeys(r))
+	}
+	m, r = relock(t, []store.Session{sessions[0]}, "i") // the target is the first (only) card
+	if m.passThrough() || len(sentKeys(r)) != 0 || !m.pvFocus {
+		t.Errorf("one session: pass-through resumed (%v), keys → %q", m.passThrough(), sentKeys(r))
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "session is gone") {
+		t.Errorf("no 'session is gone':\n%s", v)
+	}
+	if m, _ = press(t, m, "tab"); m.pvFocus { // tab takes the keys back, and i locks anew
+		t.Error("tab did not leave")
+	}
+	if m, _ = press(t, m, "i"); !m.passThrough() {
+		t.Error("cannot lock again")
+	}
+}
+
+// The same under a kept filter: a fix that keeps the focus only while filtering would resume here.
+func TestRelockAfterEmptyListKeptFilter(t *testing.T) {
+	m, r := relock(t, sessions, "/", "t", "h", "r", "enter", "i")
+	if m.query == "" || !m.pvFocus {
+		t.Fatalf("no lock under the kept filter: query %q pvFocus %v focus %s", m.query, m.pvFocus, m.focus)
+	}
+	if m.passThrough() || len(sentKeys(r)) != 0 {
+		t.Errorf("kept filter %q: pass-through resumed, keys → %q", m.query, sentKeys(r))
+	}
+}
+
+// The target's pane changed for a poll (the session restarted elsewhere) and changed back: it is
+// not the same target any more, the lock does not come back by itself.
+func TestRelockAfterPaneChange(t *testing.T) {
+	all := append([]store.Session(nil), sessions...)
+	src := &mutSrc{ss: all}
+	r := &fakeRunner{}
+	m := New(src, r)
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	m, _ = press(t, tm.(Model), "l", "i") // b1 / %3
+	moved := append([]store.Session(nil), all...)
+	moved[2].TmuxPane = "%9"
+	src.ss = moved
+	tm, _ = m.Update(frameMsg{})
+	m = tm.(Model)
+	src.ss = all
+	r.reset()
+	m, _ = press(t, m, "hi")
+	if m.passThrough() || len(sentKeys(r)) != 0 {
+		t.Errorf("pass-through resumed after the pane changed and came back, keys → %q", sentKeys(r))
+	}
+}
