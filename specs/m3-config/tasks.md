@@ -149,7 +149,7 @@
 
 ## 第六批（用户 2026-10-13 下午：22 张卡时底部被截、没法滚；要生成头像的 prompt）
 
-### T34 卡片区可滚动（dev @6bdad7a；tester 黑盒退回 1 条：开板后第一个滚轮 / ctrl+d 被吞（m.focus 初始空串被当成焦点移动 → followHidden 撤销滚动），修复 @b8c0a36；审查再退 4 必改：同根因在轮询删焦点卡后复现（改比「屏上显示的焦点」）、部分可见边界 / 滚动态点击 / 滚轮 mode 守卫无测试；定稿：过滤态顶栏无 more 提示接受；轮询回落焦点也算移出 → 回到跟随；修复 @e1a6ff0 + 测试 @656a036 复审通过（5 条必改全关闭）。**tester 整套退回 1 条**：e1a6ff0 的 frameMsg 每 tick 调持久 current()，零命中过滤时把记住的焦点置空，Esc 后回第一张（test_t19 第三轮用例红，二分到 e1a6ff0）→ 改用副本判断、只有焦点会话真消失才回落，修复中。已知窗口：轮询删卡到下一帧之间来滚轮，焦点回落后不跟随直到下次按键，接受）
+### T34 卡片区可滚动（dev @6bdad7a；tester 黑盒退回 1 条：开板后第一个滚轮 / ctrl+d 被吞（m.focus 初始空串被当成焦点移动 → followHidden 撤销滚动），修复 @b8c0a36；审查再退 4 必改：同根因在轮询删焦点卡后复现（改比「屏上显示的焦点」）、部分可见边界 / 滚动态点击 / 滚轮 mode 守卫无测试；定稿：过滤态顶栏无 more 提示接受；轮询回落焦点也算移出 → 回到跟随；修复 @e1a6ff0 + 测试 @656a036 复审通过（5 条必改全关闭）。**tester 整套退回 1 条**：e1a6ff0 的 frameMsg 每 tick 调持久 current()，零命中过滤时把记住的焦点置空，Esc 后回第一张（test_t19 第三轮用例红，二分到 e1a6ff0）→ reviewer 查明范围更大：capture()（预览开）和所有按键路径都经持久 current() 清 focus，T19 起就有；定稿在 current() 的 len(gs)==0 分支不清 focus 一处修掉（T19 存量 bug 并入 T34 修复），修复中。已知窗口：轮询删卡到下一帧之间来滚轮，焦点回落后不跟随直到下次按键，接受）
 - dev 自报：搜索过滤态顶栏被过滤框替换看不到 more 提示；滚动中焦点卡被轮询删掉时焦点悄悄换到第一张、视图停在原偏移直到下次按键；单卡高于正文高的极窄终端没处理。
 - 现状：正文只跟着焦点滚（scrollOff），鼠标滚轮只滚预览，底部被截的卡没有任何提示；用户以为是 bug。
 - 做法：鼠标滚轮在卡片区（x < cardsW）每格滚 3 行，不动焦点；新增动作 `page_down` / `page_up`（默认 ctrl+d / ctrl+u）滚半个正文高度；手动滚过的偏移保留，直到按键移动焦点把焦点移出可见区才回到「跟着焦点」；顶栏在被截时加提示：下方还有内容 ` · ↓ more`、上方被滚走 ` · ↑ more`（都有就两个）。`agmux config` 打印新动作，README 键位表加一行。
@@ -177,6 +177,7 @@
 ### T38 浮窗（嵌套 tmux client）里图片模式失效（dev 查完，定稿 A–E，实现中）
 - dev 实测（kitty + tmux 3.8，用户的 tmux.conf 与 fl-toggle.sh 原样）：1. chooseClient 选对（外层 kitty client），错在 imageMode 用 `display-message -p -c <client>` 查 termname——**tmux 3.8 里 display-message 不带 -t 时 -c 不生效**，按最近活动 client 展开 → 拿到嵌套的 tmux-256color；2. 单层 passthrough 经嵌套 client 到不了 kitty（被 popup pty 再解析一次）；3. 包两层能到，但常驻 session 先起、popup 后 attach 时上传无处可写全丢。
 - 定稿：A termname 并进 list-clients 字段；B 选中 client 是 tmux-/screen- 时改看最近活动的非 tmux client；**C tmux 里上传直写选中 client 的 tty（#{client_tty}），不再要求 allow-passthrough，打不开 tty 回落 passthrough 单层并底栏提示，写完 refresh-client，单次 write ≤ 一块**；D auto 判 off 底栏给原因；E 接受非 -h 的 AGMUX_CLIENT（-h 优先）。design.md 上传一节由 dev 改写。
+- dev @8f4217d 送审 / 送测：真机（用户脚本布局、先起后 attach）图集头像全显示；旧代码单层 / 两层包装都是空占位。用户之前偶尔能看到图 = 旧探测恰好选到 kitty client + 同 id 的图早留在 kitty 窗口里。
 - 用户现象（2026-10-13 下午）：~/go/bin/agmux 已是 c2b26dd，但在常驻浮窗里开看板，卡片和 `a` 格子全是像素头像（图集名字在、画的是 hash 出的 sprite）= 图片模式被判 off；底栏没有任何提示（auto 模式判 off 时 note 为空）。
 - 用户的浮窗脚本 `~/.config/tmux/scripts/fl-toggle.sh`：程序跑在常驻 session `fl-agmux`（`new-session -d … agmux board`），浮窗是 `display-popup -E "tmux attach-session -t fl-agmux"`——**同一个 server 上多了一个 termname 为 tmux-256color 的嵌套 client**（实测 list-clients：/dev/ttys001 xterm-kitty sess=agmux；/dev/ttys042 tmux-256color sess=fl-agmux，后者活动时间更新）。脚本用 `set-environment -t fl-agmux AGMUX_CLIENT <client>`（**没有 -h**），而 chooseClient 只读 `show-environment -h`，所以 AGMUX_CLIENT 实际没生效，走「最近活动且不在自己 session 的 client」。从别的 fl-* 浮窗切过来时脚本还会 unset AGMUX_CLIENT。
 - 先查后改（dev 在自己的 kitty + tmux 里用同一个脚本复现，把结论写进 design.md）：1. 这种布局下 chooseClient 选到哪个 client、为什么（TMUX_PANE → own 是否解析成功；popup client 和 agmux 进程启动的先后）；2. 单层 `\ePtmux;` 包装的上传经「嵌套 client → popup pty → 外层 tmux」能不能到 kitty（之前截图 9 在浮窗里见过图，说明某种情况下能）；3. 需不需要按嵌套层数多包一层。
