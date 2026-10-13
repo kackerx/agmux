@@ -235,3 +235,10 @@
 - 用户：现在只有按 cwd 一种；参考 ccmux 加 project、tmux session，再加一个 state。`g` 切换。
 - 定稿：四种 `group_by`：`cwd`（现状，默认）→ `project`（ccmux 的 `project` 字段：worktree 归到主仓库名下，标题 = 项目名，如 `shopcart (8)`）→ `session`（`tmuxTarget` 的 session 名，没有 pane 的后台会话归 `(no pane)`）→ `state`（working / waiting / done / idle 四组，按这个顺序，不按名排）。`g`（新动作 `group`，默认 g）按上面顺序循环；底栏显示 `g group:cwd`；config `[layout] group_by` 定启动时的方式；折叠状态按「方式 + 标题」记，切换方式后各组展开。组内卡片排序不变（名字序）；state 分组里卡片仍显示自己的状态行。标题的路径缩写只用于 cwd；project / session / state 标题直接写名字。`flow` 两种模式都适用。
 - 验收：单测 四种分组的 key 与标题、state 的固定顺序、g 循环、配置值校验（非法报一行）、折叠记忆按方式隔离、`agmux config` 打印 group_by。黑盒 夹具里给两个 worktree + 主仓库同 project → project 模式合成一组；session 模式按 tmuxTarget；state 模式四组顺序；g 三次回到 cwd；底栏文案。
+
+### T44 `agmux board --stay`：常驻看板，enter 跳转 / q 都只收起浮窗不退出（待开工，排 T41 补丁之后）
+- 用户 2026-10-13：浮窗里 enter 跳转后看板进程退出，下次 ctrl+1 要重起；想要回车跳到对应 pane 但看板不关，下次打开还是原来的进程。用户的 fl-toggle.sh 已经是「程序跑在常驻 session fl-agmux，浮窗 = display-popup -E 里 attach 它」，进程退出 session 才没。
+- 做法：`agmux board --stay`（只加旗标，不加配置项；脚本里传）。stay 模式下：`jump`（enter / 再点卡片）= 照旧 `switch-client` 把外层 client 切到目标 pane，然后 **detach 掉 attach 在自己 session 上的那个 popup client**（chooseClient 里已算出 own session；popup client = list-clients 里 session 为 own 的 client），进程不退出；`quit`（q / esc）同样只 detach；新增动作 `exit`（默认 `Q`，`agmux config` 打印）真正退出进程。不在 tmux 里、或自己 session 上没有 client（不是常驻布局）时 --stay 退化成现状（底栏一行提示 "--stay needs the board in its own tmux session"），不报错。
+- 收起期间轮询照旧（500 ms tick 不停）；再 attach 时 bubbletea 收到 resize 重画，焦点留在跳走前那张卡；图片已在 kitty 里，不重传。`a` 换头像 / 搜索保留态等状态都留着。
+- README：浮窗一节加 --stay 的用法和 fl-toggle 式脚本示例（new-session -d … agmux board --stay）；底栏 stay 模式下 `q hide · Q quit`。
+- 验收：单测 stay 下 jump 发 switch-client + detach-client（目标 = own session 的 client）且不 Quit；quit 只 detach；exit Quit；非 stay 行为不变；own 无 client 时退化 + 提示。黑盒 真 tmux：常驻 session + popup attach，enter 后 popup 关、外层 client 到目标 pane、进程仍在、再 attach 看到同一焦点；q 同样；Q 退出进程。
