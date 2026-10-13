@@ -164,12 +164,14 @@
 
 ## 第七批（用户 2026-10-13 下午：agents / shell 要醒目；显示 agent 角色定义；默认头像仍是像素）
 
-### T36 后台 agents / shell 醒目 + 图片模式默认头像只在图集里挑（待开工）
+### T36 后台 agents / shell 醒目 + 图片模式默认头像只在图集里挑（dev @c464e31 送审 / 送测）
+- dev 定稿（照准）：` · Bash` 这类工具名详情仍 muted；Sets 为空时池回落 sprite。
 - 用户截图：`⏵ working · agents ⚇ 1` 里 `agents` 和 `⚇ 1` 是 muted 灰，看不出有东西在跑。改：状态行的 ` · agents` 详情和 `⚇ n` / `⚙ n` 计数段都用 `working` 色（和状态词同色），不新增颜色项；让位顺序不变。
 - 用户以为新版没装：装了（13:02，c2b26dd），但没绑定的会话按 hash 在「5 个像素 + 10 个图集」里挑，三分之一还是像素。改：**图片模式下 hash 池只含图集**，像素头像只能按 `a` 手选；像素模式照旧只含 sprite。design.md「选择与绑定」那句同步改。
 - 验收：单测 agents 详情 / 计数的转义码是 working 色；图片模式 Choices 不含 sprite、像素模式不含集。黑盒 带 subagents 的卡第 3 行 `agents` 和 `⚇` 段是 working 色；图片模式 100 个无绑定会话全是占位符头像。
 
-### T37 卡片显示 agent 角色定义（待开工）
+### T37 卡片显示 agent 角色定义（dev @ebcc6db 送审 / 送测）
+- dev 定稿（照准）：缓存规则——找到即缓存；文件 >64KB 仍无也缓存「无」；短文件无则下次轮询再看。无分支时第 2 行只显示右侧 agent。
 - 用户问能不能拿到会话用的哪个 agent 定义（`claude --agent orchestrator` 那个）。能：Claude Code 的 transcript jsonl 里有 `{"type":"agent-setting","agentSetting":"orchestrator",...}` 行（第 1 行，resume 时再写一次）；statusline payload 和 ccmux 都没有。
 - 做法：store 读 jsonl **开头 64KB**（现在读尾部 64KB 取模型的逻辑旁边再加一次读头），取第一条 agent-setting 的值存 `Session.Agent`，按 session ID 缓存（不会变）；没有就空。卡片第 2 行右侧靠右显示它（和第 1 行的时间同一规则：始终显示，分支放不下才截），新颜色项 `colors.agent` 默认 `#bd93f9`；`agmux show` 也多一列。README 颜色表加行。
 - 验收：单测 jsonl 第 1 行有 agent-setting → Agent="orchestrator"；没有 → ""；只在尾部有（头 64KB 外）不要求读到（写进注释）；第 2 行布局：分支 + 右侧 agent，窄时分支截断 agent 保留。黑盒 夹具 jsonl 带 agent-setting 的卡第 2 行右侧出现 `orchestrator` 且是 colors.agent 色；无的卡第 2 行照旧。
