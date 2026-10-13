@@ -89,6 +89,9 @@ func TestHUD(t *testing.T) {
 		{`{"context_window":{"used_percentage":29.6}}`, 29, "", ""}, // truncated, like claude-hud
 		{`{"context_window":{"used_percentage":0}}`, 0, "", ""},
 		{`{"context_window":{"used_percentage":null},"model":{"display_name":"Sonnet 5.5"}}`, -1, "Sonnet 5.5", ""},
+		// a wrongly typed field must not take the good ones down with it
+		{`{"context_window":{"used_percentage":41.6},"model":{"display_name":"Opus 5.5"},"effort":{"level":3}}`, 41, "Opus 5.5", ""},
+		{`{"context_window":{"used_percentage":41.6},"model":{"display_name":"Opus 5.5"},"effort":"high"}`, 41, "Opus 5.5", ""},
 		{`{"context_window":`, -1, "", ""}, // half-written: treat as missing
 	} {
 		if err := os.WriteFile(hud, []byte(c.body), 0o644); err != nil {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -221,8 +222,12 @@ func readHUD(path string) (pct int, model, effort string) {
 			Level string `json:"level"`
 		} `json:"effort"`
 	}
-	if json.Unmarshal(data, &hud) != nil {
-		return -1, "", ""
+	// a wrongly typed field (effort: "high") leaves the rest decoded: only broken JSON is unknown
+	if err := json.Unmarshal(data, &hud); err != nil {
+		var te *json.UnmarshalTypeError
+		if !errors.As(err, &te) {
+			return -1, "", ""
+		}
 	}
 	pct = -1
 	if hud.ContextWindow.UsedPercentage != nil {
