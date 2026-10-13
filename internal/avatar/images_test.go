@@ -361,6 +361,96 @@ func TestCropPNG(t *testing.T) {
 	}
 }
 
+// A frame is shown by a 6 × 2 cell box: nothing is uploaded more than 128 pixels high, and a smaller
+// picture is not enlarged.
+func TestCropPNGShrinks(t *testing.T) {
+	size := func(w, h int) image.Rectangle {
+		var b bytes.Buffer
+		png.Encode(&b, image.NewNRGBA(image.Rect(0, 0, w, h)))
+		out, err := cropPNG(b.Bytes())
+		if err != nil {
+			t.Fatalf("%d × %d: %v", w, h, err)
+		}
+		got, err := png.Decode(bytes.NewReader(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Bounds()
+	}
+	for _, c := range []struct {
+		w, h int
+		want image.Rectangle
+	}{
+		{1024, 1024, image.Rect(0, 0, 192, 128)}, // 1024 × 682 after the crop, then to 128 high
+		{1000, 3000, image.Rect(0, 0, 192, 128)},
+		{600, 200, image.Rect(0, 0, 192, 128)}, // wide: 300 × 200 → 192 × 128
+		{64, 64, image.Rect(0, 0, 64, 42)},     // not enlarged
+		{192, 192, image.Rect(0, 0, 192, 128)},
+		{150, 100, image.Rect(0, 0, 150, 100)}, // 3:2 and small already: as it is
+		{300, 200, image.Rect(0, 0, 192, 128)},
+	} {
+		if got := size(c.w, c.h); got != c.want {
+			t.Errorf("%d × %d: %v, want %v", c.w, c.h, got, c.want)
+		}
+	}
+	// the pixels are the picture's, not a blur or a shift: a left half red and right half blue stays so
+	im := image.NewNRGBA(image.Rect(0, 0, 1024, 1024))
+	for y := range 1024 {
+		for x := range 1024 {
+			c := color.NRGBA{255, 0, 0, 255}
+			if x >= 512 {
+				c = color.NRGBA{0, 0, 255, 255}
+			}
+			im.SetNRGBA(x, y, c)
+		}
+	}
+	var b bytes.Buffer
+	png.Encode(&b, im)
+	out, _ := cropPNG(b.Bytes())
+	got, _ := png.Decode(bytes.NewReader(out))
+	if r, _, _, _ := got.At(10, 60).RGBA(); r>>8 != 255 {
+		t.Error("left is not red")
+	}
+	if _, _, bl, _ := got.At(180, 60).RGBA(); bl>>8 != 255 {
+		t.Error("right is not blue")
+	}
+}
+
+// A small file can claim a huge picture: over 4096 pixels either way is refused from the header,
+// before anything is allocated.
+func TestCropPNGRefusesHuge(t *testing.T) {
+	for _, d := range [][2]int{{4097, 1}, {1, 4097}, {5000, 5000}} {
+		var b bytes.Buffer
+		png.Encode(&b, image.NewNRGBA(image.Rect(0, 0, d[0], d[1])))
+		if _, err := cropPNG(b.Bytes()); err == nil || !strings.Contains(err.Error(), "over 4096") {
+			t.Errorf("%d × %d: %v", d[0], d[1], err)
+		}
+	}
+	var b bytes.Buffer
+	png.Encode(&b, image.NewNRGBA(image.Rect(0, 0, 4096, 4)))
+	if _, err := cropPNG(b.Bytes()); err != nil {
+		t.Errorf("4096 wide is fine: %v", err)
+	}
+	probs := useSets(t, fstest.MapFS{"s/idle/1.png": file("ok"), "s/idle/2.png": &fstest.MapFile{Data: func() []byte {
+		var b bytes.Buffer
+		png.Encode(&b, image.NewNRGBA(image.Rect(0, 0, 4097, 1)))
+		return b.Bytes()
+	}()}})
+	if len(probs) != 1 || !strings.Contains(probs[0], "1 frame(s) are not usable") || len(Sets[0].Frames["idle"]) != 1 {
+		t.Errorf("a huge frame is skipped and reported: %q", probs)
+	}
+}
+
+// Every ID carries the version of what is uploaded, so a board of another version never finds a
+// different picture under an ID it knows.
+func TestFrameIDHasVersion(t *testing.T) {
+	h := fnv.New32a()
+	h.Write([]byte("3:2-128\x00kit\x00idle\x00a.png\x00data"))
+	if got, want := frameID("kit", "idle", "a.png", []byte("data")), h.Sum32()&0xffffff; got != want {
+		t.Errorf("frameID %x, want %x (hash of the version, set, directory, file and bytes)", got, want)
+	}
+}
+
 // A file that is not a PNG (or whose header is cut short) is skipped and reported, one line per set;
 // a set left with no idle frame is skipped altogether.
 func TestBadPNGs(t *testing.T) {
@@ -373,9 +463,9 @@ func TestBadPNGs(t *testing.T) {
 		t.Fatalf("sets: %+v", Sets)
 	}
 	want := []string{ // sets in name order: bad, kit
-		`avatar set "bad": 1 frame(s) are not valid PNGs and are skipped, first idle/1.png`,
+		`avatar set "bad": 1 frame(s) are not usable PNGs (invalid, or over 4096 × 4096) and are skipped, first idle/1.png`,
 		`avatar set "bad" has no idle/*.png: skipped`,
-		`avatar set "kit": 4 frame(s) are not valid PNGs and are skipped, first idle/2.png`, // one in idle, three in think
+		`avatar set "kit": 4 frame(s) are not usable PNGs (invalid, or over 4096 × 4096) and are skipped, first idle/2.png`, // one in idle, three in think
 	}
 	if !slices.Equal(probs, want) {
 		t.Errorf("problems:\n%s\nwant\n%s", strings.Join(probs, "\n"), strings.Join(want, "\n"))

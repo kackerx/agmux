@@ -51,21 +51,40 @@ func cropFor(w, h int) crop {
 	return crop{0, (h - ch) / 2, w, ch}
 }
 
-// cropPNG is the centered 3:2 part of a PNG, as a PNG (a picture that is that already goes as it is).
-// kitty can crop by itself (x, y, w, h in the upload), but ignores that for the virtual placements
-// the placeholders show, so the pixels are cut here.
+// cropPNG is the centered 3:2 part of a PNG, no more than maxHeight pixels high, as a PNG (a picture
+// that is that already goes as it is). kitty can crop by itself (x, y, w, h in the upload), but
+// ignores that for the virtual placements the placeholders show, so the pixels are cut here. A frame
+// over maxSide pixels either way is refused before it is decoded.
+// ponytail: shrinking takes the nearest pixel, which suits pixel art; a photograph would alias.
 func cropPNG(data []byte) ([]byte, error) {
+	cfg, err := png.DecodeConfig(bytes.NewReader(data)) // the header only
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Width > maxSide || cfg.Height > maxSide {
+		return nil, fmt.Errorf("%d × %d is over %d × %d", cfg.Width, cfg.Height, maxSide, maxSide)
+	}
 	im, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	b := im.Bounds()
 	c := cropFor(b.Dx(), b.Dy())
-	if c.w == b.Dx() && c.h == b.Dy() {
+	if c.w == b.Dx() && c.h == b.Dy() && c.h <= maxHeight {
 		return data, nil
 	}
-	out := image.NewNRGBA(image.Rect(0, 0, c.w, c.h))
-	draw.Draw(out, out.Bounds(), im, image.Pt(b.Min.X+c.x, b.Min.Y+c.y), draw.Src)
+	var out *image.NRGBA
+	if c.h > maxHeight {
+		out = image.NewNRGBA(image.Rect(0, 0, max(c.w*maxHeight/c.h, 1), maxHeight))
+		for y := range out.Rect.Dy() {
+			for x := range out.Rect.Dx() {
+				out.Set(x, y, im.At(b.Min.X+c.x+(2*x+1)*c.w/(2*out.Rect.Dx()), b.Min.Y+c.y+(2*y+1)*c.h/(2*maxHeight)))
+			}
+		}
+	} else {
+		out = image.NewNRGBA(image.Rect(0, 0, c.w, c.h))
+		draw.Draw(out, out.Bounds(), im, image.Pt(b.Min.X+c.x, b.Min.Y+c.y), draw.Src)
+	}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, out); err != nil {
 		return nil, err
@@ -138,11 +157,23 @@ func UseSets(fsys fs.FS) []string {
 	return problems
 }
 
+// pixelsVersion goes into every image ID and names what is uploaded of a file (the centered 3:2 part,
+// at most maxHeight pixels high): change it when that changes, so that a board of another version
+// running at the same time never finds a different picture under an ID it knows.
+const pixelsVersion = "3:2-128"
+
+// maxHeight is the most pixels high an uploaded frame is: a 6 × 2 cell box shows nothing finer.
+// maxSide is the most a frame may measure in either direction (a small file can claim a huge image).
+const (
+	maxHeight = 128
+	maxSide   = 4096
+)
+
 // frameID is a 24-bit image ID (it rides in the placeholders' foreground color); never 0, which
 // means "no image" to kitty.
 func frameID(set, state, file string, data []byte) uint32 {
 	h := fnv.New32a()
-	io.WriteString(h, set+"\x00"+state+"\x00"+file+"\x00")
+	io.WriteString(h, pixelsVersion+"\x00"+set+"\x00"+state+"\x00"+file+"\x00")
 	h.Write(data)
 	return max(h.Sum32()&0xffffff, 1)
 }
@@ -192,7 +223,7 @@ func loadSets(fsys fs.FS, source string) (sets []*Set, problems []string) {
 			}
 		}
 		if len(bad) > 0 {
-			problems = append(problems, fmt.Sprintf("avatar set %q: %d frame(s) are not valid PNGs and are skipped, first %s", d.Name(), len(bad), bad[0]))
+			problems = append(problems, fmt.Sprintf("avatar set %q: %d frame(s) are not usable PNGs (invalid, or over 4096 × 4096) and are skipped, first %s", d.Name(), len(bad), bad[0]))
 		}
 		if len(s.Frames["idle"]) == 0 {
 			problems = append(problems, fmt.Sprintf("avatar set %q has no idle/*.png: skipped", d.Name()))
