@@ -34,12 +34,16 @@ func (s *seenSrc) MarkSeen(x store.Session) error {
 	return nil
 }
 
-func seenModel() (Model, *seenSrc, *fakeRunner) {
-	src := &seenSrc{staticSrc: staticSrc{
+func seenSessions() staticSrc {
+	return staticSrc{
 		{ID: "d1", Name: "one", GroupKey: "/a", TmuxPane: "%1", Status: "idle", Done: true, ContextPct: -1},
 		{ID: "d2", Name: "two", GroupKey: "/a", TmuxPane: "%2", Status: "idle", Done: true, ContextPct: -1},
 		{ID: "w1", Name: "three", GroupKey: "/b", TmuxPane: "%3", Status: "working", ContextPct: -1},
-	}}
+	}
+}
+
+func seenModel() (Model, *seenSrc, *fakeRunner) {
+	src := &seenSrc{staticSrc: seenSessions()}
 	r := &fakeRunner{}
 	m := New(src, r)
 	m.getenv = func(string) string { return "" }
@@ -166,5 +170,45 @@ func TestSeenCountsFromDone(t *testing.T) {
 	frame(t, m)
 	if !reflect.DeepEqual(src.marked, []string{"w1"}) {
 		t.Errorf("marked %v", src.marked)
+	}
+}
+
+// A board --stay has hidden keeps running unseen: nothing counts as seen until a key or a resize
+// says someone is looking again.
+func TestSeenNotWhileHidden(t *testing.T) {
+	for _, wake := range []tea.Msg{tea.WindowSizeMsg{Width: 120, Height: 40}, key("k")} {
+		m, _ := stayModel(stayClients)
+		src := &seenSrc{staticSrc: seenSessions()}
+		m.src = src
+		m, quit := press(t, m, "q")
+		if quit || !m.hidden {
+			t.Fatalf("quit %v hidden %v", quit, m.hidden)
+		}
+		for range 10 {
+			m = frame(t, m)
+		}
+		if len(src.marked) != 0 {
+			t.Fatalf("marked while hidden: %v", src.marked)
+		}
+		tm, _ := m.Update(wake)
+		m = frame(t, frame(t, tm.(Model)))
+		if m.hidden || !reflect.DeepEqual(src.marked, []string{"d1"}) {
+			t.Errorf("%T: hidden %v marked %v", wake, m.hidden, src.marked)
+		}
+	}
+}
+
+// enter under --stay hides the popup too: a done that comes after it is not seen by the frames that follow.
+func TestSeenNotWhileHiddenByJump(t *testing.T) {
+	m, _ := stayModel(stayClients)
+	src := &seenSrc{staticSrc: seenSessions()}
+	m.src = src
+	m, _ = press(t, m, "enter")  // marks d1, hides
+	src.staticSrc[0].Done = true // it works and is done again, while nobody looks
+	for range 10 {
+		m = frame(t, m)
+	}
+	if !reflect.DeepEqual(src.marked, []string{"d1"}) {
+		t.Errorf("marked %v, want only the jump's", src.marked)
 	}
 }

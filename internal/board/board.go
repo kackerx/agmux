@@ -113,6 +113,7 @@ type Model struct {
 	top       int        // lines scrolled off the top of the cards while scrolled; the focus leaving the view ends it
 	dwellID   string     // the done card the focus has rested on, and for how many frames: seenFrames of them make it seen
 	dwellN    int
+	hidden    bool // --stay hid the popup itself; the board runs on unseen, so nothing it shows counts as seen
 
 	cfg    *config.Config
 	keymap map[string]string // key (as KeyMsg.String() spells it) → action
@@ -171,6 +172,7 @@ type doneMsg struct {
 	err     error
 	quit    bool // leave the board on success (switch)
 	retrack bool // came back from ExecProcess: bubbletea v1 leaves the mouse off, turn it back on
+	hid     bool // --stay detached the popup: nobody is looking until a key, a click or a resize says so
 }
 
 func nextFrame() tea.Cmd { return tea.Tick(frameEvery, func(time.Time) tea.Msg { return frameMsg{} }) }
@@ -180,7 +182,7 @@ func (m Model) Init() tea.Cmd { return nextFrame() }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.w, m.h = msg.Width, msg.Height
+		m.w, m.h, m.hidden = msg.Width, msg.Height, false
 		if m.pvFocus && !m.previewOn() { // not "session is gone": it isn't
 			m.pvFocus = false
 			m = m.say(cMuted, "preview closed: terminal too narrow")
@@ -215,6 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case doneMsg:
+		m.hidden = m.hidden || msg.hid
 		switch {
 		case msg.err != nil:
 			m.msg = fg(cRed, " "+firstLine(msg.err.Error()))
@@ -227,6 +230,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.EnableMouseCellMotion
 		}
 	case tea.KeyMsg, tea.MouseMsg:
+		m.hidden = false
 		m.dropLostLock()
 		// whatever moved the focus (hjkl, a click, unfolding), the preview follows right away
 		before := m.focus
@@ -339,6 +343,10 @@ const seenFrames = 2
 // dwell counts the frames the focus has rested on a done card (the key / click that moved it zeroes
 // the count, so passing through does not count), and marks it seen at seenFrames.
 func (m *Model) dwell() tea.Cmd {
+	if m.hidden {
+		m.dwellN = 0
+		return nil
+	}
 	c := *m // what the screen shows: with no focus set yet that is the first card; m's focus stays unset
 	_, _, s, ok := c.current()
 	if !ok || !s.Done {
@@ -670,7 +678,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			r, getenv := m.run, m.getenv
 			return m, func() tea.Msg { // off the UI goroutine: it asks tmux
 				hidden, err := hideBoard(r, getenv)
-				return doneMsg{err: err, quit: !hidden && err == nil}
+				return doneMsg{err: err, quit: !hidden && err == nil, hid: hidden}
 			}
 		}
 		return m, tea.Quit
@@ -909,7 +917,7 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 		var done doneMsg
 		if stay {
 			hidden, err := switchAndHide(r, getenv, s.TmuxPane)
-			done = doneMsg{err: err, quit: !hidden && err == nil}
+			done = doneMsg{err: err, quit: !hidden && err == nil, hid: hidden}
 		} else {
 			done = doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true}
 		}
