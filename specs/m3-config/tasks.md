@@ -86,7 +86,8 @@
 
 ## 第四批（用户 2026-10-13 上午验收意见）
 
-### T27 接上 effort（dev @b35eb49，审查退回 1 条，修复中）
+### T27 接上 effort（通过 @1367e65 / 套件 0a6189f，test_t27 27 条；整套 450 条）
+- 复审通过；建议「语法错分支杀不掉变异可删」不改。回归里 test_t10 一条时序问题是测试自己的（时间戳未落盘），tester 已修。没覆盖：真 Claude Code 的 effort payload、超长 effort 截断、colors.effort 写 ANSI 索引。
 - 审查退回（reviewer @b35eb49，探针 cr-t27-b35eb49/probes/）：effort 类型不对（{"level":3}、"effort":"high"）时整个状态文件被当未知，pct 和模型一起丢——改成只有语法错误才算未知，*json.UnmarshalTypeError 放过；TestHUD 加两行。让位顺序、colors.effort、变异探针都过。
 - 用户跑了 `agmux setup --write`，`~/.local/state/agmux/<id>.json` 里真实字段是 `"effort":{"level":"high"}`。readHUD 读 `effort.level`，卡片第 3 行 `模型·effort` 的 effort 段生效，`colors.effort` 随之生效；缺字段 = 空串、不显示（和现在一样）。m1-mvp/design.md 第 15 行「核实后再读」、m3-config/design.md 第 27 行「看不到效果」两句改掉。
 - 验收：单测 payload 带 effort.level → Effort="high"；不带 → ""；黑盒 夹具 json 加 effort 后卡片第 3 行出现 `·high`，颜色是 colors.effort。
