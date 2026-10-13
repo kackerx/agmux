@@ -57,11 +57,6 @@ var Sprites = []Sprite{
 		"BEBBEB",
 		".BBBB.",
 		"bbbbbb"}},
-	{"bot-06", "Cyclops", "#ff79c6", [Height]string{
-		".BBBB.",
-		"BBEEBB",
-		"BBBBBB",
-		"bbbbbb"}},
 }
 
 // Mood is what the eyes say.

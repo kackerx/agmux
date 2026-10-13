@@ -1628,7 +1628,7 @@ func TestConfiguredColors(t *testing.T) {
 	}
 }
 
-// a: the avatar list over the focused card; j/k move, enter binds by name (ID without one) into
+// a: the avatar grid under the focused card; h/j/k/l move, enter binds by name (ID without one) into
 // avatars.json and the card shows it at once, esc / q cancel without writing; nothing else acts.
 func TestAvatarPicker(t *testing.T) {
 	dir := t.TempDir()
@@ -1653,32 +1653,27 @@ func TestAvatarPicker(t *testing.T) {
 	m.getenv = func(string) string { return "" }
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
 	m, _ = press(t, tm.(Model), "j", "a") // a1 "one" (a2 has no name and sorts first)
-	if !strings.Contains(ansi.Strip(m.View()), "avatar for one") {
-		t.Fatalf("list not open:\n%s", ansi.Strip(m.View()))
-	}
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	for _, sp := range avatar.Sprites {
+	if top, _, _ := gridAt(lines); top < 0 {
+		t.Fatalf("grid not open:\n%s", ansi.Strip(m.View()))
+	}
+	for _, sp := range avatar.Sprites { // the five sprites in one row, by name
 		found := false
 		for _, l := range lines {
-			if strings.Contains(l, sp.ID+"  "+sp.Name) {
-				found = true
-				if strings.Contains(l, "▸") != (sp.ID == "bot-04") {
-					t.Errorf("cursor starts on the sprite the card wears: %q", l)
-				}
-			}
+			found = found || strings.Contains(l, sp.Name)
 		}
 		if !found {
-			t.Errorf("%s missing from the list", sp.ID)
+			t.Errorf("%s missing from the grid", sp.Name)
 		}
 	}
 	lipgloss.SetColorProfile(termenv.TrueColor)
-	if v := m.View(); !strings.Contains(v, fg(cFocus, "bot-04  Boo")) || strings.Contains(v, fg(cFocus, "bot-01  Clawd")) {
-		t.Error("the sprite the card wears now is in the focus color, only it")
+	if v := m.View(); !strings.Contains(v, "48;2;255;142;190m   Boo   ") || strings.Count(v, "48;2;255;142;190m") != 1 { // the cursor starts on the sprite the card wears
+		t.Error("the cursor is on Boo, only there")
 	}
-	if last := lines[len(lines)-1]; !strings.Contains(last, "j/k move · enter bind · q cancel") {
+	if last := lines[len(lines)-1]; !strings.Contains(last, "h/j/k/l move · enter bind · q cancel") {
 		t.Errorf("footer %q", last)
 	}
-	m, quit := press(t, m, "x", "f", "p", "i", "H", "r", "d", "k", "k", "enter") // bot-04 → bot-02
+	m, quit := press(t, m, "x", "f", "p", "i", "H", "r", "d", "h", "h", "enter") // bot-04 → bot-02
 	if quit || m.mode != browsing || m.preview || m.folded["/a"] || len(r.calls) != 0 {
 		t.Fatalf("keys acted while the list was open: mode %v preview %v folded %v calls %q", m.mode, m.preview, m.folded, r.calls)
 	}
@@ -1688,25 +1683,25 @@ func TestAvatarPicker(t *testing.T) {
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "bot-02"`) {
 		t.Errorf("avatars.json: %s", data)
 	}
-	if strings.Contains(ansi.Strip(m.View()), "avatar for") || av("a1") != "bot-02" {
+	if top, _, _ := gridAt(strings.Split(ansi.Strip(m.View()), "\n")); top >= 0 || av("a1") != "bot-02" {
 		t.Errorf("list closed and card shows bot-02: %v", p.Sessions())
 	}
-	if m, _ = press(t, m, "a", "j", "j", "enter"); av("a1") != "bot-04" {
-		t.Error("j j enter: two below the current one")
+	if m, _ = press(t, m, "a", "l", "l", "enter"); av("a1") != "bot-04" {
+		t.Error("l l enter: two along from the current one")
 	}
 	for _, cancel := range []string{"esc", "q"} {
-		m, quit = press(t, m, "a", "j", cancel)
+		m, quit = press(t, m, "a", "l", cancel)
 		if quit || m.mode != browsing || av("a1") != "bot-04" {
 			t.Errorf("%s cancels, keeps the board: quit %v mode %v", cancel, quit, m.mode)
 		}
 	}
-	if m, _ = press(t, m, "a", "k", "k", "k", "k", "k", "enter"); av("a1") != "bot-01" {
-		t.Error("k stops at the first sprite")
+	if m, _ = press(t, m, "a", "h", "h", "h", "h", "h", "enter"); av("a1") != "bot-01" {
+		t.Error("h stops at the first sprite")
 	}
-	if m, _ = press(t, m, "a", "j", "j", "j", "j", "j", "j", "j", "enter"); av("a1") != "bot-06" {
-		t.Error("j stops at the last sprite")
+	if m, _ = press(t, m, "a", "l", "l", "l", "l", "l", "l", "l", "enter"); av("a1") != "bot-05" {
+		t.Error("l stops at the last sprite")
 	}
-	m, _ = press(t, m, "k", "a", "j", "enter") // a2: no name
+	m, _ = press(t, m, "k", "a", "l", "enter") // a2: no name
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"a2": "bot-05"`) || !strings.Contains(ansi.Strip(m.View()), "bound to session id (name missing)") {
 		t.Errorf("no name: by ID, said so: %s", data)
 	}
@@ -1999,7 +1994,7 @@ func TestPickerFooterSkipsKeyless(t *testing.T) {
 	m := withConfig(t, "[keys]\nfold = [\"enter\"]\n") // jump is left with no key
 	m, _ = press(t, m, "a")
 	v := strings.Split(ansi.Strip(m.View()), "\n")
-	if last := v[len(v)-1]; last != " j/k move · q cancel" {
+	if last := v[len(v)-1]; last != " h/j/k/l move · q cancel" {
 		t.Errorf("footer %q", last)
 	}
 	m, _ = press(t, withConfig(t, "[keys]\nfold = [\"k\", \"up\"]\n"), "a") // up: no key, so no "move"

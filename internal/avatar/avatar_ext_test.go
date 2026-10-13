@@ -20,8 +20,8 @@ var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 func init() { lipgloss.SetColorProfile(termenv.TrueColor) }
 
 func TestExtRenderShape(t *testing.T) {
-	if len(avatar.Sprites) != 6 {
-		t.Fatalf("%d sprites, want 6", len(avatar.Sprites))
+	if len(avatar.Sprites) != 5 {
+		t.Fatalf("%d sprites, want 5", len(avatar.Sprites))
 	}
 	ids := map[string]bool{}
 	for _, s := range avatar.Sprites {
@@ -174,8 +174,8 @@ func TestExtFallbackAndHash(t *testing.T) {
 		count[a]++
 	}
 	t.Logf("600 uuid-like ids over sprites: %v", count)
-	if len(count) != 6 {
-		t.Errorf("only %d of 6 sprites ever assigned by default", len(count))
+	if len(count) != 5 {
+		t.Errorf("only %d of 5 sprites ever assigned by default", len(count))
 	}
 	for id, n := range count {
 		if n < 60 || n > 140 {

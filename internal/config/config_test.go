@@ -136,7 +136,7 @@ func TestAvatars(t *testing.T) {
 	if err != nil || c.AvatarDefault != "hash" || c.AvatarBind["sqlmux-orchestrator"] != "bot-03" {
 		t.Errorf("%v %q %v", err, c.AvatarDefault, c.AvatarBind)
 	}
-	if c, err := Parse("cfg", []byte("[avatars]\ndefault = \"bot-06\"\nbind = { x = \"bot-01\" }\n")); err != nil || c.AvatarDefault != "bot-06" || c.AvatarBind["x"] != "bot-01" {
+	if c, err := Parse("cfg", []byte("[avatars]\ndefault = \"bot-05\"\nbind = { x = \"bot-01\" }\n")); err != nil || c.AvatarDefault != "bot-05" || c.AvatarBind["x"] != "bot-01" {
 		t.Errorf("a sprite as default: %v", err)
 	}
 }

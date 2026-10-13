@@ -31,8 +31,8 @@ func TestRenderShape(t *testing.T) {
 			}
 		}
 	}
-	if len(Sprites) != 6 || len(ids) != 6 {
-		t.Fatalf("want 6 sprites with unique IDs, got %d / %d", len(Sprites), len(ids))
+	if len(Sprites) != 5 || len(ids) != 5 {
+		t.Fatalf("want 5 sprites with unique IDs, got %d / %d", len(Sprites), len(ids))
 	}
 }
 

@@ -186,6 +186,14 @@ func TestBuiltinSet(t *testing.T) {
 	t.Cleanup(func() { Sets, problems = nil, nil })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no user sets
 	LoadSets()
+	if len(Sets) != 15 || len(Sprites) != 5 { // 20 built-in avatars: 15 pictures and 5 pixel sprites
+		t.Errorf("%d built-in sets and %d sprites, want 15 and 5", len(Sets), len(Sprites))
+	}
+	for i, s := range Sets[1:] { // aza_choi, then the party portraits: one still picture each
+		if want := fmt.Sprintf("party-%02d", i+1); s.ID != want || len(s.Frames["idle"]) != 1 || len(s.Frames["think"]) != 0 {
+			t.Errorf("set %d: %s, %d idle frames, want %s with one", i+1, s.ID, len(s.Frames["idle"]), want)
+		}
+	}
 	s, ok := SetByID("aza_choi")
 	if !ok || s.Source != "builtin" || len(problems) != 0 {
 		t.Fatalf("aza_choi: %v %v problems %q", s, ok, problems)
@@ -214,8 +222,8 @@ func TestUserSetReplacesBuiltin(t *testing.T) {
 		t.Fatal(err)
 	}
 	LoadSets()
-	if len(Sets) != 2 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || !bytes.Equal(Sets[0].Frames["idle"][0], pngOf("mine")) || Sets[1].ID != "zed" {
-		t.Errorf("sets: %+v", Sets)
+	if n := len(Sets); n != 16 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || !bytes.Equal(Sets[0].Frames["idle"][0], pngOf("mine")) || Sets[1].ID != "party-01" || Sets[1].Source != "builtin" || Sets[n-1].ID != "zed" {
+		t.Errorf("sets (want the 15 built-in ones, aza_choi replaced, then zed): %d %+v", n, Sets[0])
 	}
 }
 

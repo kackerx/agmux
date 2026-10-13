@@ -16,7 +16,9 @@ import (
 	"testing/fstest"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
@@ -177,149 +179,6 @@ func TestImageCardFallsBackToSprite(t *testing.T) {
 	}
 }
 
-// The avatar list shows the image sets first, then the sprites; the cursor starts on what the
-// session wears, and enter binds a set's ID like a sprite's.
-func TestAvatarPickerSets(t *testing.T) {
-	avatar.UseSets(fstest.MapFS{ // kit has done frames, so the list must pick idle's; bot-03 shadows the sprite
-		"kit/idle/1.png": pngFile("i1"), "kit/done/1.png": pngFile("d1"), "bot-03/idle/1.png": pngFile("b"),
-	})
-	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
-	dir := t.TempDir()
-	path := filepath.Join(dir, "avatars.json")
-	b, _ := avatar.LoadBindings(path)
-	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: "kit", Show: func() ([]ccmux.Session, error) {
-		return []ccmux.Session{{ID: "a1", Summary: "one", CWD: "/a", TmuxPane: "%1", Status: "idle"}}, nil
-	}}
-	if err := p.Refresh(); err != nil {
-		t.Fatal(err)
-	}
-	for _, images := range []bool{true, false} {
-		useImages = images
-		m := New(p, &fakeRunner{})
-		m.getenv = func(string) string { return "" }
-		tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
-		m, _ = press(t, tm.(Model), "a")
-		view := m.View()
-		lines := strings.Split(ansi.Strip(view), "\n")
-		kit, bot01 := -1, -1
-		for i, l := range lines {
-			if kit < 0 && strings.Contains(l, "▸") { // the cursor
-				kit = i
-			}
-			if strings.Contains(l, "bot-01  Clawd") {
-				bot01 = i
-			}
-		}
-		if kit < 0 || bot01 < 0 || kit > bot01 || !strings.Contains(lines[kit], "▸") {
-			t.Fatalf("images=%v: the set comes first and the cursor starts on it (kit row %d, bot-01 row %d):\n%s", images, kit, bot01, ansi.Strip(view))
-		}
-		if f := strings.Fields(strings.TrimSuffix(strings.TrimSpace(lines[kit]), "│")); f[len(f)-1] != "kit" { // a set's name is its ID: no second name
-			t.Errorf("images=%v: set row %q", images, lines[kit])
-		}
-		if got := strings.Contains(view, "\U0010EEEE"); got != images {
-			t.Errorf("images=%v: placeholders in the list: %v", images, got)
-		}
-		sgr := func(state string) string {
-			kit, _ := avatar.SetByID("kit")
-			id := kit.FrameID(state, 0)
-			return fmt.Sprintf("38;2;%d;%d;%dm", id>>16&255, id>>8&255, id&255)
-		}
-		if images && !strings.Contains(view, sgr("idle")) { // kit's idle frame
-			t.Errorf("the set's row is not its first idle frame:\n%q", view)
-		}
-		if images && strings.Contains(view, sgr("success")) { // not its done frame
-			t.Errorf("the list shows the done frame:\n%q", view)
-		}
-		if strings.Contains(ansi.Strip(view), "bot-03  Sprout") || !strings.Contains(ansi.Strip(view), "bot-03  ") {
-			t.Errorf("images=%v: a set named like a sprite replaces it, under its ID alone:\n%s", images, ansi.Strip(view))
-		}
-		m, _ = press(t, m, "j", "enter") // down one: the first sprite
-		if !strings.Contains(ansi.Strip(m.View()), "one wears Clawd") {
-			t.Errorf("images=%v: %q", images, ansi.Strip(m.View()))
-		}
-		if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "bot-01"`) {
-			t.Errorf("avatars.json: %s", data)
-		}
-		m, _ = press(t, m, "a", "k", "enter") // back up to the set
-		if !strings.Contains(ansi.Strip(m.View()), "one wears kit") {
-			t.Errorf("images=%v: %q", images, ansi.Strip(m.View()))
-		}
-		if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "kit"`) || p.Sessions()[0].AvatarID != "kit" {
-			t.Errorf("a set's ID is bound: %s %v", data, p.Sessions())
-		}
-		// a set that shadows a sprite is bound under its ID, not the sprite's name
-		if n := len(avatar.Listing()); n != len(avatar.Sets)+len(avatar.Sprites)-1 {
-			t.Errorf("images=%v: %d entries, want the sets and the sprites minus the shadowed one", images, n)
-		}
-		if n := strings.Count(ansi.Strip(view), "bot-03"); n != 1 {
-			t.Errorf("images=%v: bot-03 is listed %d times", images, n)
-		}
-		m, _ = press(t, m, "a", "k", "enter")
-		if v := ansi.Strip(m.View()); !strings.Contains(v, "one wears bot-03") || strings.Contains(v, "wears Sprout") {
-			t.Errorf("images=%v: %q", images, v)
-		}
-		m, _ = press(t, m, "a", "j", "enter") // back to kit for the next round
-	}
-}
-
-// A list taller than the screen shows the entries around the cursor: the cursor never leaves the
-// screen, the board's bars stay, and enter binds the entry the cursor is on.
-func TestAvatarPickerScrolls(t *testing.T) {
-	files := fstest.MapFS{}
-	for i := range 20 {
-		files[fmt.Sprintf("u%02d/idle/1.png", i)] = pngFile("x")
-	}
-	avatar.UseSets(files)
-	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
-	useImages = false
-	dir := t.TempDir()
-	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
-	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: "u00", Show: func() ([]ccmux.Session, error) {
-		return []ccmux.Session{{ID: "a1", Summary: "one", CWD: "/a", TmuxPane: "%1", Status: "idle"}}, nil
-	}}
-	if err := p.Refresh(); err != nil {
-		t.Fatal(err)
-	}
-	all := avatar.Listing() // 20 sets, then the 6 sprites
-	for _, h := range []int{30, 12, 6} {
-		m := New(p, &fakeRunner{})
-		m.getenv = func(string) string { return "" }
-		tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: h})
-		m, _ = press(t, tm.(Model), "a")
-		for i := range all { // every cursor position, top to bottom
-			lines := strings.Split(ansi.Strip(m.View()), "\n")
-			var marked []string
-			for _, l := range lines {
-				if _, rest, ok := strings.Cut(l, "▸"); ok {
-					marked = append(marked, rest)
-				}
-			}
-			if len(lines) != h || len(marked) != 1 || !strings.Contains(marked[0], all[i]) {
-				t.Fatalf("h=%d cursor on %s: %d lines, marked rows %q\n%s", h, all[i], len(lines), marked, strings.Join(lines, "\n"))
-			}
-			top, bottom := -1, -1 // the box's own rows: the top bar above it and the footer below it stay
-			for y, l := range lines {
-				if strings.Contains(l, "╭") {
-					top = y
-				}
-				if strings.Contains(l, "╰") {
-					bottom = y
-				}
-			}
-			if h >= 12 && (top < 1 || bottom > h-2) {
-				t.Errorf("h=%d cursor on %s: the box covers the bars (rows %d..%d):\n%s", h, all[i], top, bottom, strings.Join(lines, "\n"))
-			}
-			m, _ = press(t, m, "j")
-		}
-		m, _ = press(t, m, "enter") // the cursor is on the last entry
-		if data, _ := os.ReadFile(filepath.Join(dir, "avatars.json")); !strings.Contains(string(data), `"one": "`+all[len(all)-1]+`"`) {
-			t.Errorf("h=%d: bound %s, want %s", h, data, all[len(all)-1])
-		}
-		os.Remove(filepath.Join(dir, "avatars.json"))
-		p.Refresh() // the session wears the default again
-	}
-}
-
 // DetectImages tells the avatar package whether a hash may pick image sets: only when pictures are
 // drawn. Outside tmux it asks nobody but the environment.
 func TestDetectImagesSetsHashPool(t *testing.T) {
@@ -340,5 +199,206 @@ func TestDetectImagesSetsHashPool(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	if img := DetectImages(cfg); img.On || avatar.HashImages {
 		t.Errorf("auto elsewhere: %+v, HashImages %v", img, avatar.HashImages)
+	}
+}
+
+// ---- the avatar grid (a) ----
+
+// gridFixture: n image sets s01.. plus the five sprites, a poller with the given session names, all in
+// one group so the cards stack, avatars wearing def.
+func gridFixture(t *testing.T, nSets int, def string, names ...string) (*store.Poller, string) {
+	t.Helper()
+	files := fstest.MapFS{}
+	for i := range nSets {
+		files[fmt.Sprintf("s%02d/idle/1.png", i+1)] = pngFile(fmt.Sprintf("s%d", i))
+	}
+	avatar.UseSets(files)
+	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
+	dir := t.TempDir()
+	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
+	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: def, Show: func() ([]ccmux.Session, error) {
+		var ss []ccmux.Session
+		for i, n := range names {
+			name, cwd, ok := strings.Cut(n, "@") // "name@/dir": its own group
+			if !ok {
+				cwd = "/a"
+			}
+			ss = append(ss, ccmux.Session{ID: fmt.Sprintf("a%d", i), Summary: name, CWD: cwd, TmuxPane: fmt.Sprintf("%%%d", i), Status: "idle"})
+		}
+		return ss, nil
+	}}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	return p, filepath.Join(dir, "avatars.json")
+}
+
+func gridModel(p *store.Poller, w, h int) Model {
+	m := New(p, &fakeRunner{})
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	return tm.(Model)
+}
+
+// gridAt finds the picker box on the screen: its top and bottom row and its left column (-1: none).
+func gridAt(lines []string) (top, bottom, col int) {
+	top, bottom, col = -1, -1, -1
+	for y, l := range lines {
+		if i := strings.Index(l, "╭"+strings.Repeat("─", gridCols*cellW)+"╮"); i >= 0 && top < 0 {
+			top, col = y, len([]rune(l[:i]))
+		}
+		if strings.Contains(l, "╰"+strings.Repeat("─", gridCols*cellW)+"╯") {
+			bottom = y
+		}
+	}
+	return
+}
+
+// The grid is 5 columns × 4 rows of a 6 × 2 avatar and its name, the sets first and the sprites in
+// the last row, straight under the card it is for, at that card's left edge; the cursor starts on
+// the avatar the session wears, whose name is in the focus color's inverse.
+func TestAvatarGrid(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	p, path := gridFixture(t, 15, "s07", "one")
+	for _, images := range []bool{false, true} {
+		useImages = images
+		m, _ := press(t, gridModel(p, 120, 40), "a")
+		v := m.View()
+		lines := strings.Split(ansi.Strip(v), "\n")
+		top, bottom, col := gridAt(lines)
+		cardTop, cardLeft := -1, -1
+		for y, l := range lines { // the focused card has the thick border
+			if i := strings.Index(l, "┏"); i >= 0 && cardTop < 0 {
+				cardTop, cardLeft = y, len([]rune(l[:i]))
+			}
+		}
+		if len(lines) != 40 || top != cardTop+5 || bottom != top+13 || col != cardLeft {
+			t.Fatalf("images=%v: card at row %d col %d, box rows %d..%d col %d, %d lines:\n%s", images, cardTop, cardLeft, top, bottom, col, len(lines), strings.Join(lines, "\n"))
+		}
+		names := func(row int) []string { // the name row of grid row `row` (0..3)
+			return strings.Fields(strings.Trim(lines[top+1+3*row+2], "│"))
+		}
+		if got := names(0); !slicesEqual(got, []string{"s01", "s02", "s03", "s04", "s05"}) {
+			t.Errorf("images=%v: first row %q", images, got)
+		}
+		if got := names(2); !slicesEqual(got, []string{"s11", "s12", "s13", "s14", "s15"}) {
+			t.Errorf("images=%v: third row %q", images, got)
+		}
+		if got := names(3); !slicesEqual(got, []string{"Clawd", "Boxy", "Sprout", "Boo", "Mochi"}) { // sprites last, by name
+			t.Errorf("images=%v: last row %q", images, got)
+		}
+		if n := strings.Count(v, "\U0010EEEE"); (n > 0) != images || (images && n != 15*12+12) { // the 15 sets in the box; the card wears one too
+			t.Errorf("images=%v: %d placeholder cells", images, n)
+		}
+		if !strings.Contains(v, "48;2;255;142;190m   s07   ") { // the cursor starts on the avatar it wears
+			t.Errorf("images=%v: cursor not on s07:\n%q", images, lines[top+1+3*1+2])
+		}
+		if msg := lines[len(lines)-2]; strings.TrimSpace(msg) != "s07" {
+			t.Errorf("images=%v: message line %q", images, msg)
+		}
+		if f := lines[len(lines)-1]; !strings.HasPrefix(f, " h/j/k/l move · enter bind · q cancel") {
+			t.Errorf("footer %q", f)
+		}
+		// moves: l → s08, j → s13, j → the sprite row (index 17: Sprout), k k back, h h to the start of the row
+		for _, c := range []struct{ keys, want string }{
+			{"l", "s08"}, {"j", "s13"}, {"j", "bot-03  Sprout"}, {"j", "bot-03  Sprout"}, {"k", "s13"}, {"k", "s08"}, {"k", "s03"}, {"k", "s03"},
+			{"h", "s02"}, {"h", "s01"}, {"h", "s01"}, {"right", "s02"}, {"down", "s07"}, {"up", "s02"}, {"left", "s01"},
+		} {
+			m, _ = press(t, m, c.keys)
+			if got := strings.TrimSpace(strings.Split(ansi.Strip(m.View()), "\n")[38]); got != c.want {
+				t.Fatalf("images=%v: after %q the message line is %q, want %q", images, c.keys, got, c.want)
+			}
+		}
+		m, _ = press(t, m, "l", "l", "enter") // s03
+		if v := ansi.Strip(m.View()); !strings.Contains(v, "one wears s03") || strings.Contains(v, "╭"+strings.Repeat("─", 40)) {
+			t.Errorf("images=%v: bound message, grid closed: %q", images, v)
+		}
+		if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "s03"`) || p.Sessions()[0].AvatarID != "s03" {
+			t.Errorf("a set's ID is bound: %s %v", data, p.Sessions())
+		}
+		os.Remove(path)
+		p.Refresh() // back to the default
+	}
+}
+
+func slicesEqual(a, b []string) bool { return strings.Join(a, "\x00") == strings.Join(b, "\x00") }
+
+// Under the card, or above it when there is no room below; at the card's left edge, pulled in
+// when the grid would run off the right of the screen.
+
+func TestAvatarGridPlacement(t *testing.T) {
+	p, _ := gridFixture(t, 15, "s07", "n1", "n2", "n3", "n4")
+	cardRows := func(lines []string) (top int) {
+		for y, l := range lines {
+			if strings.Contains(l, "┏") {
+				return y
+			}
+		}
+		return -1
+	}
+	m, _ := press(t, gridModel(p, 60, 30), "a")
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if top, bottom, _ := gridAt(lines); top != cardRows(lines)+5 || bottom != top+13 {
+		t.Errorf("first card: grid at %d..%d, card at %d", top, bottom, cardRows(lines))
+	}
+	m, _ = press(t, gridModel(p, 60, 30), "j", "j", "j", "a") // the last card: no room below on 30 rows
+	lines = strings.Split(ansi.Strip(m.View()), "\n")
+	if top, bottom, _ := gridAt(lines); bottom != cardRows(lines)-1 || top != bottom-13 {
+		t.Errorf("last card: grid at %d..%d, card at %d:\n%s", top, bottom, cardRows(lines), strings.Join(lines, "\n"))
+	}
+	// room both above and below: below
+	p6, _ := gridFixture(t, 15, "s07", "n1", "n2", "n3", "n4", "n5", "n6")
+	m, _ = press(t, gridModel(p6, 60, 60), "j", "j", "j", "a")
+	lines = strings.Split(ansi.Strip(m.View()), "\n")
+	if top, _, _ := gridAt(lines); top != cardRows(lines)+5 {
+		t.Errorf("room on both sides: grid at %d, card at %d", top, cardRows(lines))
+	}
+	// a card in the second column, 82 columns wide: the grid (gridW) is pulled in to end at the screen's edge
+	p2, _ := gridFixture(t, 15, "s07", "n1", "n2@/b")
+	m, _ = press(t, gridModel(p2, 82, 40), "l", "a")
+	lines = strings.Split(ansi.Strip(m.View()), "\n")
+	if _, _, col := gridAt(lines); col != 82-gridW {
+		t.Errorf("second column: grid at column %d, want %d:\n%s", col, 82-gridW, strings.Join(lines, "\n"))
+	}
+}
+
+// More than 20 avatars scroll by row; on a short screen the grid shows fewer rows; the cursor is
+// on the screen wherever it is, and enter binds what it is on.
+func TestAvatarGridScrolls(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	p, path := gridFixture(t, 18, "s01", "one") // 18 sets and 5 sprites: 23, five rows
+	all := avatar.Listing()
+	if len(all) != 23 {
+		t.Fatalf("%d avatars", len(all))
+	}
+	for _, c := range []struct{ h, boxH int }{{40, 14}, {20, 11}, {18, 8}, {16, 5}, {12, 5}} { // 4, 3, 2, 1, 1 rows: what fits under the 7 rows above (on 12 it covers the card)
+		m := gridModel(p, 120, c.h)
+		m, _ = press(t, m, "a")
+		for i, id := range all {
+			v := m.View()
+			lines := strings.Split(ansi.Strip(v), "\n")
+			top, bottom, _ := gridAt(lines)
+			if len(lines) != c.h || bottom-top+1 != c.boxH || bottom > c.h-3 || strings.Count(v, "48;2;255;142;190m") != 1 {
+				t.Fatalf("h=%d cursor %d (%s): %d lines, grid rows %d..%d, %d cursors:\n%s", c.h, i, id, len(lines), top, bottom, strings.Count(v, "48;2;255;142;190m"), strings.Join(lines, "\n"))
+			}
+			if i < len(all)-1 {
+				m, _ = press(t, m, "l")
+			}
+		}
+		m, _ = press(t, m, "enter") // on the last: Mochi
+		if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "bot-05"`) {
+			t.Errorf("h=%d: avatars.json %s", c.h, data)
+		}
+		os.Remove(path)
+		p.Refresh()
+	}
+	// down from a row whose successor is shorter goes to the very last one
+	m, _ := press(t, gridModel(p, 120, 40), "a", "j", "j", "j", "l", "l", "l", "l", "j") // index 19 → 24 doesn't exist → 22
+	if got := strings.TrimSpace(strings.Split(ansi.Strip(m.View()), "\n")[38]); got != "bot-05  Mochi" {
+		t.Errorf("the short last row: %q", got)
 	}
 }

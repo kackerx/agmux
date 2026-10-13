@@ -40,7 +40,7 @@ agmux avatars   # 打印全部头像：先是图片集（id、来源、各状态
 | `r` | 重启会话 |
 | `x` | 杀掉会话（按 `y` 确认） |
 | `d` | 用 ccmux review 看改动 |
-| `a` | 给这个会话换头像：列表先是图片集再是像素头像，`j`/`k` 选，`enter` 绑定（集和像素头像都行），`esc` 取消 |
+| `a` | 给这个会话换头像：在这张卡正下方（放不下就在上方）弹出 5 列 × 4 行的头像格子，先是图片集（内置的，再是你的），最后一排是像素头像；`h` `j` `k` `l` / 方向键移动，`enter` 绑定，`esc` 取消；超过 20 个按行滚动，当前穿的那个一开始就选着，底下的消息行显示选中的 id |
 | `q` / `esc` | 退出（预览获焦时先按 `tab` 回到卡片；保留着 `/` 过滤时 `esc` 先清空过滤） |
 
 没有 tmux pane 的后台会话不能跳转和发送，底栏对应键会变暗。
@@ -123,6 +123,6 @@ default = "hash"                    # 没绑定的会话：hash = 按名字固�
   同一个状态下放多张 PNG，按文件名排序就是动画帧，每 500ms 换一帧；`idle` 例外：第一张是常态脸，其余的（比如眨眼）每 4 秒只露一帧。只认 `.png`，图不会被变暗或闪红，神态靠画。
 - **什么时候生效**：启动时一次性上传所有图（内置的 + 你的），所以看板开着时新建的目录要重开才认；之后在 `a` 里换头像不需要重传。图很小，退出时不删，留在终端里到关闭，下次启动同 id 覆盖。
 - **回落**：非 kitty 系终端、没开直通、或 `renderer = "pixel"` 时，绑了图片集的会话显示一个按集 id 固定挑出的像素头像。图片模式下卡片没有像素头像底边的 agentType 色带。
-- **内置**：`aza_choi`，来自 [pi-emote](https://github.com/shennguyenrs/pi-emote)（MIT，© Eiji Onchi）。许可文本见 `internal/avatar/sets/aza_choi/LICENSE-pi-emote`。
+- **内置**：共 20 个头像：15 个图片集和 5 个像素头像。图片集是 `aza_choi`（动画，来自 [pi-emote](https://github.com/shennguyenrs/pi-emote)，MIT，© Eiji Onchi）和 `party-01` … `party-14`（14 张 CC0 的 EGA 风格像素肖像，静态，作者 Tim Rachor，来自 OpenGameArt 的 [Wacky EGA style character portraits](https://opengameart.org/content/wacky-ega-style-character-portraits)）。每一项的来源、作者、许可见 `internal/avatar/sets/CREDITS.md`。风格会杂；想要统一风格，可以自己做一套放进用户目录（pi-agent-portrait 的 draw-portrait 能从一句描述生成）。
 
 未知的键、动作、颜色，键名写错，或你写的两个动作用了同一个键：启动时报一行错误（文件、哪一项、原因）并退出。你绑的键如果原本是另一个动作的默认键，那个动作就让出这个键（一个键都不剩才报错）；`confirm` 和 `leave_preview` 只在各自的模式里生效，可以和看板键重复。`ctrl+c` 不能绑；`ctrl+i` / `ctrl+m` 终端发出来就是 `tab` / `enter`，要写成后者。

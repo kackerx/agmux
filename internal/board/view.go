@@ -475,38 +475,82 @@ func footerFor(c *config.Config) []footerKey {
 	return out
 }
 
-// avatarList is the avatar picker for s, h rows of screen: two rows per image set and sprite with its ID (and a sprite's name) beside;
-// ▸ marks the cursor, the focus color the avatar s wears now.
-func avatarList(s store.Session, pick, h int) []string {
-	name := s.Name
-	if name == "" {
-		name = s.ID
-	}
-	rows := []string{fg(cMuted, "avatar for ") + fg(cName, name), ""}
+// The picker is a grid of avatars below the card it is for: gridCols across, at most gridRows
+// down (more rows scroll), each cell cellW × cellH: the avatar (6 × 2) with its name under it.
+const (
+	gridCols, gridRows = 5, 4
+	cellW, cellH       = 9, 3               // 6 for the avatar, the rest a gap: an 8 character name (aza_choi, party-01) still has one
+	gridW              = gridCols*cellW + 2 // with the border
+)
+
+// avatarGrid draws the picker for s showing rows rows of the grid, the ones around the cursor pick.
+// Under the cursor the name is in the focus color's inverse; the avatar s wears now has its name in
+// the focus color.
+func avatarGrid(s store.Session, pick, rows int) []string {
 	ids := avatar.Listing()
-	// the box keeps the top bar and the footer: what is left holds the title, a blank row, two rows
-	// per entry and the border; a longer list shows the entries around the cursor
-	first, n := 0, len(ids)
-	if fit := max((h-2-2-2)/2, 1); n > fit {
-		first, n = min(max(pick-fit/2, 0), len(ids)-fit), fit
+	total := (len(ids) + gridCols - 1) / gridCols
+	rows = min(rows, total)
+	first := min(max(pick/gridCols-rows/2, 0), total-rows)
+	var lines []string
+	for r := first; r < first+rows; r++ {
+		cells := [cellH][]string{}
+		for c := range gridCols {
+			i := r*gridCols + c
+			if i >= len(ids) {
+				for l := range cellH {
+					cells[l] = append(cells[l], strings.Repeat(" ", cellW))
+				}
+				continue
+			}
+			id := ids[i]
+			face := avatarFace(store.Session{AvatarID: id, AgentType: s.AgentType, AvatarState: "idle"}, avatar.Normal, 0) // a picture: the resting face
+			label := ansi.Truncate(avatarName(id), cellW, "…")
+			label = pad(strings.Repeat(" ", (cellW-ansi.StringWidth(label))/2)+label, cellW)
+			switch {
+			case i == pick:
+				label = lipgloss.NewStyle().Foreground(lipgloss.Color("#2d2a2e")).Background(cFocus).Render(label)
+			case id == s.AvatarID:
+				label = fg(cFocus, label)
+			}
+			cells[0] = append(cells[0], " "+face[0]+"  ")
+			cells[1] = append(cells[1], " "+face[1]+"  ")
+			cells[2] = append(cells[2], label)
+		}
+		for l := range cellH {
+			lines = append(lines, strings.Join(cells[l], ""))
+		}
 	}
-	for i := first; i < first+n; i++ {
-		id := ids[i]
-		face := avatarFace(store.Session{AvatarID: id, AgentType: s.AgentType, AvatarState: "idle"}, avatar.Normal, 0) // a picture: the resting face
-		mark, label := "  ", id
-		if sp, ok := avatar.ByID(id); ok && !isSet(id) {
-			label += "  " + sp.Name
-		}
-		if i == pick {
-			mark = "▸ "
-		}
-		if id == s.AvatarID {
-			label = fg(cFocus, label)
-		}
-		rows = append(rows, mark+face[0]+"  "+label, "  "+face[1])
-	}
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cFocus).Padding(0, 1).Render(strings.Join(rows, "\n"))
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cFocus).Render(strings.Join(lines, "\n"))
 	return strings.Split(box, "\n")
+}
+
+// gridPlace picks where the grid goes for a card whose top is at screen row cardTop and which is
+// cardH tall, on a screen h rows high (the top bar above row 1, the message line and footer from
+// h-2 on): straight below the card, else above it, with fewer rows if need be. rows is how many it
+// shows.
+func gridPlace(cardTop, cardH, h, want int) (y, rows int) {
+	below, above := h-2-(cardTop+cardH), cardTop-1
+	for rows = want; rows >= 1; rows-- {
+		if need := 2 + cellH*rows; below >= need {
+			return cardTop + cardH, rows
+		} else if above >= need {
+			return cardTop - need, rows
+		}
+	}
+	return 1, 1 // no room at all: the top of the board
+}
+
+// overlayAt puts box on screen with its top left corner at column x, row y.
+func overlayAt(screen string, box []string, x, y, w int) string {
+	lines := strings.Split(screen, "\n")
+	bw := min(ansi.StringWidth(box[0]), w-x)
+	for i, b := range box {
+		if y+i >= len(lines) {
+			break
+		}
+		lines[y+i] = put(lines[y+i], x, ansi.Truncate(b, bw, ""))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // overlay draws box centered over screen (w columns), the screen showing on both sides.

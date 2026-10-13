@@ -266,7 +266,7 @@ func TestAvatarsByName(t *testing.T) {
 	dir := t.TempDir()
 	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
 	b.Set("orch", "bot-01")
-	p := &Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-06",
+	p := &Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-05",
 		AvatarBind: map[string]string{"orch": "bot-02", "dev": "bot-03", "id-3": "bot-04"},
 		Show: func() ([]ccmux.Session, error) {
 			return []ccmux.Session{{ID: "id-1", Summary: "orch"}, {ID: "id-2", Summary: "dev"}, {ID: "id-3"}, {ID: "id-4", Project: "proj"}}, nil
@@ -275,7 +275,7 @@ func TestAvatarsByName(t *testing.T) {
 		t.Fatal(err)
 	}
 	ss := p.Sessions()
-	for id, want := range map[string]string{"id-1": "bot-01", "id-2": "bot-03", "id-3": "bot-04", "id-4": "bot-06"} {
+	for id, want := range map[string]string{"id-1": "bot-01", "id-2": "bot-03", "id-3": "bot-04", "id-4": "bot-05"} {
 		if got := byID(t, ss, id).AvatarID; got != want {
 			t.Errorf("%s: %s, want %s", id, got, want)
 		}
@@ -354,10 +354,10 @@ func TestPollFollowsAvatarsFile(t *testing.T) {
 	if p.Err() == nil {
 		t.Fatal("broken file: error")
 	}
-	os.WriteFile(path, []byte(`{"n":"bot-06"}`), 0o644)
+	os.WriteFile(path, []byte(`{"n":"bot-05"}`), 0o644)
 	os.Chtimes(path, time.Now(), time.Now().Add(time.Hour))
 	p.Refresh()
-	if p.Err() != nil || p.Sessions()[0].AvatarID != "bot-06" {
+	if p.Err() != nil || p.Sessions()[0].AvatarID != "bot-05" {
 		t.Errorf("fixed by hand, another board's pick: err %v avatar %s", p.Err(), p.Sessions()[0].AvatarID)
 	}
 	os.WriteFile(path, []byte("{oops"), 0o644)

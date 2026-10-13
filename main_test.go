@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"hash/fnv"
 	"image"
 	"image/color"
@@ -37,19 +38,22 @@ func TestAvatarsOutput(t *testing.T) {
 	var out, errs bytes.Buffer
 	avatars(&out, &errs)
 	lines := strings.Split(out.String(), "\n")
-	want := []string{
-		"aza_choi  builtin  idle 2 · think 4 · read 4 · write 4 · tool 4 · hi 4 · success 0",
+	want := []string{"aza_choi  builtin  idle 2 · think 4 · read 4 · write 4 · tool 4 · hi 4 · success 0"}
+	for i := 1; i <= 14; i++ {
+		want = append(want, fmt.Sprintf("party-%02d  builtin  idle 1 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 0", i))
+	}
+	want = append(want,
 		"bot-01  user  idle 1 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 0",
-		"kit  user  idle 1 · think 2 · read 0 · write 0 · tool 0 · hi 0 · success 0",
+		"kit  user  idle 1 · think 2 · read 0 · write 0 · tool 0 · hi 0 · success 0", // working/ is think's old name
 		"",
 		"bot-02  Boxy", // bot-01 is a set now: its sprite is gone from the list
-	}
+	)
 	for i, w := range want {
 		if lines[i] != w {
 			t.Errorf("line %d: %q, want %q", i, lines[i], w)
 		}
 	}
-	if strings.Count(out.String(), "bot-01") != 1 || !strings.Contains(out.String(), "\nbot-06  ") {
+	if strings.Count(out.String(), "bot-01") != 1 || !strings.Contains(out.String(), "\nbot-05  ") {
 		t.Errorf("sprites:\n%s", out.String())
 	}
 	if !strings.Contains(errs.String(), `"noidle"`) || strings.Count(errs.String(), "\n") != 1 {

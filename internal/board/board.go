@@ -84,7 +84,7 @@ type Model struct {
 	msg    string // one line above the footer: ccmux stderr, hints
 	mode   mode
 	target store.Session   // what the open x prompt / avatar list acts on, fixed when it opened
-	pick   int             // the avatar list's cursor, an index into avatar.Listing()
+	pick   int             // the avatar grid's cursor, an index into avatar.Listing()
 	folded map[string]bool // group keys folded with f; this run only
 
 	query      string // the / filter; "" = every card
@@ -415,10 +415,20 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case pickAvatar: // other keys do nothing while the list is open
 		switch m.keymap[k.String()] {
-		case "up":
+		case "left":
 			m.pick = max(m.pick-1, 0)
-		case "down":
+		case "right":
 			m.pick = min(m.pick+1, len(avatar.Listing())-1)
+		case "up":
+			if m.pick >= gridCols {
+				m.pick -= gridCols
+			}
+		case "down":
+			if n := len(avatar.Listing()); m.pick+gridCols < n {
+				m.pick += gridCols
+			} else if m.pick/gridCols < (n-1)/gridCols { // the row below is shorter: its last one
+				m.pick = n - 1
+			}
 		case "quit":
 			m.mode = browsing
 		case "jump": // off the UI goroutine: it writes a file and may wait for a poll
@@ -920,6 +930,12 @@ func (m Model) msgLine(focused store.Session) string {
 	switch m.mode {
 	case confirmKill:
 		return fg(cRed, " kill "+m.target.Name+"? "+m.cfg.First("confirm")+" to confirm, any other key cancels")
+	case pickAvatar: // what the cursor is on
+		id := avatar.Listing()[m.pick]
+		if _, isSprite := avatar.ByID(id); isSprite && !isSet(id) {
+			return fg(cFocus, " "+id+"  "+avatarName(id))
+		}
+		return fg(cFocus, " "+id)
 	}
 	var parts []string
 	if m.msg != "" {
@@ -944,7 +960,7 @@ func (m Model) View() string {
 		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.passThrough())
 	}
 	ss, hits := m.shown()
-	out, _, _ := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits)
+	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits)
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
 		cursor := ""
 		if m.searching {
@@ -994,15 +1010,22 @@ func (m Model) View() string {
 	case m.mode == pickAvatar:
 		k := m.cfg.First
 		var hint []string // actions the config left with no key aren't offered
-		if k("down") != "" && k("up") != "" {
-			hint = append(hint, k("down")+"/"+k("up")+" move")
+		if k("left") != "" && k("down") != "" && k("up") != "" && k("right") != "" {
+			hint = append(hint, k("left")+"/"+k("down")+"/"+k("up")+"/"+k("right")+" move")
 		}
 		for _, a := range [][2]string{{"jump", " bind"}, {"quit", " cancel"}} {
 			if k(a[0]) != "" {
 				hint = append(hint, k(a[0])+a[1])
 			}
 		}
-		out = overlay(out, avatarList(m.target, m.pick, m.h), m.w)
+		x, y, rows := 0, 1, 1 // the grid under the card it is for (above if it doesn't fit)
+		for _, r := range rects {
+			if r.id == m.target.ID {
+				x = min(r.x, max(m.w-gridW, 0))
+				y, rows = gridPlace(1+r.y-off, r.h, m.h, gridRows)
+			}
+		}
+		out = overlayAt(out, avatarGrid(m.target, m.pick, rows), x, y, m.w)
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+strings.Join(hint, " · "))
 	case m.passThrough():
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · "+m.cfg.First("leave_preview")+" back to the cards")
