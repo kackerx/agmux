@@ -39,7 +39,7 @@ func fixture(t *testing.T) []store.Session {
 
 func TestColumns(t *testing.T) {
 	for _, c := range []struct{ w, n, colW int }{
-		{30, 1, 30}, {81, 1, 81}, {82, 2, 40}, {113, 2, 55}, {200, 4, 48}, {232, 4, 56}, {300, 4, 73},
+		{30, 1, 30}, {80, 1, 80}, {81, 2, 40}, {113, 2, 56}, {200, 4, 49}, {232, 4, 57}, {300, 4, 74},
 	} {
 		if n, colW := columns(c.w); n != c.n || colW != c.colW {
 			t.Errorf("columns(%d) = %d×%d, want %d×%d", c.w, n, colW, c.n, c.colW)
@@ -241,14 +241,34 @@ func TestCardLines(t *testing.T) {
 	}
 	// the acceptance card: 48 columns hold the 24-character name and the 32-character branch whole
 	lines := strings.Split(ansi.Strip(card(s, 48, 5, false, 0, now, hit{})), "\n")
-	if !strings.Contains(lines[1], s.Name+" ") || !strings.HasSuffix(lines[1], " 3h │") || !strings.Contains(lines[2], "\ue725 "+s.Branch) ||
-		!strings.HasPrefix(lines[3], "│ ■") || !strings.HasSuffix(lines[3], "Opus 5.5·high │") {
+	if !strings.Contains(lines[1], s.Name+" ") || strings.HasPrefix(lines[1], "│ ") || !strings.HasSuffix(lines[1], " 3h│") || !strings.Contains(lines[2], "\ue725 "+s.Branch) ||
+		strings.HasPrefix(lines[3], "│ ") || !strings.HasSuffix(lines[3], "Opus 5.5·high│") { // the avatar and the right-edge text touch the border
 		t.Errorf("48-column card:\n%s", strings.Join(lines, "\n"))
 	}
 	for _, l := range lines {
 		if ansi.StringWidth(l) != 48 {
 			t.Errorf("card line %q is %d wide", l, ansi.StringWidth(l))
 		}
+	}
+}
+
+// The geometry: neighbouring columns are one cell apart, cards in a column touch, and nothing sits
+// between a card's border and its avatar or the time at its right edge.
+func TestCardGeometry(t *testing.T) {
+	mk := func(id, cwd string) store.Session {
+		return store.Session{ID: id, Name: id, CWD: cwd, GroupKey: cwd, Status: "idle", ContextPct: -1}
+	}
+	gs := groups([]store.Session{mk("a1", "/a"), mk("a2", "/a"), mk("b1", "/b")})
+	_, rects := layout(gs, 120, "", 0, now, nil, nil)
+	at := map[string]rect{}
+	for _, r := range rects {
+		at[r.id] = r
+	}
+	if d := at["a2"].y - at["a1"].y; d != cardH {
+		t.Errorf("two cards of one column are %d lines apart, want %d (no blank line between)", d, cardH)
+	}
+	if d := at["b1"].x - at["a1"].x; d != at["a1"].w+1 {
+		t.Errorf("columns start %d apart, want %d + 1", d, at["a1"].w)
 	}
 }
 

@@ -21,7 +21,7 @@ import (
 
 const (
 	minColW  = 40
-	colGap   = 2
+	colGap   = 1
 	cardH    = 5
 	barCells = avatar.Width // the bar sits right under the avatar, same width
 )
@@ -246,11 +246,11 @@ func midTrunc(s string, w int) string {
 // card renders a session as w×h cells. h is the full height including the border;
 // S1 only draws 5 (3 body lines), smaller heights keep the first h-2 lines.
 //
-//	╭──────────────────────────────────────────────╮
-//	│ ▄▀▀▀▀▄  qa-acceptance-pap-be-dev          3h │   avatar · name · time
-//	│ ▀▄▄▄▄▀   feature/qa-acceptance-pap-be-dev   │   branch
-//	│ ■■■□□□  ⏸ idle · Bash  ⚇ 2   Opus 5.5·high │   context bar · status + detail · counts · model·effort
-//	╰──────────────────────────────────────────────╯
+//	╭────────────────────────────────────────────╮
+//	│▄▀▀▀▀▄  qa-acceptance-pap-be-dev          3h│   avatar · name · time
+//	│▀▄▄▄▄▀   feature/qa-acceptance-pap-be-dev   │   branch
+//	│■■■□□□  ⏸ idle · Bash  ⚇ 2   Opus 5.5·high│   context bar · status + detail · counts · model·effort
+//	╰────────────────────────────────────────────╯
 func card(s store.Session, w, h int, focused bool, frame int, now time.Time, hl hit) string {
 	alert := s.Attention != "" || s.Status == "waiting"
 	border, mood := cDim, avatar.Dim
@@ -273,7 +273,7 @@ func card(s store.Session, w, h int, focused bool, frame int, now time.Time, hl 
 	}
 	face := avatarFace(s, mood, frame)
 
-	x := w - 4                 // inside the border and its one-cell margins
+	x := w - 2                 // inside the border, which the avatar and the right-edge text touch
 	tw := x - avatar.Width - 2 // right of the avatar
 	body := []string{
 		face[0] + "  " + line1(s, tw, now, hl.name),
@@ -282,7 +282,7 @@ func card(s store.Session, w, h int, focused bool, frame int, now time.Time, hl 
 	}
 	b := fg(border, bs.TopLeft+strings.Repeat(bs.Top, w-2)+bs.TopRight)
 	for i := range min(h-2, len(body)) {
-		b += "\n" + fg(border, bs.Left) + " " + pad(ansi.Truncate(body[i], x, "…"), x) + " " + fg(border, bs.Right)
+		b += "\n" + fg(border, bs.Left) + pad(ansi.Truncate(body[i], x, "…"), x) + fg(border, bs.Right)
 	}
 	return b + "\n" + fg(border, bs.BottomLeft+strings.Repeat(bs.Bottom, w-2)+bs.BottomRight)
 }
@@ -713,8 +713,8 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 				found = false
 				scan(midTrunc(tildePath(g.key), r.w-2-len(count)), r.x+2, r.y-1-off, s.ID, true)
 			}
-			tw := r.w - 4 - avatar.Width - 2
-			x0, y := r.x+2+avatar.Width+2, r.y-off
+			tw := r.w - 2 - avatar.Width - 2
+			x0, y := r.x+1+avatar.Width+2, r.y-off
 			found = false
 			rw := 0
 			if t := relTime(s.LastActivity, now); t != "" {

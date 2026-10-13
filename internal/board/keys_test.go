@@ -3284,7 +3284,7 @@ func TestFlashNameCutByTime(t *testing.T) {
 	now := m0.now()
 	act := now.Add(-3 * time.Hour)
 	_, colW := columns(m0.cardsW())
-	tw := colW - 4 - avatar.Width - 2
+	tw := colW - 2 - avatar.Width - 2
 	W := tw - (ansi.StringWidth(relTime(act, now)) + 1)
 	name := strings.Repeat("a", W-1) + "zzzzzzzz" // z starts right where the cut puts its ellipsis
 	m := psized(staticSrc{{ID: "x", Name: name, GroupKey: "/g", CWD: "/g", ContextPct: -1, LastActivity: act}}, 60, 30)
