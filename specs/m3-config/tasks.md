@@ -180,14 +180,15 @@
 - dev 实测（kitty + tmux 3.8，用户的 tmux.conf 与 fl-toggle.sh 原样）：1. chooseClient 选对（外层 kitty client），错在 imageMode 用 `display-message -p -c <client>` 查 termname——**tmux 3.8 里 display-message 不带 -t 时 -c 不生效**，按最近活动 client 展开 → 拿到嵌套的 tmux-256color；2. 单层 passthrough 经嵌套 client 到不了 kitty（被 popup pty 再解析一次）；3. 包两层能到，但常驻 session 先起、popup 后 attach 时上传无处可写全丢。
 - 定稿：A termname 并进 list-clients 字段；B 选中 client 是 tmux-/screen- 时改看最近活动的非 tmux client；**C tmux 里上传直写选中 client 的 tty（#{client_tty}），不再要求 allow-passthrough，打不开 tty 回落 passthrough 单层并底栏提示，写完 refresh-client，单次 write ≤ 一块**；D auto 判 off 底栏给原因；E 接受非 -h 的 AGMUX_CLIENT（-h 优先）。design.md 上传一节由 dev 改写。
 - dev @8f4217d 送审 / 送测：真机（用户脚本布局、先起后 attach）图集头像全显示；旧代码单层 / 两层包装都是空占位。用户之前偶尔能看到图 = 旧探测恰好选到 kitty client + 同 id 的图早留在 kitty 窗口里。
-- 审查退回 2 条补测试（tmux 外选 ToTerminal、refresh-client 失败不致命）+ 采纳 2 加固（openTTY 只认 /dev/ 前缀；O_NONBLOCK，EAGAIN 回落 passthrough），补丁中。reviewer 真 tmux 3.8 核过 list-clients 按 tab 拆 5 字段安全、show-environment 各形态处理正确。
+- 审查退回 2 条补测试（tmux 外选 ToTerminal、refresh-client 失败不致命）+ 采纳 2 加固（openTTY 只认 /dev/ 前缀；O_NONBLOCK，EAGAIN 回落 passthrough），补丁 @4d9651f 送复审：EAGAIN 有进展就等、2s 无进展才回落（kitty 读得比写慢，立刻回落会让正常情况全退 passthrough）。reviewer 真 tmux 3.8 核过 list-clients 按 tab 拆 5 字段安全、show-environment 各形态处理正确。
 - 用户现象（2026-10-13 下午）：~/go/bin/agmux 已是 c2b26dd，但在常驻浮窗里开看板，卡片和 `a` 格子全是像素头像（图集名字在、画的是 hash 出的 sprite）= 图片模式被判 off；底栏没有任何提示（auto 模式判 off 时 note 为空）。
 - 用户的浮窗脚本 `~/.config/tmux/scripts/fl-toggle.sh`：程序跑在常驻 session `fl-agmux`（`new-session -d … agmux board`），浮窗是 `display-popup -E "tmux attach-session -t fl-agmux"`——**同一个 server 上多了一个 termname 为 tmux-256color 的嵌套 client**（实测 list-clients：/dev/ttys001 xterm-kitty sess=agmux；/dev/ttys042 tmux-256color sess=fl-agmux，后者活动时间更新）。脚本用 `set-environment -t fl-agmux AGMUX_CLIENT <client>`（**没有 -h**），而 chooseClient 只读 `show-environment -h`，所以 AGMUX_CLIENT 实际没生效，走「最近活动且不在自己 session 的 client」。从别的 fl-* 浮窗切过来时脚本还会 unset AGMUX_CLIENT。
 - 先查后改（dev 在自己的 kitty + tmux 里用同一个脚本复现，把结论写进 design.md）：1. 这种布局下 chooseClient 选到哪个 client、为什么（TMUX_PANE → own 是否解析成功；popup client 和 agmux 进程启动的先后）；2. 单层 `\ePtmux;` 包装的上传经「嵌套 client → popup pty → 外层 tmux」能不能到 kitty（之前截图 9 在浮窗里见过图，说明某种情况下能）；3. 需不需要按嵌套层数多包一层。
 - 改：a. 嵌套识别——选中的 client termname 以 tmux- / screen- 开头时，视为嵌套一层，终端类型改看同 server 上最近活动、termname 不是 tmux-/screen- 的 client，上传按实测结果决定包装层数；b. **auto 判 off 时底栏给一行原因**（哪个 client、它的 termname / passthrough），用户能自诊；c. chooseClient 同时接受 `show-environment -t <own>`（非 -h）的 AGMUX_CLIENT（优先 -h），README 两种写法都写明。
 - 验收：单测 嵌套 client 的探测表、note 文案、非 -h 的 AGMUX_CLIENT；黑盒 fake tmux 给两 client（kitty + tmux-256color，后者更新且在自己 session）→ 图片模式 on、上传包装层数符合定稿；只有 tmux-256color client → off 且底栏有原因。真机：dev 用用户脚本在浮窗里看到图。
 
-### T39 卡片更紧凑一点（待开工，排 T38 → T36 → T37 之后）
+### T39 卡片更紧凑一点（dev @3b5c86b 送审 / 送测）
+- dev 实查：同列相邻卡之间本来就没有空行（截图里的缝是字体行距），该项无可减；只改 colGap 2→1 和卡内左右边距 1→0。2 列阈值变为 ≥81 列。
 - 用户 2026-10-13（浮窗 OK 后）：卡片的 margin 和 padding 都再少一点点。定稿三处各减 1：列间距 colGap 2 → 1；同列相邻卡片之间的空行 1 → 0（圆角边框相接）；边框内左右各 1 格的留白 → 0（头像紧贴左边框，头像和文字之间的 2 格不动，右侧时间 / 模型紧贴右边框）。最小列宽 40 不动（文字区因此多 2 格）；组标题行、顶栏、底栏不动。
 - 牵连：rects / 鼠标命中 / flash 标签坐标 / `a` 格子定位 / 滚动的 scrollOff 都按新几何；相关单测和 e2e 的坐标断言要跟着改。README 若有画卡片示意图同步。
 - 验收：单测 两张同列卡 rect.y 相差 cardH；列 x 相差 colW+1；卡片第 1 行 `│` 后紧跟头像格、末尾时间后紧跟 `│`；黑盒 抓屏对比：120 列 2 列布局下第二列起始列号、22 张卡在 30 行里比之前多显示一张。
