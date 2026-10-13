@@ -119,3 +119,17 @@
 - go vet / go test -race 全绿；e2e 530 条全过（947s，tmux 3.7c 与 3.8 各跑一遍一致）。test_t12 一条固定 sleep 的时序问题是测试自己的，已改成轮询。
 - 黑盒测不到：tmux 外上传写失败时的 ?1049l 兜底（写的是同一个坏 fd，只靠单测）。
 - 没覆盖：真 kitty / ghostty 渲染观感与多 client 同看、id 碰撞、flash / 过滤高亮叠在占位符上、20 个以上集的上传耗时、q=2 在真终端上是否真静默。
+
+## 第五批（用户 2026-10-13 下午验收意见：状态动作、头像等宽、选择框改格子 + 20 个默认头像）
+
+### T30 头像状态对齐 pi-emote（待开工）
+- 设计 design.md「头像图片：状态、宽度、选择框」第 1–3 条。store 里按 pendingTool 算出头像状态（和 getEffectiveStatus 一样放 store 做一次，view 只读）；avatar 包的帧选择按新状态名 + 回落链 + 别名；idle 眨眼规则；内置 aza_choi 改用原目录。
+- 验收：单测 状态映射表（每种 pendingTool / 无 tool / attention / waiting / done / idle）；回落链；别名目录；idle 第 2 帧只在第 8k 个 tick 出现一个 tick；黑盒 pendingTool=Read 的卡出 read 帧、Write → write、Bash → tool、无 tool → think；旧目录名 working 仍被认。
+
+### T31 头像填满 6 格（待开工）
+- 设计第 4 条：上传带源矩形取居中 3:2 区域；DecodeConfig 读尺寸；坏 PNG 跳过并报。
+- 验收：单测 128×128 → x=0,y=21,w=128,h=85（取整规则写进注释并测）；宽图（200×100）→ 取中间 150×100；坏 PNG 跳过且 Problems 有一行；黑盒 上传序列里每帧带 x/y/w/h。
+
+### T32 选择框改 5×4 格子 + 20 个内置头像（待开工，T30/T31 之后）
+- 设计第 5–6 条。CC0 来源逐个核对许可页后再收，CREDITS.md 记 URL / 作者 / 许可；README 署名。
+- 验收：单测 格子布局（焦点卡下方 / 放不下换上方、5×4、格内 id 行、光标起点、滚动行、enter 绑定、消息行 id）；内置集数 = 15、sprite = 5；黑盒 120×40 按 a 抓屏：框在焦点卡下方、20 格、最后一排 5 个像素头像、l/j 移动、enter 后卡片换图、矮终端（高 20）时上方或滚动仍能选到最后一个。

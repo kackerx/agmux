@@ -90,3 +90,11 @@
 - 图片模式下没有像素头像底边的 agentType 色带（claude / codex 不再靠头像区分；要的话另立任务）。hash 池加入了图片集，所以无绑定会话的默认头像在像素模式下也会和以前不同（模数 6 → 7）。
 - 用户验收要含 **tmux 外直接在 kitty 里跑 `agmux board`**（spike 和 dev 实测都只在 tmux 浮窗里）。
 - 不做：运行中热加载用户目录；PNG 解码校验（坏图 = 空占位，不报错）；上传写 stdout 失败回落像素（直接退出）；allow-passthrough 的 pane 级覆盖；ghostty / WezTerm / iTerm2 实测（WezTerm、iTerm2 不支持占位符，走像素）；多 client 同时看同一个 session 的图片 id 冲突（同图同 id，无害）；kill -9 残留的图（下次启动同 id 覆盖）。
+
+## 头像图片：状态、宽度、选择框（T30–T32，用户 2026-10-13 验收意见）
+- **状态名改成和 pi-emote 一样**，用户能把 pi-emote 的角色目录原样丢进来。状态和触发：`idle` = 原始 idle；`think` = working 且没有 pendingTool（含 agents）；`read` = pendingTool 是 Read / Grep / Glob / WebFetch / WebSearch；`write` = Write / Edit / MultiEdit / NotebookEdit；`tool` = 其它 pendingTool；`hi` = 需要处理（attention 非空或 waiting）；`success` = done。回落链：read / write / tool → think → idle；hi → idle；success → idle。旧名 `working` / `attention` / `done` 当别名（= think / hi / success）仍认。talk / failure / compact 没有触发源，目录存在也不用。
+- **idle 眨眼**：idle 的第一帧是常态脸，其余帧每 8 个 tick（4 s）轮一帧、只显示一个 tick（pi-emote 的 idle_blink 就这样用；否则 500 ms 一眨太频繁）。其它状态照旧每 tick 循环。
+- 内置 aza_choi 直接用它原目录结构（idle 含 blink、think、read、write、tool、hi；没有 success → 回落 idle），不再手工映射。
+- **宽度和上下文条一样 6 格**：box 仍 6 列 × 2 行，上传时给 kitty 源矩形（`x= y= w= h=`）取图片**居中的 3:2 区域**（按格子 1:2 的常见比例，6×2 格 ≈ 3:2），这样图填满 6 格；上下会裁掉约 1/6（头顶 / 下巴）。尺寸用 image.DecodeConfig 读头，不解码整张。像素头像本来就 6 格。坏 PNG 读不出尺寸 → 跳过该帧并报底栏。
+- **选择框**：`a` 后在焦点卡片**正下方**下拉（下方放不下就放上方）一个 **5 列 × 4 行** 的格子，每格 = 6×2 头像 + 下面一行 id（sprite 用 name），格宽 8、格高 3，整框约 42 × 14 含边框；顺序：内置图集 → 用户图集（名字序）→ 像素头像放最后一排；超过 20 个按行滚动。`up/down/left/right`（hjkl / 方向键）移动，`jump`（enter）绑定并关闭，`quit`（esc）取消；当前穿的那格用 focus 色边框 + 光标起点在它上面；消息行显示光标所在的 id。像素模式下图集格用按集 id hash 的 sprite 代画。原来的纵向列表删除。
+- **内置头像 20 个**：15 个图集（aza_choi + 14 个 CC0 像素肖像，来源 OpenGameArt 的 CC0 Portraits 合集 / RPG portraits 等，只收 CC0；静态图 = 只有 idle 一帧）+ 5 个像素 sprite（去掉和 bot-01 字形重复的 bot-06 Cyclops；绑过 bot-06 的落到 hash）。每个内置图集记来源 URL 和作者到 `internal/avatar/sets/CREDITS.md`，README 署名列出。风格会杂；用户要统一风格可以自己生成后放用户目录（pi-agent-portrait 的 draw-portrait 能从一句描述生成）。
