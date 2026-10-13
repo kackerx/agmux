@@ -30,6 +30,7 @@ type staticSrc []store.Session
 func (s staticSrc) Sessions() []store.Session           { return s }
 func (s staticSrc) Err() error                          { return nil }
 func (staticSrc) SetAvatar(store.Session, string) error { return nil }
+func (staticSrc) MarkSeen(store.Session) error          { return nil }
 
 type fakeRunner struct {
 	mu       sync.Mutex // forwarded keys call Tmux from the serial worker
@@ -271,6 +272,7 @@ type mutSrc struct{ ss []store.Session }
 func (s *mutSrc) Sessions() []store.Session           { return s.ss }
 func (s *mutSrc) Err() error                          { return nil }
 func (*mutSrc) SetAvatar(store.Session, string) error { return nil }
+func (*mutSrc) MarkSeen(store.Session) error          { return nil }
 
 // The x / s prompts act on the session they named, never on whatever focus falls back to.
 func TestPromptTargetIsPinned(t *testing.T) {

@@ -590,3 +590,132 @@ func TestTmuxSession(t *testing.T) {
 		t.Errorf("a %+v b %+v", a, b)
 	}
 }
+
+func seenPoller(t *testing.T, raw *[]ccmux.Session) (*Poller, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "seen.json")
+	seen, _ := avatar.LoadBindings(path)
+	p := &Poller{Show: func() ([]ccmux.Session, error) { return *raw, nil }, StateDir: t.TempDir(), Seen: seen}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	return p, path
+}
+
+func seenFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return strings.Join(strings.Fields(string(b)), "")
+}
+
+// A done the user has seen is idle until its status changes; a done ccmux has cleared, or whose session is gone, is forgotten.
+func TestSeenDone(t *testing.T) {
+	t1 := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	raw := []ccmux.Session{
+		{ID: "a", Status: "idle", AttentionState: "unread", StatusChangedAt: t1},
+		{ID: "b", Status: "idle", AttentionState: "unread", StatusChangedAt: t1},
+		{ID: "c", Status: "idle", AttentionState: "unread", StatusChangedAt: t1},
+	}
+	p, path := seenPoller(t, &raw)
+	a := byID(t, p.Sessions(), "a")
+	if !a.Done || a.AvatarState != "success" || !a.StatusChangedAt.Equal(t1) {
+		t.Fatalf("before: %+v", a)
+	}
+	for _, id := range []string{"a", "b"} {
+		if err := p.MarkSeen(byID(t, p.Sessions(), id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if a = byID(t, p.Sessions(), "a"); a.Done || a.AvatarState != "idle" || !byID(t, p.Sessions(), "c").Done {
+		t.Errorf("right after MarkSeen: %+v", a)
+	}
+	p.Refresh()
+	if byID(t, p.Sessions(), "a").Done || !byID(t, p.Sessions(), "c").Done {
+		t.Error("a poll brings the done back")
+	}
+	if got := seenFile(t, path); got != `{"a":"2026-10-13T12:00:00Z","b":"2026-10-13T12:00:00Z"}` {
+		t.Errorf("seen.json %s", got)
+	}
+	// another board, same file: seen there is seen here
+	other, _ := avatar.LoadBindings(path)
+	p2 := &Poller{Show: p.Show, StateDir: t.TempDir(), Seen: other}
+	p2.Refresh()
+	if byID(t, p2.Sessions(), "a").Done {
+		t.Error("a restart forgets what was seen")
+	}
+	// it works again and is done again: a new done
+	raw[0].Status, raw[0].AttentionState = "working", ""
+	p.Refresh()
+	raw[0].Status, raw[0].AttentionState, raw[0].StatusChangedAt = "idle", "unread", t1.Add(time.Minute)
+	p.Refresh()
+	if !byID(t, p.Sessions(), "a").Done {
+		t.Error("a new done (statusChangedAt moved) is not seen")
+	}
+	// ccmux cleared b's attention (the pane was focused) and c's session is gone
+	raw[1].AttentionState = ""
+	raw = raw[:2]
+	p.Refresh()
+	if got := seenFile(t, path); got != "{}" {
+		t.Errorf("seen.json %s, want every entry dropped", got)
+	}
+}
+
+// A ccmux that fails, or a session working with a subagent, drops nothing.
+func TestSeenKeptWhenNotKnown(t *testing.T) {
+	t1 := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	raw := []ccmux.Session{{ID: "a", Status: "idle", AttentionState: "unread", StatusChangedAt: t1}}
+	p, path := seenPoller(t, &raw)
+	p.MarkSeen(p.Sessions()[0])
+	p.Show = func() ([]ccmux.Session, error) { return nil, os.ErrDeadlineExceeded }
+	p.Refresh()
+	if got := seenFile(t, path); !strings.Contains(got, `"a"`) {
+		t.Errorf("a failed poll forgot: %s", got)
+	}
+	raw[0].Subagents = []ccmux.Subagent{{AgentID: "x", Status: "working"}} // idle with a subagent running: shown working, attentionState kept
+	p.Show = func() ([]ccmux.Session, error) { return raw, nil }
+	p.Refresh()
+	if got := seenFile(t, path); !strings.Contains(got, `"a"`) {
+		t.Errorf("working with a subagent forgot: %s", got)
+	}
+}
+
+// A seen.json that is not JSON means nothing is seen; the board says so, and the file is left for the user.
+func TestSeenCorruptFile(t *testing.T) {
+	raw := []ccmux.Session{{ID: "a", Status: "idle", AttentionState: "unread", StatusChangedAt: time.Now()}}
+	p, path := seenPoller(t, &raw)
+	os.WriteFile(path, []byte("{oops"), 0o644)
+	os.Chtimes(path, time.Now(), time.Now().Add(time.Hour))
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if e := p.Err(); e == nil || !strings.Contains(e.Error(), "seen.json") {
+		t.Errorf("Err() = %v, want the seen.json problem", e)
+	}
+	if !p.Sessions()[0].Done {
+		t.Error("nothing is seen")
+	}
+	if err := p.MarkSeen(p.Sessions()[0]); err == nil || !strings.Contains(err.Error(), "seen.json") {
+		t.Errorf("MarkSeen: %v", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "{oops" {
+		t.Errorf("the corrupt file was overwritten: %q", b)
+	}
+	os.WriteFile(path, []byte("{}"), 0o644)
+	os.Chtimes(path, time.Now(), time.Now().Add(2*time.Hour))
+	p.Refresh()
+	if p.Err() != nil {
+		t.Errorf("fixed by hand: %v", p.Err())
+	}
+}
+
+// A session ccmux gives no statusChangedAt for can't be told apart from its next done: never marked.
+func TestSeenNeedsStatusChangedAt(t *testing.T) {
+	raw := []ccmux.Session{{ID: "a", Status: "idle", AttentionState: "unread"}}
+	p, path := seenPoller(t, &raw)
+	if err := p.MarkSeen(p.Sessions()[0]); err != nil || !p.Sessions()[0].Done || seenFile(t, path) != "" {
+		t.Errorf("err %v done %v file %q", err, p.Sessions()[0].Done, seenFile(t, path))
+	}
+}

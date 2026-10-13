@@ -43,3 +43,10 @@ func TestRun(t *testing.T) {
 		t.Errorf("missing: %v", err)
 	}
 }
+
+func TestParseStatusChangedAt(t *testing.T) {
+	ss, err := Parse([]byte(`[{"id":"a","statusChangedAt":"2026-10-13T12:01:23.671Z"},{"id":"b","statusChangedAt":null}]`))
+	if err != nil || !ss[0].StatusChangedAt.Equal(time.Date(2026, 10, 13, 12, 1, 23, 671e6, time.UTC)) || !ss[1].StatusChangedAt.IsZero() {
+		t.Errorf("%+v %v", ss, err)
+	}
+}

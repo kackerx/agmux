@@ -33,6 +33,7 @@ type Source interface {
 	store.Store
 	Err() error
 	SetAvatar(s store.Session, id string) error
+	MarkSeen(s store.Session) error // the user saw s's done: it is idle from now on
 }
 
 // Runner runs ccmux and tmux; tests swap in one that records them.
@@ -110,6 +111,8 @@ type Model struct {
 	keys      *serial    // forwarded keys reach the pane in the order they were typed
 	scrolled  bool       // the cards were scrolled by the wheel or page keys, not by the focus: top is the offset
 	top       int        // lines scrolled off the top of the cards while scrolled; the focus leaving the view ends it
+	dwellID   string     // the done card the focus has rested on, and for how many frames: seenFrames of them make it seen
+	dwellN    int
 
 	cfg    *config.Config
 	keymap map[string]string // key (as KeyMsg.String() spells it) → action
@@ -197,7 +200,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flashFollow()
 		}
 		cmd := m.capture() // the preview refreshes on the 500ms frame; called first: it marks m.capturing
-		return m, tea.Batch(nextFrame(), cmd)
+		seen := m.dwell()  // before the return reads m: dwell counts in it
+		return m, tea.Batch(nextFrame(), cmd, seen)
 	case previewMsg:
 		m.pv, m.capturing = msg, false
 		if msg.sendErr { // the key didn't reach the pane: say so where errors go
@@ -239,7 +243,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok || nm.focus == before {
 			return tm, cmd
 		}
-		nm.scroll = 0 // a new card starts at the bottom
+		nm.scroll, nm.dwellN = 0, 0 // a new card starts at the bottom, and its dwell time at 0
 		// only what the event moved counts, not the fallback shown was made for
 		if nm.focus != shown.focus {
 			nm.followHidden()
@@ -327,6 +331,41 @@ func (m Model) shown() ([]store.Session, map[string]hit) {
 		}
 	}
 	return out, hits
+}
+
+// seenFrames is how many frames (500 ms) the focus rests on a done card before it counts as seen.
+const seenFrames = 2
+
+// dwell counts the frames the focus has rested on a done card (the key / click that moved it zeroes
+// the count, so passing through does not count), and marks it seen at seenFrames.
+func (m *Model) dwell() tea.Cmd {
+	c := *m // what the screen shows: with no focus set yet that is the first card; m's focus stays unset
+	_, _, s, ok := c.current()
+	if !ok || !s.Done {
+		m.dwellID, m.dwellN = "", 0
+		return nil
+	}
+	if s.ID != m.dwellID {
+		m.dwellID, m.dwellN = s.ID, 0
+	}
+	if m.dwellN++; m.dwellN != seenFrames {
+		return nil
+	}
+	return m.markSeen(s)
+}
+
+// markSeen records that the user saw s's done, off the UI goroutine: it writes a file.
+func (m Model) markSeen(s store.Session) tea.Cmd {
+	if !s.Done {
+		return nil
+	}
+	src := m.src
+	return func() tea.Msg {
+		if err := src.MarkSeen(s); err != nil {
+			return doneMsg{err: err}
+		}
+		return nil
+	}
 }
 
 // current resolves focus against the shown sessions, falling back to the first item.
@@ -712,6 +751,9 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		}
 		m.preview, m.msg = !m.preview, ""
 		cmd := m.capture()
+		if m.preview && ok { // a preview opened on a done card is a look at it
+			cmd = tea.Batch(cmd, m.markSeen(s))
+		}
 		return m, cmd
 	case "fold": // fold / unfold the focused group; the focus stays on it
 		if m.query != "" { // every group is open under a filter: folding would show nothing
@@ -747,7 +789,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		m.preview = true
 		m.lock(s)
 		cmd := m.capture()
-		return m, cmd
+		return m, tea.Batch(cmd, m.markSeen(s))
 	case "kill":
 		m.mode, m.target, m.msg = confirmKill, s, ""
 		return m, nil
@@ -862,13 +904,19 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	if s.TmuxPane == "" {
 		return m, nil // msgLine already shows noPane
 	}
-	r, getenv, stay := m.run, m.getenv, m.stay
+	r, getenv, stay, src := m.run, m.getenv, m.stay, m.src
 	return m, func() tea.Msg {
+		var done doneMsg
 		if stay {
 			hidden, err := switchAndHide(r, getenv, s.TmuxPane)
-			return doneMsg{err: err, quit: !hidden && err == nil}
+			done = doneMsg{err: err, quit: !hidden && err == nil}
+		} else {
+			done = doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true}
 		}
-		return doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true}
+		if s.Done { // after the switch: it may wait for a poll in flight
+			src.MarkSeen(s) // an error here has nowhere to show: the board is on its way out (or hidden)
+		}
+		return done
 	}
 }
 
@@ -1092,6 +1140,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonLeft: // only the box counts, not the title row
 			if _, _, s, ok := m.current(); ok && s.TmuxPane != "" && e.Y >= 2 && e.Y <= 3+m.previewLinesN() {
 				m.lock(s)
+				return m, m.markSeen(s)
 			}
 			return m, nil
 		default:

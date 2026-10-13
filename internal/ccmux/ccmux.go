@@ -32,6 +32,7 @@ type Session struct {
 	NativeSessionID string     `json:"nativeSessionId"`
 	LogPath         string     `json:"logPath"`
 	LastActivityAt  time.Time  `json:"lastActivityAt"`
+	StatusChangedAt time.Time  `json:"statusChangedAt"` // when Status last changed: a new done is a new time
 	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 

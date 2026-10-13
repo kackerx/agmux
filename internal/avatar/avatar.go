@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,7 +198,7 @@ func (b *FileBindings) read() (map[string]string, time.Time, error) {
 		return nil, time.Time{}, err
 	}
 	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, time.Time{}, errors.New(b.Path + ": not valid JSON, fix or delete it to reset avatar bindings (" + err.Error() + ")")
+		return nil, time.Time{}, errors.New(b.Path + ": not valid JSON, fix or delete it to start over (" + err.Error() + ")")
 	}
 	if m == nil { // the file says null
 		m = map[string]string{}
@@ -238,6 +239,31 @@ func (b *FileBindings) Set(key, id string) error {
 		return err
 	}
 	m[key] = id
+	return b.write(m)
+}
+
+// Prune drops every key keep says no to from what the file holds now. The file is not touched when
+// the copy read last has nothing to drop (a poll asks every 2 s), or when it can't be read.
+func (b *FileBindings) Prune(keep func(key string) bool) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	stale := false
+	for k := range b.m {
+		stale = stale || !keep(k)
+	}
+	if !stale {
+		return nil
+	}
+	m, _, err := b.read()
+	if err != nil {
+		return err
+	}
+	maps.DeleteFunc(m, func(k, _ string) bool { return !keep(k) })
+	return b.write(m)
+}
+
+// write replaces the file with m, atomically (temp file + rename); b.mu is held.
+func (b *FileBindings) write(m map[string]string) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

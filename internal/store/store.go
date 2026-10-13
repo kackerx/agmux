@@ -25,7 +25,7 @@ type Subagent = ccmux.Subagent
 type Session struct {
 	ID, Name, AgentType, CWD, GroupKey, Branch string
 	Status, Attention, PendingTool, TmuxPane   string
-	Done                                       bool // ccmux's "done": idle, no subagent running, attentionState set
+	Done                                       bool // ccmux's "done": idle, no subagent running, attentionState set, and not seen on the board
 	AgentsWorking                              bool // Status is "working" only because subagents are
 	Model, Effort                              string
 	Project, TmuxSession                       string // ccmux's project (worktrees under their main repo); the tmux session the pane is in, "" with no pane
@@ -37,6 +37,7 @@ type Session struct {
 	AvatarID                                   string
 	AvatarState                                string // what an image avatar does: one of avatar.States, from the fields above
 	LastActivity                               time.Time
+	StatusChangedAt                            time.Time // when Status last changed; with the ID it names one done, which is what "seen" is kept for
 }
 
 // AvatarKey is what avatar bindings are keyed by: the name, which survives restarts and
@@ -66,11 +67,13 @@ type Poller struct {
 	AvatarBind    map[string]string // config.toml's [avatars.bind]
 	AvatarDefault string            // config.toml's [avatars] default; "" = hash
 
+	Seen *avatar.FileBindings // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
+
 	refreshMu sync.Mutex        // serializes Refresh; guards models
 	models    map[string]string // session ID → last model found in its jsonl
 	heads     map[string]string // transcript path → agent definition from its head (the head never changes), once known
 
-	avatarErr error // avatars.json could not be read, as of the last poll or bind
+	avatarErr, seenErr error // avatars.json / seen.json could not be read, as of the last poll or bind
 
 	mu       sync.Mutex
 	sessions []Session
@@ -84,7 +87,8 @@ func NewPoller() (*Poller, error) {
 	}
 	// a corrupt avatars.json means no bindings (hash defaults); the error shows on the board, it never exits
 	b, err := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
-	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b, avatarErr: err}, nil
+	seen, serr := avatar.LoadBindings(filepath.Join(dir, "seen.json")) // likewise: a corrupt one means nothing is seen
+	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b, avatarErr: err, Seen: seen, seenErr: serr}, nil
 }
 
 func (p *Poller) Sessions() []Session {
@@ -94,14 +98,46 @@ func (p *Poller) Sessions() []Session {
 }
 
 // Err is the last poll's error (the previous sessions are kept when it fails),
-// else the avatars.json error.
+// else the avatars.json error, else the seen.json one.
 func (p *Poller) Err() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
 		return p.err
 	}
-	return p.avatarErr
+	if p.avatarErr != nil {
+		return p.avatarErr
+	}
+	return p.seenErr
+}
+
+// seenKey names one done: the status changed at that time. A session that works and is done again has a new one.
+func seenKey(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+
+// MarkSeen records that the user saw s's done on the board: from now on it is idle, until its status changes.
+func (p *Poller) MarkSeen(s Session) error {
+	if p.Seen == nil || s.StatusChangedAt.IsZero() { // no time, no telling this done from the next: it stays until ccmux clears it
+		return nil
+	}
+	p.refreshMu.Lock() // a poll in flight was built without it; it must not land after this
+	defer p.refreshMu.Unlock()
+	err := p.Seen.Set(s.ID, seenKey(s.StatusChangedAt))
+	serr := p.Seen.Reload()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.seenErr = serr
+	if err != nil {
+		return err
+	}
+	ss := slices.Clone(p.sessions) // the board may still hold the old slice
+	for i := range ss {
+		if ss[i].ID == s.ID && ss[i].Done && ss[i].StatusChangedAt.Equal(s.StatusChangedAt) {
+			ss[i].Done = false
+			ss[i].AvatarState = avatarState(ss[i])
+		}
+	}
+	p.sessions = ss
+	return nil
 }
 
 // SetAvatar binds s's key to sprite id in avatars.json; the sessions show it right away.
@@ -131,13 +167,25 @@ func (p *Poller) SetAvatar(s Session, id string) error {
 func (p *Poller) Refresh() error {
 	p.refreshMu.Lock()
 	defer p.refreshMu.Unlock()
-	var aerr error
+	var aerr, serr error
 	if p.Avatars != nil { // another board, or a hand edit, may have changed avatars.json
 		aerr = p.Avatars.Reload()
+	}
+	if p.Seen != nil {
+		serr = p.Seen.Reload()
 	}
 	raw, err := p.Show()
 	var ss []Session
 	if err == nil {
+		if p.Seen != nil { // a done ccmux has cleared (or a session that is gone) is not "seen" any more
+			attended := map[string]bool{}
+			for _, r := range raw {
+				attended[r.ID] = r.AttentionState != ""
+			}
+			if perr := p.Seen.Prune(func(id string) bool { return attended[id] }); serr == nil {
+				serr = perr
+			}
+		}
 		ss = make([]Session, len(raw))
 		for i, r := range raw {
 			ss[i] = p.convert(r)
@@ -145,7 +193,7 @@ func (p *Poller) Refresh() error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.err, p.avatarErr = err, aerr
+	p.err, p.avatarErr, p.seenErr = err, aerr, serr
 	if err == nil {
 		p.sessions = ss
 	}
@@ -185,7 +233,8 @@ func (p *Poller) convert(r ccmux.Session) Session {
 			}
 		}
 	}
-	s.Done = s.Status == "idle" && r.AttentionState != ""
+	s.StatusChangedAt = r.StatusChangedAt
+	s.Done = s.Status == "idle" && r.AttentionState != "" && !p.seen(r)
 	s.AvatarState = avatarState(s)
 	s.GroupKey = groupKey(s)
 	s.AvatarID = avatar.For(p.Avatars, p.AvatarBind, p.AvatarDefault, s.AvatarKey())
@@ -211,6 +260,15 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		s.Model = hudModel
 	}
 	return s
+}
+
+// seen: the user already saw this very done on the board.
+func (p *Poller) seen(r ccmux.Session) bool {
+	if p.Seen == nil {
+		return false
+	}
+	k, ok := p.Seen.Get(r.ID)
+	return ok && k == seenKey(r.StatusChangedAt)
 }
 
 // tmuxSession is the session name in a tmuxTarget "<session> # <window>:<idx>.<pane>": everything

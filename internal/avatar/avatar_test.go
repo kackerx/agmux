@@ -240,3 +240,30 @@ func TestReload(t *testing.T) {
 		t.Error("the fixed file is read")
 	}
 }
+
+// Prune drops from what the file holds now (another board's keys survive), and leaves a file it can't read alone.
+func TestPrune(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seen.json")
+	b, _ := LoadBindings(path)
+	b.Set("a", "1")
+	b.Set("b", "2")
+	other, _ := LoadBindings(path)
+	other.Set("c", "3") // b's copy does not have it
+	if err := b.Prune(func(k string) bool { return k != "a" }); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if got := strings.Join(strings.Fields(string(data)), ""); got != `{"b":"2","c":"3"}` {
+		t.Errorf("file %s", got)
+	}
+	if err := b.Prune(func(string) bool { return true }); err != nil {
+		t.Error(err)
+	}
+	os.WriteFile(path, []byte("{oops"), 0o644)
+	if err := b.Prune(func(string) bool { return false }); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+		t.Errorf("corrupt file: %v", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "{oops" {
+		t.Errorf("corrupt file overwritten: %q", data)
+	}
+}
