@@ -3902,3 +3902,51 @@ func TestNoMatchKeysKeepFocus(t *testing.T) {
 		}
 	}
 }
+
+// The other side of TestFlashNameCutByTime: the last character still drawn before the cut's
+// ellipsis is a hit (a flashScan tw narrower than the card's would drop it).
+func TestFlashLastVisibleNameChar(t *testing.T) {
+	m0 := psized(staticSrc{{ID: "x", Name: "a", GroupKey: "/g", CWD: "/g", ContextPct: -1}}, 60, 30)
+	now := m0.now()
+	act := now.Add(-3 * time.Hour)
+	_, colW := columns(m0.cardsW())
+	tw := colW - 2 - avatar.Width - 2
+	W := tw - (ansi.StringWidth(relTime(act, now)) + 1)
+	name := strings.Repeat("a", W-2) + "y" + "zzzzzzzz"
+	m := psized(staticSrc{{ID: "x", Name: name, GroupKey: "/g", CWD: "/g", ContextPct: -1, LastActivity: act}}, 60, 30)
+	if !strings.Contains(ansi.Strip(m.View()), "y…") {
+		t.Fatalf("fixture: y is not the last character before the cut:\n%s", ansi.Strip(m.View()))
+	}
+	m = typed(t, m, "sy")
+	if _, ok := hitOf(m, "x"); !ok {
+		t.Errorf("y is drawn, yet no hit: %+v", m.flash.ms)
+	}
+}
+
+// stack: h / l / j / k over uneven columns, folded titles among them.
+func TestStackNav(t *testing.T) {
+	stackFlow = true
+	t.Cleanup(func() { stackFlow = false })
+	gs := groupsOf(1, 3, 1, 2, 1, 1, 2) // 4 columns at 200: c0 g0,g4  c1 g1,g5  c2 g2,g6  c3 g3
+	for _, folded := range []map[string]bool{nil, {"/g4": true}} {
+		_, rects := layout(gs, 200, "", 0, now, folded, nil)
+		g4 := map[bool]string{false: "g4-0", true: headerID("/g4")}[folded != nil]
+		for _, c := range []struct {
+			from string
+			d    [2]int
+			want string
+		}{
+			{"g0-0", [2]int{0, 1}, g4},
+			{"g5-0", [2]int{-1, 0}, g4}, // c0 ends higher: its last item
+			{"g5-0", [2]int{1, 0}, "g6-1"},
+			{"g1-2", [2]int{0, 1}, "g5-0"},
+			{"g5-0", [2]int{0, -1}, "g1-2"},
+			{"g3-1", [2]int{-1, 0}, "g6-0"},
+			{"g6-1", [2]int{1, 0}, "g3-1"},
+		} {
+			if got := nearest(rects, c.from, c.d); got != c.want {
+				t.Errorf("folded=%v %s %v: %s, want %s", folded != nil, c.from, c.d, got, c.want)
+			}
+		}
+	}
+}

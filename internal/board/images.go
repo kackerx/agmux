@@ -163,8 +163,8 @@ func (w ttyWriter) Write(p []byte) (done int, err error) {
 			done, last = done+n, time.Now()
 		}
 		switch {
-		case err == nil || err == syscall.EINTR:
-		case err == syscall.EAGAIN:
+		case n > 0 && err == nil, err == syscall.EINTR:
+		case err == syscall.EAGAIN, err == nil: // nothing taken (err == nil with n == 0 as well): wait, not spin
 			if time.Since(last) > ttyStall {
 				return done, fmt.Errorf("the terminal stopped reading (%v with no progress)", ttyStall)
 			}

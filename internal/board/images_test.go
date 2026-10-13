@@ -736,3 +736,17 @@ func TestTTYWriterWaitsAndStalls(t *testing.T) {
 		t.Errorf("stalled: wrote %d, %v after %v", n, err, time.Since(start))
 	}
 }
+
+// The client's tty is opened non-blocking: without it ttyWriter's EAGAIN / stall logic never runs
+// and a terminal that stopped reading hangs the board's start.
+func TestOpenClientTTYNonblocking(t *testing.T) {
+	w, err := openClientTTY("/dev/null")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	fl, _, e := syscall.Syscall(syscall.SYS_FCNTL, uintptr(w.(ttyWriter).fd), syscall.F_GETFL, 0)
+	if e != 0 || fl&syscall.O_NONBLOCK == 0 {
+		t.Errorf("flags %#x (errno %v): not O_NONBLOCK", fl, e)
+	}
+}
