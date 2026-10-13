@@ -79,3 +79,39 @@ func pngOf(label string) []byte {
 	png.Encode(&b, im)
 	return b.Bytes()
 }
+
+// `agmux avatars import`: flags before or after the sheet, usage errors exit 2, a set that exists
+// needs --force, and the new set shows up in `agmux avatars` with its seven states.
+func TestAvatarsImport(t *testing.T) {
+	t.Cleanup(func() { avatar.Sets = nil })
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	sheet := filepath.Join(t.TempDir(), "sheet.png")
+	im := image.NewNRGBA(image.Rect(0, 0, 240, 200))
+	draw.Draw(im, im.Bounds(), &image.Uniform{color.NRGBA{20, 20, 60, 255}}, image.Point{}, draw.Src)
+	f, _ := os.Create(sheet)
+	png.Encode(f, im)
+	f.Close()
+	run := func(args ...string) (int, string, string) {
+		var out, errs bytes.Buffer
+		return avatarsCmd(args, &out, &errs), out.String(), errs.String()
+	}
+	for _, args := range [][]string{{"nope"}, {"import"}, {"import", sheet}, {"import", "--name", "kit"}, {"import", sheet, "extra", "--name", "kit"}, {"import", "--bad"}} {
+		if code, _, errs := run(args...); code != 2 || !strings.Contains(errs, "usage") && !strings.Contains(errs, "flag provided") {
+			t.Errorf("%v: exit %d, %q", args, code, errs)
+		}
+	}
+	if code, out, errs := run("import", sheet, "--name", "kit"); code != 0 || !strings.Contains(out, "imported") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, _, errs := run("import", "--name", "kit", sheet); code != 1 || !strings.Contains(errs, "--force") {
+		t.Errorf("existing set: exit %d, %q", code, errs)
+	}
+	if code, _, errs := run("import", "--name", "kit", "--force", sheet); code != 0 {
+		t.Errorf("--force: exit %d, %q", code, errs)
+	}
+	var out, errs bytes.Buffer
+	avatars(&out, &errs)
+	if want := "kit  user  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2"; !strings.Contains(out.String(), want) {
+		t.Errorf("avatars lists:\n%s\nwant a line %q", out.String(), want)
+	}
+}

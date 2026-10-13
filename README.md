@@ -21,6 +21,7 @@ go install github.com/kackerx/agmux@latest
 agmux board     # 全屏看板，建议开在 tmux 浮窗里
 agmux show      # 每个会话一行：id、名字、分组、状态、模型、上下文%
 agmux avatars   # 打印全部头像：先是图片集（id、来源、各状态帧数），再是像素头像
+agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 sheet 切成图片集（见「头像图片」）
 ```
 
 ### 看板键位
@@ -122,6 +123,7 @@ default = "hash"                    # 没绑定的会话：hash = 按名字固�
 
   状态名和 [pi-emote](https://github.com/shennguyenrs/pi-emote) 一样，它的角色目录可以原样丢进来（`talk` / `failure` / `compact` 没有对应的触发，放着不用）：`idle` 空闲；`think` 在跑且没有等工具（含只有子 agent 在跑）；`read` 等 Read / Grep / Glob / WebFetch / WebSearch；`write` 等 Write / Edit / MultiEdit / NotebookEdit；`tool` 等其它工具；`hi` 需要你处理（等权限、等回答）；`success` 做完了。某个状态没有帧时往下回落：`read` / `write` / `tool` → `think` → `idle`，`hi` / `success` → `idle`；**没有 `idle` 的集不算**，启动时底栏报一行。旧目录名 `working` / `attention` / `done` 仍认，分别等于 `think` / `hi` / `success`（新名优先）。
   同一个状态下放多张 PNG，按文件名排序就是动画帧，每 500ms 换一帧；文件名以 `_v2` / `_v3`（`_v` 加数字再加 `.png`）结尾的是「备选 take」（pi-agent-portrait 每次进入状态随机挑一个），不当帧、不加载（`idle_2.png` 这样的才是帧）；`idle` 例外：第一张是常态脸，其余的（比如眨眼）每 4 秒只露一帧。只认 `.png`，图不会被变暗或闪红，神态靠画。
+- **从 sheet 导入**：`agmux avatars import <sheet.png> --name <id> [--layout 30|19] [--force]` 把 pi-agent-portrait 格式的一张 sheet（默认 6 × 5 共 30 格，从左到右、从上到下；`--layout 19` 是旧的 5 × 4 共 19 格）切成用户图集 `~/.config/agmux/avatars/<id>/`，文件名照 pi 的（`idle/idle.png`、`idle/idle_blink.png`、`hi/hi1.png` …），所以同一套在 pi 里也能用；每格取中间的正方形缩到 128 × 128。切法同 `draw-portrait`：以深色背景的边界定出网格；sheet 要是 PNG、背景深色。已有同 id 的集会报错，加 `--force` 才替换。
 - **什么时候生效**：启动时一次性上传所有图（内置的 + 你的），所以看板开着时新建的目录要重开才认；之后在 `a` 里换头像不需要重传。图很小，退出时不删，留在终端里到关闭，下次启动同 id 覆盖。
 - **回落**：非 kitty 系终端、没开直通、或 `renderer = "pixel"` 时，绑了图片集的会话显示一个按集 id 固定挑出的像素头像。图片模式下卡片没有像素头像底边的 agentType 色带。
 - **内置**：共 15 个头像：10 个图片集和 5 个像素头像。图片集是 `aza_choi`、`cipher`、`default`、`forge`、`moss`、`nova`、`oana`、`quill`、`red`、`sprocket`，来自 [pi-agent-portrait](https://github.com/testy-cool/pi-agent-portrait)（MIT，作者 testy-cool，基于 Eiji Onchi 的 pi-emote；`aza_choi` 原出 [pi-emote](https://github.com/shennguyenrs/pi-emote)，MIT）。每一项的来源、作者、许可见 `internal/avatar/sets/CREDITS.md`，许可原文在 `internal/avatar/sets/LICENSE-*`。pi-agent-portrait 的 `draw-portrait` 能从一句描述或一张照片生成一套自己的角色，放进用户目录即可。
