@@ -4,8 +4,15 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"hash/fnv"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -32,7 +39,18 @@ func writeFiles(root string, files map[string]string) error {
 	return nil
 }
 
-func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
+// pngOf is a small valid PNG, a different one for every label.
+func pngOf(label string) []byte {
+	h := fnv.New32a()
+	h.Write([]byte(label))
+	im := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	draw.Draw(im, im.Bounds(), &image.Uniform{color.NRGBA{uint8(h.Sum32()), uint8(h.Sum32() >> 8), uint8(h.Sum32() >> 16), 255}}, image.Point{}, draw.Src)
+	var b bytes.Buffer
+	png.Encode(&b, im)
+	return b.Bytes()
+}
+
+func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: pngOf(s)} }
 
 // A set is <id>/<state>/*.png: frames in file name order, only .png, a state with no files shows
 // idle, a set with no idle is skipped and reported; working / attention / done are old names for
@@ -64,10 +82,14 @@ func TestLoadSets(t *testing.T) {
 		t.Fatalf("sets: %v", Sets)
 	}
 	both, kit, solo := Sets[0], Sets[1], Sets[2]
-	frames := func(set *Set, st string) string {
+	frames := func(set *Set, st string) string { // which file labels the frames are, in order
 		var s []string
 		for _, f := range set.Frames[st] {
-			s = append(s, string(f))
+			for _, l := range []string{"idle-a", "idle-b", "work-1", "work-2", "new name", "old name"} {
+				if bytes.Equal(f, pngOf(l)) {
+					s = append(s, l)
+				}
+			}
 		}
 		return strings.Join(s, ",")
 	}
@@ -85,10 +107,10 @@ func TestLoadSets(t *testing.T) {
 	}
 	// an ID is a hash of set, directory, file name and bytes: 24 bits, not 0, the same wherever it is loaded
 	idle0, idle1 := kit.FrameID("idle", 0), kit.FrameID("idle", 8)
-	if idle0 != frameID("kit", "idle", "a.png", []byte("idle-a")) || idle1 != frameID("kit", "idle", "b.png", []byte("idle-b")) {
+	if idle0 != frameID("kit", "idle", "a.png", pngOf("idle-a")) || idle1 != frameID("kit", "idle", "b.png", pngOf("idle-b")) {
 		t.Errorf("ids: %x %x", idle0, idle1)
 	}
-	if kit.FrameID("think", 0) != frameID("kit", "working", "1.png", []byte("work-1")) {
+	if kit.FrameID("think", 0) != frameID("kit", "working", "1.png", pngOf("work-1")) {
 		t.Error("an alias frame is hashed under the directory it came from")
 	}
 	seen := map[uint32]bool{}
@@ -98,7 +120,7 @@ func TestLoadSets(t *testing.T) {
 		}
 		seen[id] = true
 	}
-	if frameID("kit", "idle", "a.png", []byte("idle-a")) == frameID("kit", "idle", "a.png", []byte("edited")) || // an edited picture is a new ID
+	if frameID("kit", "idle", "a.png", pngOf("idle-a")) == frameID("kit", "idle", "a.png", pngOf("edited")) || // an edited picture is a new ID
 		frameID("kit", "idle", "a.png", nil) == frameID("zed", "idle", "a.png", nil) {
 		t.Error("different pictures, same ID")
 	}
@@ -147,7 +169,7 @@ func TestIdleBlink(t *testing.T) {
 // A set directory may be a symbolic link (the same pictures shared by several configs, say).
 func TestLoadSetsSymlink(t *testing.T) {
 	root, real := t.TempDir(), t.TempDir()
-	if err := writeFiles(real, map[string]string{"idle/1.png": "x", "working/1.png": "y"}); err != nil {
+	if err := writeFiles(real, map[string]string{"idle/1.png": string(pngOf("x")), "working/1.png": string(pngOf("y"))}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(real, filepath.Join(root, "linked")); err != nil {
@@ -188,11 +210,11 @@ func TestUserSetReplacesBuiltin(t *testing.T) {
 	t.Cleanup(func() { Sets, problems = nil, nil })
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	if err := writeFiles(dir+"/agmux/avatars", map[string]string{"aza_choi/idle/1.png": "mine", "zed/idle/1.png": "z"}); err != nil {
+	if err := writeFiles(dir+"/agmux/avatars", map[string]string{"aza_choi/idle/1.png": string(pngOf("mine")), "zed/idle/1.png": string(pngOf("z"))}); err != nil {
 		t.Fatal(err)
 	}
 	LoadSets()
-	if len(Sets) != 2 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || string(Sets[0].Frames["idle"][0]) != "mine" || Sets[1].ID != "zed" {
+	if len(Sets) != 2 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || !bytes.Equal(Sets[0].Frames["idle"][0], pngOf("mine")) || Sets[1].ID != "zed" {
 		t.Errorf("sets: %+v", Sets)
 	}
 }
@@ -223,6 +245,16 @@ func TestPlaceholder(t *testing.T) {
 }
 
 // capture is what Upload writes, split into the escape sequences it is made of.
+// noisePNG is a 100 × 100 PNG that does not compress.
+func noisePNG() []byte {
+	im := image.NewNRGBA(image.Rect(0, 0, 100, 100))
+	rnd := rand.New(rand.NewSource(1))
+	rnd.Read(im.Pix)
+	var b bytes.Buffer
+	png.Encode(&b, im)
+	return b.Bytes()
+}
+
 func capture(t *testing.T, tmux bool) (seqs []string, png []byte) {
 	seqs, png, _ = captureAlt(t, tmux)
 	return
@@ -231,7 +263,7 @@ func capture(t *testing.T, tmux bool) (seqs []string, png []byte) {
 // captureAlt also says whether Upload switched to the alternate screen first.
 func captureAlt(t *testing.T, tmux bool) (seqs []string, png []byte, alt bool) {
 	t.Helper()
-	png = bytes.Repeat([]byte("0123456789"), 1000) // 10000 bytes: 13336 base64 characters, 4 chunks
+	png = noisePNG() // 100 × 100 pixels of noise: about 40 KB, many chunks
 	useSets(t, fstest.MapFS{"s/idle/1.png": &fstest.MapFile{Data: png}})
 	var b bytes.Buffer
 	if err := Upload(&b, Sets, tmux); err != nil {
@@ -252,6 +284,92 @@ func captureAlt(t *testing.T, tmux bool) (seqs []string, png []byte, alt bool) {
 	return seqs, png, alt
 }
 
+// Every picture is shown by its centered 3:2 part, so that it fills the 6 × 2 cells (about 3:2):
+// the sizes round down; a wide one loses its sides, any other its top and bottom.
+func TestCropFor(t *testing.T) {
+	for _, c := range []struct {
+		w, h int
+		want crop
+	}{
+		{128, 128, crop{0, 21, 128, 85}},  // 128 × 2/3 = 85.3 → 85; (128 − 85) / 2 = 21.5 → 21
+		{64, 64, crop{0, 11, 64, 42}},     // the built-in frames
+		{200, 100, crop{25, 0, 150, 100}}, // wider than 3:2: the middle 150
+		{300, 200, crop{0, 0, 300, 200}},  // exactly 3:2: all of it
+		{100, 200, crop{0, 67, 100, 66}},  // tall
+		{201, 100, crop{25, 0, 150, 100}}, // (201 − 150) / 2 = 25.5 → 25
+		{1, 1, crop{0, 0, 1, 1}},          // never an empty rectangle
+		{1, 5, crop{0, 2, 1, 1}},
+		{5, 1, crop{2, 0, 1, 1}},
+	} {
+		if got := cropFor(c.w, c.h); got != c.want {
+			t.Errorf("%d × %d: %+v, want %+v", c.w, c.h, got, c.want)
+		}
+	}
+}
+
+// kitty ignores a source rectangle on the virtual placements placeholders show, so the pixels are
+// cut: the middle of a picture, 3:2; a picture that is 3:2 already goes as it is.
+func TestCropPNG(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 200, 100))
+	for y := range 100 {
+		for x := range 200 {
+			src.SetNRGBA(x, y, color.NRGBA{uint8(x), uint8(y), 7, 255})
+		}
+	}
+	var b bytes.Buffer
+	png.Encode(&b, src)
+	out, err := cropPNG(b.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := png.Decode(bytes.NewReader(out))
+	if err != nil || got.Bounds() != image.Rect(0, 0, 150, 100) {
+		t.Fatalf("%v %v", err, got.Bounds())
+	}
+	if r, g, _, _ := got.At(0, 0).RGBA(); r>>8 != 25 || g>>8 != 0 { // the pixel at (25, 0) of the source
+		t.Errorf("not the middle: %d %d", r>>8, g>>8)
+	}
+	if r, _, _, _ := got.At(149, 99).RGBA(); r>>8 != 174 {
+		t.Errorf("right edge: %d", r>>8)
+	}
+	tall := image.NewNRGBA(image.Rect(0, 0, 128, 128))
+	b.Reset()
+	png.Encode(&b, tall)
+	if out, _ := cropPNG(b.Bytes()); func() image.Rectangle { g, _ := png.Decode(bytes.NewReader(out)); return g.Bounds() }() != image.Rect(0, 0, 128, 85) {
+		t.Error("128 × 128 → 128 × 85")
+	}
+	exact := image.NewNRGBA(image.Rect(0, 0, 30, 20))
+	b.Reset()
+	png.Encode(&b, exact)
+	if out, err := cropPNG(b.Bytes()); err != nil || !bytes.Equal(out, b.Bytes()) {
+		t.Errorf("3:2 goes as it is: %v", err)
+	}
+	if _, err := cropPNG([]byte("nope")); err == nil {
+		t.Error("not a PNG")
+	}
+}
+
+// A file that is not a PNG (or whose header is cut short) is skipped and reported, one line per set;
+// a set left with no idle frame is skipped altogether.
+func TestBadPNGs(t *testing.T) {
+	probs := useSets(t, fstest.MapFS{
+		"kit/idle/1.png": file("ok"), "kit/idle/2.png": &fstest.MapFile{Data: []byte("not a png")},
+		"kit/think/1.png": &fstest.MapFile{}, "kit/think/2.png": &fstest.MapFile{Data: pngOf("t")[:20]}, "kit/think/3.png": file("t3"), "kit/think/4.png": &fstest.MapFile{Data: pngOf("t4")[:60]}, // header fine, pixels cut off
+		"bad/idle/1.png": &fstest.MapFile{Data: []byte("nope")},
+	})
+	if len(Sets) != 1 || Sets[0].ID != "kit" || len(Sets[0].Frames["idle"]) != 1 || len(Sets[0].Frames["think"]) != 1 || len(Sets[0].sent["think"]) != 1 {
+		t.Fatalf("sets: %+v", Sets)
+	}
+	want := []string{ // sets in name order: bad, kit
+		`avatar set "bad": 1 frame(s) are not valid PNGs and are skipped, first idle/1.png`,
+		`avatar set "bad" has no idle/*.png: skipped`,
+		`avatar set "kit": 4 frame(s) are not valid PNGs and are skipped, first idle/2.png`, // one in idle, three in think
+	}
+	if !slices.Equal(probs, want) {
+		t.Errorf("problems:\n%s\nwant\n%s", strings.Join(probs, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 // kitty keeps images per screen. The board runs on the alternate one, so outside tmux the upload
 // goes there too; in tmux the client is on it already and tmux would not pass the switch on.
 func TestUploadAlternateScreen(t *testing.T) {
@@ -270,8 +388,8 @@ func TestUploadAlternateScreen(t *testing.T) {
 
 func TestUpload(t *testing.T) {
 	seqs, png := capture(t, false)
-	if len(seqs) != 4 {
-		t.Fatalf("%d sequences, want 4 chunks", len(seqs))
+	if n := (base64.StdEncoding.EncodedLen(len(Sets[0].sent["idle"][0])) + 4095) / 4096; len(seqs) != n || n < 5 {
+		t.Fatalf("%d sequences, want %d chunks of at most 4096", len(seqs), n)
 	}
 	var b64 strings.Builder
 	for i, s := range seqs {
@@ -292,8 +410,10 @@ func TestUpload(t *testing.T) {
 		}
 		b64.WriteString(payload)
 	}
-	if got, err := base64.StdEncoding.DecodeString(b64.String()); err != nil || !bytes.Equal(got, png) {
-		t.Errorf("payload does not decode to the file: %v", err)
+	// what is sent is the middle 100 × 66 of the 100 × 100 picture (see cropPNG)
+	got, err := base64.StdEncoding.DecodeString(b64.String())
+	if err != nil || !bytes.Equal(got, Sets[0].sent["idle"][0]) || bytes.Equal(got, png) {
+		t.Errorf("payload: %v", err)
 	}
 	if strings.Contains(strings.Join(seqs, ""), "a=d") { // nothing is deleted on exit: see Upload
 		t.Error("Upload deletes images")

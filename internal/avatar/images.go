@@ -1,10 +1,14 @@
 package avatar
 
 import (
+	"bytes"
 	"embed"
 	"encoding/base64"
 	"fmt"
 	"hash/fnv"
+	"image"
+	"image/draw"
+	"image/png"
 	"io"
 	"io/fs"
 	"os"
@@ -32,11 +36,49 @@ var (
 	oldName  = map[string]string{"think": "working", "hi": "attention", "success": "done"}
 )
 
+// crop is a rectangle in pixels.
+type crop struct{ x, y, w, h int }
+
+// cropFor is the centered 3:2 part of a w × h picture, which a 6 × 2 cell box (cells are about 1:2)
+// shows without bars at the sides or distortion: a picture wider than 3:2 loses its sides, any
+// other loses top and bottom (a square one about a sixth of each). Sizes round down.
+func cropFor(w, h int) crop {
+	if w*2 > h*3 {
+		cw := max(h*3/2, 1)
+		return crop{(w - cw) / 2, 0, cw, h}
+	}
+	ch := max(w*2/3, 1)
+	return crop{0, (h - ch) / 2, w, ch}
+}
+
+// cropPNG is the centered 3:2 part of a PNG, as a PNG (a picture that is that already goes as it is).
+// kitty can crop by itself (x, y, w, h in the upload), but ignores that for the virtual placements
+// the placeholders show, so the pixels are cut here.
+func cropPNG(data []byte) ([]byte, error) {
+	im, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	b := im.Bounds()
+	c := cropFor(b.Dx(), b.Dy())
+	if c.w == b.Dx() && c.h == b.Dy() {
+		return data, nil
+	}
+	out := image.NewNRGBA(image.Rect(0, 0, c.w, c.h))
+	draw.Draw(out, out.Bounds(), im, image.Pt(b.Min.X+c.x, b.Min.Y+c.y), draw.Src)
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, out); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // Set is one image avatar. Its ID shares the sprite ID namespace.
 type Set struct {
 	ID     string
 	Source string              // "builtin" or "user"
 	Frames map[string][][]byte // PNG data per state, in file name order; idle is always there
+	sent   map[string][][]byte // what is uploaded for each frame: its centered 3:2 part (cropPNG)
 	ids    map[string][]uint32 // the image ID of each frame: a hash of the set, state, file name and bytes, so the
 	// same picture always has the same ID (a restart overwrites it; two boards, or a user edit between
 	// them, can't mix pictures up) and a different one almost surely a different ID
@@ -118,7 +160,8 @@ func loadSets(fsys fs.FS, source string) (sets []*Set, problems []string) {
 			problems = append(problems, `avatar set "hash" skipped: "hash" is reserved for picking one by hashing; rename the directory`)
 			continue
 		}
-		s := &Set{ID: d.Name(), Source: source, Frames: map[string][][]byte{}, ids: map[string][]uint32{}}
+		s := &Set{ID: d.Name(), Source: source, Frames: map[string][][]byte{}, ids: map[string][]uint32{}, sent: map[string][][]byte{}}
+		var bad []string
 		for _, st := range States {
 			dirs := []string{st}
 			if old, ok := oldName[st]; ok {
@@ -130,15 +173,26 @@ func loadSets(fsys fs.FS, source string) (sets []*Set, problems []string) {
 					if f.IsDir() || !strings.HasSuffix(f.Name(), ".png") || strings.HasPrefix(f.Name(), ".") {
 						continue
 					}
-					if data, err := fs.ReadFile(fsys, path.Join(d.Name(), dir, f.Name())); err == nil {
-						s.Frames[st] = append(s.Frames[st], data)
-						s.ids[st] = append(s.ids[st], frameID(d.Name(), dir, f.Name(), data))
+					data, err := fs.ReadFile(fsys, path.Join(d.Name(), dir, f.Name()))
+					if err != nil {
+						continue
 					}
+					crop, err := cropPNG(data)
+					if err != nil {
+						bad = append(bad, dir+"/"+f.Name())
+						continue
+					}
+					s.Frames[st] = append(s.Frames[st], data)
+					s.ids[st] = append(s.ids[st], frameID(d.Name(), dir, f.Name(), data))
+					s.sent[st] = append(s.sent[st], crop)
 				}
 				if len(s.Frames[st]) > 0 {
 					break
 				}
 			}
+		}
+		if len(bad) > 0 {
+			problems = append(problems, fmt.Sprintf("avatar set %q: %d frame(s) are not valid PNGs and are skipped, first %s", d.Name(), len(bad), bad[0]))
 		}
 		if len(s.Frames["idle"]) == 0 {
 			problems = append(problems, fmt.Sprintf("avatar set %q has no idle/*.png: skipped", d.Name()))
@@ -217,7 +271,8 @@ func Placeholder(id uint32) []string {
 const chunkSize = 4096
 
 // Upload sends every frame of sets to the terminal as a virtual placement of Width × Height/2 cells
-// (U=1: nothing is drawn until placeholders show it). q=2 silences the terminal's replies, which
+// (U=1: nothing is drawn until placeholders show it), each the centered 3:2 part of its picture
+// (cropPNG) so that it fills all the cells. q=2 silences the terminal's replies, which
 // inside tmux would arrive as keystrokes. In tmux each sequence goes through its DCS passthrough.
 // Outside tmux it first switches to the alternate screen, where the board will run.
 // The images are never deleted: they are small, stay in the terminal until it closes, and the next
@@ -235,7 +290,7 @@ func Upload(w io.Writer, sets []*Set, tmux bool) (err error) {
 	}
 	for _, s := range sets {
 		for _, st := range States {
-			for i, png := range s.Frames[st] {
+			for i, png := range s.sent[st] {
 				b64 := base64.StdEncoding.EncodeToString(png)
 				for off := 0; off < len(b64); off += chunkSize {
 					end := min(off+chunkSize, len(b64))

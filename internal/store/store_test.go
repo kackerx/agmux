@@ -1,6 +1,12 @@
 package store
 
 import (
+	"bytes"
+	"hash/fnv"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -377,7 +383,7 @@ func TestSetAvatarWriteErrorNotAvatarErr(t *testing.T) {
 
 // An image set's ID is as good as a sprite's in a binding, [avatars.bind] or default.
 func TestAvatarImageSetIDs(t *testing.T) {
-	avatar.UseSets(fstest.MapFS{"kit/idle/1.png": &fstest.MapFile{Data: []byte("x")}})
+	avatar.UseSets(fstest.MapFS{"kit/idle/1.png": &fstest.MapFile{Data: pngOf("x")}})
 	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}) })
 	dir := t.TempDir()
 	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
@@ -433,4 +439,15 @@ func TestAvatarState(t *testing.T) {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
 	}
+}
+
+// pngOf is a small valid PNG, a different one for every label.
+func pngOf(label string) []byte {
+	h := fnv.New32a()
+	h.Write([]byte(label))
+	im := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	draw.Draw(im, im.Bounds(), &image.Uniform{color.NRGBA{uint8(h.Sum32()), uint8(h.Sum32() >> 8), uint8(h.Sum32() >> 16), 255}}, image.Point{}, draw.Src)
+	var b bytes.Buffer
+	png.Encode(&b, im)
+	return b.Bytes()
 }

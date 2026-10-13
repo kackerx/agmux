@@ -1,8 +1,14 @@
 package board
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,15 +24,26 @@ import (
 	"github.com/kackerx/agmux/internal/store"
 )
 
-func png(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
+// pngOf is a small valid PNG, a different one for every label.
+func pngOf(label string) []byte {
+	h := fnv.New32a()
+	h.Write([]byte(label))
+	im := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	draw.Draw(im, im.Bounds(), &image.Uniform{color.NRGBA{uint8(h.Sum32()), uint8(h.Sum32() >> 8), uint8(h.Sum32() >> 16), 255}}, image.Point{}, draw.Src)
+	var b bytes.Buffer
+	png.Encode(&b, im)
+	return b.Bytes()
+}
+
+func pngFile(s string) *fstest.MapFile { return &fstest.MapFile{Data: pngOf(s)} }
 
 // useKit loads one set: two idle frames, two think, one read, one hi, nothing else.
 func useKit(t *testing.T) {
 	t.Helper()
 	avatar.UseSets(fstest.MapFS{
-		"kit/idle/1.png": png("i1"), "kit/idle/2.png": png("i2"),
-		"kit/think/1.png": png("t1"), "kit/think/2.png": png("t2"),
-		"kit/read/1.png": png("r1"), "kit/hi/1.png": png("h1"),
+		"kit/idle/1.png": pngFile("i1"), "kit/idle/2.png": pngFile("i2"),
+		"kit/think/1.png": pngFile("t1"), "kit/think/2.png": pngFile("t2"),
+		"kit/read/1.png": pngFile("r1"), "kit/hi/1.png": pngFile("h1"),
 	})
 	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
 }
@@ -164,7 +181,7 @@ func TestImageCardFallsBackToSprite(t *testing.T) {
 // session wears, and enter binds a set's ID like a sprite's.
 func TestAvatarPickerSets(t *testing.T) {
 	avatar.UseSets(fstest.MapFS{ // kit has done frames, so the list must pick idle's; bot-03 shadows the sprite
-		"kit/idle/1.png": png("i1"), "kit/done/1.png": png("d1"), "bot-03/idle/1.png": png("b"),
+		"kit/idle/1.png": pngFile("i1"), "kit/done/1.png": pngFile("d1"), "bot-03/idle/1.png": pngFile("b"),
 	})
 	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
 	dir := t.TempDir()
@@ -250,7 +267,7 @@ func TestAvatarPickerSets(t *testing.T) {
 func TestAvatarPickerScrolls(t *testing.T) {
 	files := fstest.MapFS{}
 	for i := range 20 {
-		files[fmt.Sprintf("u%02d/idle/1.png", i)] = png("x")
+		files[fmt.Sprintf("u%02d/idle/1.png", i)] = pngFile("x")
 	}
 	avatar.UseSets(files)
 	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
