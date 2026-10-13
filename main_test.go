@@ -32,9 +32,9 @@ func TestAvatarsOutput(t *testing.T) {
 	avatars(&out, &errs)
 	lines := strings.Split(out.String(), "\n")
 	want := []string{
-		"aza_choi  builtin  idle 1 · working 4 · attention 4 · done 4",
-		"bot-01  user  idle 1 · working 0 · attention 0 · done 0",
-		"kit  user  idle 1 · working 2 · attention 0 · done 0",
+		"aza_choi  builtin  idle 2 · think 4 · read 4 · write 4 · tool 4 · hi 4 · success 0",
+		"bot-01  user  idle 1 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 0",
+		"kit  user  idle 1 · think 2 · read 0 · write 0 · tool 0 · hi 0 · success 0",
 		"",
 		"bot-02  Boxy", // bot-01 is a set now: its sprite is gone from the list
 	}

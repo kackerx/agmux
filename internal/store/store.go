@@ -31,6 +31,7 @@ type Session struct {
 	Subagents                                  []Subagent
 	Shells                                     int // always 0 in S1
 	AvatarID                                   string
+	AvatarState                                string // what an image avatar does: one of avatar.States, from the fields above
 	LastActivity                               time.Time
 }
 
@@ -179,6 +180,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		}
 	}
 	s.Done = s.Status == "idle" && r.AttentionState != ""
+	s.AvatarState = avatarState(s)
 	s.GroupKey = groupKey(s)
 	s.AvatarID = avatar.For(p.Avatars, p.AvatarBind, p.AvatarDefault, s.AvatarKey())
 	hudModel := ""
@@ -201,6 +203,29 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		s.Model = hudModel
 	}
 	return s
+}
+
+// avatarState is what an image avatar shows: hi when the session needs you, then for a working one
+// think (no tool pending, or only subagents), read / write / tool by the pending tool, then success
+// when it is done, else idle.
+func avatarState(s Session) string {
+	switch {
+	case s.Attention != "" || s.Status == "waiting":
+		return "hi"
+	case s.Status == "working":
+		switch s.PendingTool {
+		case "":
+			return "think"
+		case "Read", "Grep", "Glob", "WebFetch", "WebSearch":
+			return "read"
+		case "Write", "Edit", "MultiEdit", "NotebookEdit":
+			return "write"
+		}
+		return "tool"
+	case s.Done:
+		return "success"
+	}
+	return "idle"
 }
 
 // readHUD reads what `agmux statusline` saved from Claude Code's status line payload:

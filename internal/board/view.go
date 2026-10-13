@@ -492,11 +492,7 @@ func avatarList(s store.Session, pick, h int) []string {
 	}
 	for i := first; i < first+n; i++ {
 		id := ids[i]
-		mood := avatar.Normal
-		if isSet(id) && useImages { // a picture: its first idle frame
-			mood = avatar.Dim
-		}
-		face := avatarFace(store.Session{AvatarID: id, AgentType: s.AgentType}, mood, 0)
+		face := avatarFace(store.Session{AvatarID: id, AgentType: s.AgentType, AvatarState: "idle"}, avatar.Normal, 0) // a picture: the resting face
 		mark, label := "  ", id
 		if sp, ok := avatar.ByID(id); ok && !isSet(id) {
 			label += "  " + sp.Name

@@ -20,13 +20,13 @@ import (
 
 func png(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
 
-// useKit loads one set: two idle frames, two working, one attention, nothing for done.
+// useKit loads one set: two idle frames, two think, one read, one hi, nothing else.
 func useKit(t *testing.T) {
 	t.Helper()
 	avatar.UseSets(fstest.MapFS{
 		"kit/idle/1.png": png("i1"), "kit/idle/2.png": png("i2"),
-		"kit/working/1.png": png("w1"), "kit/working/2.png": png("w2"),
-		"kit/attention/1.png": png("a1"),
+		"kit/think/1.png": png("t1"), "kit/think/2.png": png("t2"),
+		"kit/read/1.png": png("r1"), "kit/hi/1.png": png("h1"),
 	})
 	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
 }
@@ -95,8 +95,8 @@ func TestImageMode(t *testing.T) {
 	}
 }
 
-func kitSession(status string) store.Session {
-	return store.Session{ID: "a", Name: "n", AvatarID: "kit", Status: status, ContextPct: -1, TmuxPane: "%1"}
+func kitSession(state string) store.Session {
+	return store.Session{ID: "a", Name: "n", AvatarID: "kit", Status: "idle", AvatarState: state, ContextPct: -1, TmuxPane: "%1"}
 }
 
 // A set's card holds placeholders (U+10EEEE, foreground = the frame's image id) and is exactly as
@@ -120,22 +120,27 @@ func TestImageCard(t *testing.T) {
 		fmt.Sscanf(rgb, "%d;%d;%d", &r, &g, &b)
 		return fmt.Sprintf("%x", r<<16|g<<8|b)
 	}
-	idle, working, attention := kitSession("idle"), kitSession("working"), kitSession("waiting")
 	kit, _ := avatar.SetByID("kit")
-	hex := func(m avatar.Mood, frame int) string { return fmt.Sprintf("%x", kit.FrameID(m, frame)) }
-	if a, b, c := id(idle, 0), id(idle, 1), id(idle, 2); a != hex(avatar.Dim, 0) || b != hex(avatar.Dim, 1) || c != a || a == b {
-		t.Errorf("idle frames: %s %s %s", a, b, c)
+	hex := func(state string, frame int) string { return fmt.Sprintf("%x", kit.FrameID(state, frame)) }
+	// the card shows the session's AvatarState, a frame per tick (idle: the resting face, a blink every 8th)
+	for _, c := range []struct {
+		state string
+		frame int
+		want  string // the state whose picture it is
+		at    int    // and the tick that picture is shown at
+	}{
+		{"idle", 0, "idle", 0}, {"idle", 1, "idle", 0}, {"idle", 8, "idle", 8}, {"idle", 9, "idle", 0},
+		{"think", 0, "think", 0}, {"think", 1, "think", 1}, {"think", 2, "think", 0},
+		{"read", 0, "read", 0}, {"read", 5, "read", 0},
+		{"write", 1, "think", 1}, {"tool", 0, "think", 0}, // no frames of its own: think's
+		{"hi", 3, "hi", 0}, {"success", 0, "idle", 0}, {"success", 8, "idle", 8}, // no success frames: idle's
+	} {
+		if got, want := id(kitSession(c.state), c.frame), hex(c.want, c.at); got != want {
+			t.Errorf("%s at tick %d: %s, want %s at tick %d (%s)", c.state, c.frame, got, c.want, c.at, want)
+		}
 	}
-	if a, b := id(working, 0), id(working, 1); a != hex(avatar.Scan, 0) || b != hex(avatar.Scan, 1) || a == b || a == hex(avatar.Dim, 0) {
-		t.Errorf("working frames: %s %s", a, b)
-	}
-	if a, b := id(attention, 0), id(attention, 3); a != hex(avatar.Alert, 0) || b != a {
-		t.Errorf("attention frames: %s %s", a, b)
-	}
-	done := kitSession("idle")
-	done.Done = true
-	if a := id(done, 0); a != hex(avatar.Dim, 0) { // the set has no done frames: idle's
-		t.Errorf("done falls back to idle: %s", a)
+	if id(kitSession("think"), 0) == id(kitSession("idle"), 0) {
+		t.Error("think and idle show the same picture")
 	}
 }
 
@@ -197,15 +202,15 @@ func TestAvatarPickerSets(t *testing.T) {
 		if got := strings.Contains(view, "\U0010EEEE"); got != images {
 			t.Errorf("images=%v: placeholders in the list: %v", images, got)
 		}
-		sgr := func(m avatar.Mood) string {
+		sgr := func(state string) string {
 			kit, _ := avatar.SetByID("kit")
-			id := kit.FrameID(m, 0)
+			id := kit.FrameID(state, 0)
 			return fmt.Sprintf("38;2;%d;%d;%dm", id>>16&255, id>>8&255, id&255)
 		}
-		if images && !strings.Contains(view, sgr(avatar.Dim)) { // kit's idle frame
+		if images && !strings.Contains(view, sgr("idle")) { // kit's idle frame
 			t.Errorf("the set's row is not its first idle frame:\n%q", view)
 		}
-		if images && strings.Contains(view, sgr(avatar.Normal)) { // not its done frame
+		if images && strings.Contains(view, sgr("success")) { // not its done frame
 			t.Errorf("the list shows the done frame:\n%q", view)
 		}
 		if strings.Contains(ansi.Strip(view), "bot-03  Sprout") || !strings.Contains(ansi.Strip(view), "bot-03  ") {

@@ -22,18 +22,22 @@ import (
 //go:embed sets
 var builtin embed.FS
 
-// states maps what the eyes say (Mood) to the directory a set keeps its frames in.
-var states = [...]struct {
-	Mood Mood
-	Dir  string
-}{{Dim, "idle"}, {Scan, "working"}, {Alert, "attention"}, {Normal, "done"}}
+// States are pi-emote's, so a pi-emote character directory works as it is: a set keeps its frames
+// in <id>/<state>/*.png. A state with no frames falls back along fallback, ending at idle. The
+// directory names working, attention and done are older spellings of think, hi and success.
+var States = [...]string{"idle", "think", "read", "write", "tool", "hi", "success"}
+
+var (
+	fallback = map[string]string{"read": "think", "write": "think", "tool": "think", "think": "idle", "hi": "idle", "success": "idle"}
+	oldName  = map[string]string{"think": "working", "hi": "attention", "success": "done"}
+)
 
 // Set is one image avatar. Its ID shares the sprite ID namespace.
 type Set struct {
 	ID     string
-	Source string            // "builtin" or "user"
-	Frames map[Mood][][]byte // PNG data per state, in file name order; Dim (idle) is always there
-	ids    map[Mood][]uint32 // the image ID of each frame: a hash of the set, state, file name and bytes, so the
+	Source string              // "builtin" or "user"
+	Frames map[string][][]byte // PNG data per state, in file name order; idle is always there
+	ids    map[string][]uint32 // the image ID of each frame: a hash of the set, state, file name and bytes, so the
 	// same picture always has the same ID (a restart overwrites it; two boards, or a user edit between
 	// them, can't mix pictures up) and a different one almost surely a different ID
 }
@@ -114,20 +118,29 @@ func loadSets(fsys fs.FS, source string) (sets []*Set, problems []string) {
 			problems = append(problems, `avatar set "hash" skipped: "hash" is reserved for picking one by hashing; rename the directory`)
 			continue
 		}
-		s := &Set{ID: d.Name(), Source: source, Frames: map[Mood][][]byte{}, ids: map[Mood][]uint32{}}
-		for _, st := range states {
-			files, _ := fs.ReadDir(fsys, path.Join(d.Name(), st.Dir))
-			for _, f := range files {
-				if f.IsDir() || !strings.HasSuffix(f.Name(), ".png") || strings.HasPrefix(f.Name(), ".") {
-					continue
+		s := &Set{ID: d.Name(), Source: source, Frames: map[string][][]byte{}, ids: map[string][]uint32{}}
+		for _, st := range States {
+			dirs := []string{st}
+			if old, ok := oldName[st]; ok {
+				dirs = append(dirs, old) // used only when the new name has no frames
+			}
+			for _, dir := range dirs {
+				files, _ := fs.ReadDir(fsys, path.Join(d.Name(), dir))
+				for _, f := range files {
+					if f.IsDir() || !strings.HasSuffix(f.Name(), ".png") || strings.HasPrefix(f.Name(), ".") {
+						continue
+					}
+					if data, err := fs.ReadFile(fsys, path.Join(d.Name(), dir, f.Name())); err == nil {
+						s.Frames[st] = append(s.Frames[st], data)
+						s.ids[st] = append(s.ids[st], frameID(d.Name(), dir, f.Name(), data))
+					}
 				}
-				if data, err := fs.ReadFile(fsys, path.Join(d.Name(), st.Dir, f.Name())); err == nil {
-					s.Frames[st.Mood] = append(s.Frames[st.Mood], data)
-					s.ids[st.Mood] = append(s.ids[st.Mood], frameID(d.Name(), st.Dir, f.Name(), data))
+				if len(s.Frames[st]) > 0 {
+					break
 				}
 			}
 		}
-		if len(s.Frames[Dim]) == 0 {
+		if len(s.Frames["idle"]) == 0 {
 			problems = append(problems, fmt.Sprintf("avatar set %q has no idle/*.png: skipped", d.Name()))
 			continue
 		}
@@ -151,22 +164,33 @@ func Listing() []string {
 	return ids
 }
 
-// FrameCounts is how many frames the set has per state, as "idle 1 · working 4 · attention 4 · done 4".
+// FrameCounts is how many frames the set has per state, as "idle 2 · think 4 · read 0 · …".
 func (s *Set) FrameCounts() string {
 	var parts []string
-	for _, st := range states {
-		parts = append(parts, fmt.Sprintf("%s %d", st.Dir, len(s.Frames[st.Mood])))
+	for _, st := range States {
+		parts = append(parts, fmt.Sprintf("%s %d", st, len(s.Frames[st])))
 	}
 	return strings.Join(parts, " · ")
 }
 
-// FrameID is the image ID to show for mood at frame; a state with no frames shows idle.
-func (s *Set) FrameID(m Mood, frame int) uint32 {
-	ids := s.ids[m]
-	if len(ids) == 0 {
-		ids = s.ids[Dim]
+// FrameID is the image ID to show for state at tick: the frames of the state or of the first state
+// on its fallback chain that has any, cycling once a tick. Idle is different: its first frame is
+// the resting face and the others (a blink) show for one tick in every 8.
+func (s *Set) FrameID(state string, tick int) uint32 {
+	st := state
+	for len(s.ids[st]) == 0 && st != "idle" {
+		if st = fallback[st]; st == "" {
+			st = "idle"
+		}
 	}
-	return ids[frame%len(ids)]
+	ids := s.ids[st]
+	if st == "idle" && len(ids) > 1 {
+		if tick > 0 && tick%8 == 0 {
+			return ids[1+(tick/8-1)%(len(ids)-1)]
+		}
+		return ids[0]
+	}
+	return ids[tick%len(ids)]
 }
 
 // diacritics are kitty's row / column numbers 0..5 as combining marks (rowcolumn-diacritics.txt).
@@ -210,8 +234,8 @@ func Upload(w io.Writer, sets []*Set, tmux bool) (err error) {
 		}()
 	}
 	for _, s := range sets {
-		for _, st := range states {
-			for i, png := range s.Frames[st.Mood] {
+		for _, st := range States {
+			for i, png := range s.Frames[st] {
 				b64 := base64.StdEncoding.EncodeToString(png)
 				for off := 0; off < len(b64); off += chunkSize {
 					end := min(off+chunkSize, len(b64))
@@ -221,7 +245,7 @@ func Upload(w io.Writer, sets []*Set, tmux bool) (err error) {
 					}
 					seq := fmt.Sprintf("\x1b_Gm=%d;%s\x1b\\", more, b64[off:end])
 					if off == 0 {
-						seq = fmt.Sprintf("\x1b_Ga=T,U=1,f=100,q=2,i=%d,c=%d,r=%d,m=%d;%s\x1b\\", s.ids[st.Mood][i], Width, Height/2, more, b64[off:end])
+						seq = fmt.Sprintf("\x1b_Ga=T,U=1,f=100,q=2,i=%d,c=%d,r=%d,m=%d;%s\x1b\\", s.ids[st][i], Width, Height/2, more, b64[off:end])
 					}
 					if _, err = io.WriteString(w, passthrough(seq, tmux)); err != nil {
 						return err

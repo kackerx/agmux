@@ -35,7 +35,8 @@ func writeFiles(root string, files map[string]string) error {
 func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
 
 // A set is <id>/<state>/*.png: frames in file name order, only .png, a state with no files shows
-// idle, a set with no idle is skipped and reported.
+// idle, a set with no idle is skipped and reported; working / attention / done are old names for
+// think / hi / success.
 func TestLoadSets(t *testing.T) {
 	probs := useSets(t, fstest.MapFS{
 		"kit/idle/b.png":       file("idle-b"),
@@ -48,40 +49,50 @@ func TestLoadSets(t *testing.T) {
 		"kit/working/2.png":    file("work-2"),
 		"kit/working/1.png":    file("work-1"),
 		"kit/attention/x.gif":  file("not a frame"),
+		"kit/read/r.png":       file("read"),
 		"loose.png":            file("a file at the root"),
 		"noidle/working/1.png": file("w"),
 		"solo/idle/i.png":      file("solo"),
+		"both/idle/i.png":      file("i"),
+		"both/think/t.png":     file("new name"),
+		"both/working/w.png":   file("old name"),
 	})
 	if len(probs) != 2 || !strings.Contains(probs[0], `"hash"`) || !strings.Contains(probs[0], "reserved") || !strings.Contains(probs[1], `"noidle"`) || !strings.Contains(probs[1], "idle") {
 		t.Errorf("problems: %q", probs)
 	}
-	if len(Sets) != 2 || Sets[0].ID != "kit" || Sets[1].ID != "solo" {
+	if len(Sets) != 3 || Sets[0].ID != "both" || Sets[1].ID != "kit" || Sets[2].ID != "solo" {
 		t.Fatalf("sets: %v", Sets)
 	}
-	kit := Sets[0]
-	frames := func(m Mood) string {
+	both, kit, solo := Sets[0], Sets[1], Sets[2]
+	frames := func(set *Set, st string) string {
 		var s []string
-		for _, f := range kit.Frames[m] {
+		for _, f := range set.Frames[st] {
 			s = append(s, string(f))
 		}
 		return strings.Join(s, ",")
 	}
-	if got := frames(Dim); got != "idle-a,idle-b" {
+	if got := frames(kit, "idle"); got != "idle-a,idle-b" {
 		t.Errorf("idle frames: %s", got)
 	}
-	if got := frames(Scan); got != "work-1,work-2" {
-		t.Errorf("working frames: %s", got)
+	if got := frames(kit, "think"); got != "work-1,work-2" { // the old name works
+		t.Errorf("think frames from working/: %s", got)
 	}
-	if len(kit.Frames[Alert]) != 0 || len(kit.Frames[Normal]) != 0 {
-		t.Errorf("attention / done should be empty: %v", kit.Frames)
+	if got := frames(both, "think"); got != "new name" { // the new name wins when both exist
+		t.Errorf("think with both directories: %s", got)
 	}
-	// an ID is a hash of set, state, file name and bytes: 24 bits, not 0, the same wherever it is loaded
-	idle0, idle1 := kit.FrameID(Dim, 0), kit.FrameID(Dim, 1)
+	if len(kit.Frames["hi"]) != 0 || len(kit.Frames["success"]) != 0 || len(kit.Frames["write"]) != 0 {
+		t.Errorf("hi / success / write should be empty: %v", kit.Frames)
+	}
+	// an ID is a hash of set, directory, file name and bytes: 24 bits, not 0, the same wherever it is loaded
+	idle0, idle1 := kit.FrameID("idle", 0), kit.FrameID("idle", 8)
 	if idle0 != frameID("kit", "idle", "a.png", []byte("idle-a")) || idle1 != frameID("kit", "idle", "b.png", []byte("idle-b")) {
 		t.Errorf("ids: %x %x", idle0, idle1)
 	}
+	if kit.FrameID("think", 0) != frameID("kit", "working", "1.png", []byte("work-1")) {
+		t.Error("an alias frame is hashed under the directory it came from")
+	}
 	seen := map[uint32]bool{}
-	for _, id := range []uint32{idle0, idle1, kit.FrameID(Scan, 0), kit.FrameID(Scan, 1), Sets[1].FrameID(Dim, 0)} {
+	for _, id := range []uint32{idle0, idle1, kit.FrameID("think", 0), kit.FrameID("think", 1), kit.FrameID("read", 0), solo.FrameID("idle", 0)} {
 		if id == 0 || id > 0xffffff || seen[id] {
 			t.Errorf("ID %x is 0, over 24 bits or repeated", id)
 		}
@@ -91,11 +102,45 @@ func TestLoadSets(t *testing.T) {
 		frameID("kit", "idle", "a.png", nil) == frameID("zed", "idle", "a.png", nil) {
 		t.Error("different pictures, same ID")
 	}
-	if kit.FrameID(Dim, 2) != idle0 || kit.FrameID(Scan, 3) != kit.FrameID(Scan, 1) { // frames cycle
-		t.Errorf("cycle: %x %x", kit.FrameID(Dim, 2), kit.FrameID(Scan, 3))
+	if kit.FrameID("think", 2) != kit.FrameID("think", 0) || kit.FrameID("think", 3) != kit.FrameID("think", 1) { // frames cycle
+		t.Errorf("cycle: %x %x", kit.FrameID("think", 2), kit.FrameID("think", 3))
 	}
-	if kit.FrameID(Alert, 5) != kit.FrameID(Dim, 5) || kit.FrameID(Normal, 0) != idle0 { // no frames: idle's
-		t.Errorf("missing state does not fall back to idle")
+	// no frames: along the chain read / write / tool → think → idle, hi / success → idle, a stranger → idle
+	for st, via := range map[string]string{"read": "read", "write": "think", "tool": "think", "hi": "idle", "success": "idle", "unheard-of": "idle"} {
+		if got, want := kit.FrameID(st, 1), kit.FrameID(via, 1); got != want {
+			t.Errorf("%s: %x, want %s's %x", st, got, via, want)
+		}
+	}
+	for _, st := range []string{"read", "write", "tool"} { // a set with think but not these
+		if both.FrameID(st, 1) != both.FrameID("think", 1) {
+			t.Errorf("%s → think", st)
+		}
+	}
+	if solo.FrameID("tool", 5) != solo.FrameID("idle", 5) { // no think either: idle
+		t.Error("tool → think → idle")
+	}
+}
+
+// Idle's first frame is the resting face; the other frames (a blink) show for one tick in every 8,
+// one after another.
+func TestIdleBlink(t *testing.T) {
+	useSets(t, fstest.MapFS{"b/idle/1.png": file("rest"), "b/idle/2.png": file("blink"), "b/idle/3.png": file("wink"), "one/idle/1.png": file("only")})
+	b, one := Sets[0], Sets[1]
+	f := func(i int) uint32 { return b.ids["idle"][i] }
+	for tick, want := range map[int]uint32{0: f(0), 1: f(0), 7: f(0), 8: f(1), 9: f(0), 15: f(0), 16: f(2), 17: f(0), 24: f(1), 32: f(2), 800: f(2)} {
+		if got := b.FrameID("idle", tick); got != want {
+			t.Errorf("tick %d: frame %x, want %x", tick, got, want)
+		}
+	}
+	for tick := range 20 {
+		if one.FrameID("idle", tick) != one.ids["idle"][0] {
+			t.Errorf("one idle frame: tick %d", tick)
+		}
+	}
+	// the other states run on every tick
+	useSets(t, fstest.MapFS{"c/idle/1.png": file("i"), "c/think/1.png": file("t1"), "c/think/2.png": file("t2")})
+	if c := Sets[0]; c.FrameID("think", 0) == c.FrameID("think", 1) || c.FrameID("think", 8) != c.FrameID("think", 0) {
+		t.Error("think cycles every tick")
 	}
 }
 
@@ -109,7 +154,7 @@ func TestLoadSetsSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	sets, probs := loadSets(os.DirFS(root), "user")
-	if len(probs) != 0 || len(sets) != 1 || sets[0].ID != "linked" || len(sets[0].Frames[Dim]) != 1 || len(sets[0].Frames[Scan]) != 1 {
+	if len(probs) != 0 || len(sets) != 1 || sets[0].ID != "linked" || len(sets[0].Frames["idle"]) != 1 || len(sets[0].Frames["think"]) != 1 {
 		t.Errorf("symlinked set: %v %q", sets, probs)
 	}
 }
@@ -123,15 +168,18 @@ func TestBuiltinSet(t *testing.T) {
 	if !ok || s.Source != "builtin" || len(problems) != 0 {
 		t.Fatalf("aza_choi: %v %v problems %q", s, ok, problems)
 	}
-	for _, st := range states {
-		if len(s.Frames[st.Mood]) == 0 {
-			t.Errorf("no %s frames", st.Dir)
+	for _, st := range States { // pi-emote's own directories, but for success: that falls back to idle
+		if (len(s.Frames[st]) == 0) != (st == "success") {
+			t.Errorf("%s: %d frames", st, len(s.Frames[st]))
 		}
-		for _, f := range s.Frames[st.Mood] {
+		for _, f := range s.Frames[st] {
 			if !bytes.HasPrefix(f, []byte("\x89PNG")) {
-				t.Errorf("%s frame is not a PNG", st.Dir)
+				t.Errorf("%s frame is not a PNG", st)
 			}
 		}
+	}
+	if len(s.Frames["idle"]) != 2 {
+		t.Errorf("idle has the resting face and the blink: %d frames", len(s.Frames["idle"]))
 	}
 }
 
@@ -144,7 +192,7 @@ func TestUserSetReplacesBuiltin(t *testing.T) {
 		t.Fatal(err)
 	}
 	LoadSets()
-	if len(Sets) != 2 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || string(Sets[0].Frames[Dim][0]) != "mine" || Sets[1].ID != "zed" {
+	if len(Sets) != 2 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || string(Sets[0].Frames["idle"][0]) != "mine" || Sets[1].ID != "zed" {
 		t.Errorf("sets: %+v", Sets)
 	}
 }
@@ -237,7 +285,7 @@ func TestUpload(t *testing.T) {
 		}
 		want := more // later chunks carry only m
 		if i == 0 {
-			want = fmt.Sprintf("a=T,U=1,f=100,q=2,i=%d,c=6,r=2,%s", Sets[0].FrameID(Dim, 0), more)
+			want = fmt.Sprintf("a=T,U=1,f=100,q=2,i=%d,c=6,r=2,%s", Sets[0].FrameID("idle", 0), more)
 		}
 		if head != want {
 			t.Errorf("chunk %d control %q, want %q", i, head, want)

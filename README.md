@@ -116,10 +116,11 @@ default = "hash"                    # 没绑定的会话：hash = 按名字固�
 - **图片集**：一个目录 = 一个头像，目录名就是它的 id（和像素头像同一个命名空间，同名时图片集优先）：
 
   ```
-  ~/.config/agmux/avatars/<id>/{idle,working,attention,done}/*.png
+  ~/.config/agmux/avatars/<id>/{idle,think,read,write,tool,hi,success}/*.png
   ```
 
-  四个状态对应卡片的四种神态：`idle` 空闲、`working` 在跑、`attention` 等你处理、`done` 做完。同一个状态下放多张 PNG，按文件名排序就是动画帧，每 500ms 换一帧；某个状态没有目录就用 `idle` 的帧；**没有 `idle` 的集不算**，启动时底栏报一行。只认 `.png`，图不会被变暗或闪红，神态靠画。
+  状态名和 [pi-emote](https://github.com/shennguyenrs/pi-emote) 一样，它的角色目录可以原样丢进来（`talk` / `failure` / `compact` 没有对应的触发，放着不用）：`idle` 空闲；`think` 在跑且没有等工具（含只有子 agent 在跑）；`read` 等 Read / Grep / Glob / WebFetch / WebSearch；`write` 等 Write / Edit / MultiEdit / NotebookEdit；`tool` 等其它工具；`hi` 需要你处理（等权限、等回答）；`success` 做完了。某个状态没有帧时往下回落：`read` / `write` / `tool` → `think` → `idle`，`hi` / `success` → `idle`；**没有 `idle` 的集不算**，启动时底栏报一行。旧目录名 `working` / `attention` / `done` 仍认，分别等于 `think` / `hi` / `success`（新名优先）。
+  同一个状态下放多张 PNG，按文件名排序就是动画帧，每 500ms 换一帧；`idle` 例外：第一张是常态脸，其余的（比如眨眼）每 4 秒只露一帧。只认 `.png`，图不会被变暗或闪红，神态靠画。
 - **什么时候生效**：启动时一次性上传所有图（内置的 + 你的），所以看板开着时新建的目录要重开才认；之后在 `a` 里换头像不需要重传。图很小，退出时不删，留在终端里到关闭，下次启动同 id 覆盖。
 - **回落**：非 kitty 系终端、没开直通、或 `renderer = "pixel"` 时，绑了图片集的会话显示一个按集 id 固定挑出的像素头像。图片模式下卡片没有像素头像底边的 agentType 色带。
 - **内置**：`aza_choi`，来自 [pi-emote](https://github.com/shennguyenrs/pi-emote)（MIT，© Eiji Onchi）。许可文本见 `internal/avatar/sets/aza_choi/LICENSE-pi-emote`。

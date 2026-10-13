@@ -395,3 +395,42 @@ func TestAvatarImageSetIDs(t *testing.T) {
 		}
 	}
 }
+
+// The avatar state an image avatar shows, worked out once per poll: hi beats everything, a working
+// session is think / read / write / tool by its pending tool, then success, else idle.
+func TestAvatarState(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		r    ccmux.Session
+		want string
+	}{
+		{"idle", ccmux.Session{Status: "idle"}, "idle"},
+		{"done", ccmux.Session{Status: "idle", AttentionState: "read"}, "success"},
+		{"waiting", ccmux.Session{Status: "waiting"}, "hi"},
+		{"attention", ccmux.Session{Status: "working", AttentionType: "permission", PendingTool: "Bash"}, "hi"},
+		{"idle with attention", ccmux.Session{Status: "idle", AttentionType: "question", AttentionState: "read"}, "hi"},
+		{"working, no tool", ccmux.Session{Status: "working"}, "think"},
+		{"working on subagents", ccmux.Session{Status: "idle", Subagents: []ccmux.Subagent{{Status: "working"}}}, "think"},
+		{"Read", ccmux.Session{Status: "working", PendingTool: "Read"}, "read"},
+		{"Grep", ccmux.Session{Status: "working", PendingTool: "Grep"}, "read"},
+		{"Glob", ccmux.Session{Status: "working", PendingTool: "Glob"}, "read"},
+		{"WebFetch", ccmux.Session{Status: "working", PendingTool: "WebFetch"}, "read"},
+		{"WebSearch", ccmux.Session{Status: "working", PendingTool: "WebSearch"}, "read"},
+		{"Write", ccmux.Session{Status: "working", PendingTool: "Write"}, "write"},
+		{"Edit", ccmux.Session{Status: "working", PendingTool: "Edit"}, "write"},
+		{"MultiEdit", ccmux.Session{Status: "working", PendingTool: "MultiEdit"}, "write"},
+		{"NotebookEdit", ccmux.Session{Status: "working", PendingTool: "NotebookEdit"}, "write"},
+		{"Bash", ccmux.Session{Status: "working", PendingTool: "Bash"}, "tool"},
+		{"an MCP tool", ccmux.Session{Status: "working", PendingTool: "mcp__x__y"}, "tool"},
+		{"background", ccmux.Session{Status: "background"}, "idle"},
+	} {
+		c.r.ID = "id"
+		p := &Poller{StateDir: t.TempDir(), Show: func() ([]ccmux.Session, error) { return []ccmux.Session{c.r}, nil }}
+		if err := p.Refresh(); err != nil {
+			t.Fatal(err)
+		}
+		if got := p.Sessions()[0].AvatarState; got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}

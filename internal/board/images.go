@@ -13,10 +13,11 @@ import (
 // sets it once, after the pictures are uploaded.
 var useImages bool
 
-// avatarFace is the avatar's Height/2 lines of avatar.Width cells for a card.
+// avatarFace is the avatar's Height/2 lines of avatar.Width cells for a card: a picture of the
+// session's AvatarState, or a sprite in the mood.
 func avatarFace(s store.Session, mood avatar.Mood, frame int) []string {
 	if set, ok := avatar.SetByID(s.AvatarID); ok && useImages {
-		return avatar.Placeholder(set.FrameID(mood, frame))
+		return avatar.Placeholder(set.FrameID(s.AvatarState, frame))
 	}
 	return strings.Split(avatar.Render(avatar.SpriteFor(s.AvatarID), s.AgentType, mood, frame), "\n")
 }
