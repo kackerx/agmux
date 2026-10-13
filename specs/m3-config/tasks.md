@@ -208,3 +208,8 @@
 - 数据：ccmux `subagents` 只有 agentId、status、attentionType、pendingTool、lastActivityAt、startedAt、worktreePath——没有名字和任务描述；Claude Code 自己列表里的名字和「Committing quick-add styles…」来自父会话 jsonl 的 Task tool_use（subagent_type、description），要自己解析并按 agentId 对上。
 - 交互：子 agent 没有 pane，不能跳转、不能发消息，框里只能看。
 - 判断：`p` 预览已经能看到 Claude Code 屏幕底部那份列表，enter 跳过去也是一键；T36 已把 `agents ⚇ n` 改醒目。做下拉框是中等工作量换一个只读视图，先不做；要做时从 jsonl 的 Task 调用取 subagent_type + description。
+
+## 第六 + 七批审查最终结论（reviewer 2026-10-13，df3002b）
+- T34–T40 全部通过，无遗留必改；各任务关键变异在 df3002b 上整套重跑全被杀。
+- 不阻塞的遗留：T34 轮询删卡到下一帧之间（≤500ms）来滚轮，焦点停屏外直到下次按键；T35 页边杂点使网格漂移、`--layout 19` 用于 30 格 sheet 静默错切（照搬上游）；T38 外层终端停读 2s 后回落 passthrough 只有单测 / pipe 验证，未在真机试；T40 ruleGE / foldedRectH2 视觉等价。
+- 等 tester 整套回归结论。
