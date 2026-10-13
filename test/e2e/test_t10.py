@@ -286,6 +286,7 @@ class FakeTmux(unittest.TestCase):
         self.start()
         self.t.keys("H"); c = self.tcalls(2)
         self.assertEqual([x[0] for x in c], ["send-keys", "send-keys"])
+        wait(lambda: len(self.env.tmux_times()) >= 2, 3)  # the fake logs argv first, then spends a perl start on the timestamp: calls can be visible before their time is
         times = self.env.tmux_times()
         self.assertGreaterEqual(len(times), 2)
         self.assertGreaterEqual(times[1] - times[0], 0.14, f"Enter must wait ~150ms after the text (so Claude Code does not read it as paste): {times}")

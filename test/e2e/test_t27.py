@@ -82,21 +82,13 @@ class Absent(Base):
     def test_other_fields_named_effort_are_not_read(self): self.healthy({"reasoning_effort": "xhigh", "thinking": {"effort": "xhigh"}})
 
     # wrong types must not cost the model or the bar (review of b35eb49: json.Unmarshal type error threw the whole file away)
-    @unittest.expectedFailure  # b35eb49 defect: wrong-typed effort makes readHUD drop the whole file (remove when fixed)
     def test_level_number(self): self.healthy({"effort": {"level": 3}})
-    @unittest.expectedFailure  # b35eb49 defect: wrong-typed effort makes readHUD drop the whole file (remove when fixed)
     def test_level_array(self): self.healthy({"effort": {"level": ["high"]}})
-    @unittest.expectedFailure  # b35eb49 defect: wrong-typed effort makes readHUD drop the whole file (remove when fixed)
     def test_level_object(self): self.healthy({"effort": {"level": {"x": 1}}})
-    @unittest.expectedFailure  # b35eb49 defect: wrong-typed effort makes readHUD drop the whole file (remove when fixed)
     def test_level_bool(self): self.healthy({"effort": {"level": True}})
-    @unittest.expectedFailure  # b35eb49 defect: wrong-typed effort makes readHUD drop the whole file (remove when fixed)
     def test_effort_top_level_string_xhigh(self): self.healthy({"effort": "xhigh"})
-    @unittest.expectedFailure  # b35eb49 defect: wrong-typed effort makes readHUD drop the whole file (remove when fixed)
     def test_effort_top_level_string_high(self): self.healthy({"effort": "high"})
-    @unittest.expectedFailure  # b35eb49 defect: wrong-typed effort makes readHUD drop the whole file (remove when fixed)
     def test_effort_number(self): self.healthy({"effort": 3})
-    @unittest.expectedFailure  # b35eb49 defect: wrong-typed effort makes readHUD drop the whole file (remove when fixed)
     def test_effort_array(self): self.healthy({"effort": ["high"]})
 
     def test_no_model_in_payload_does_not_crash(self):  # effort rides on the model; nothing to attach it to
