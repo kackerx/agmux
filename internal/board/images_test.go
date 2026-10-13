@@ -14,8 +14,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -582,11 +584,20 @@ func TestAvatarGridEverywhere(t *testing.T) {
 // In tmux the pictures are written to the real terminal's client tty, bare, and tmux is told to
 // redraw that client afterwards; a tty that cannot be opened falls back to tmux's passthrough on
 // stdout, and says so.
+// asFile makes the "tty" an ordinary file for the test (the real opener takes only devices).
+func asFile(t *testing.T) {
+	t.Helper()
+	old := openTTY
+	openTTY = func(path string) (io.WriteCloser, error) { return os.OpenFile(path, os.O_WRONLY, 0) }
+	t.Cleanup(func() { openTTY = old })
+}
+
 func TestUploadImages(t *testing.T) {
 	useKit(t)
 	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
 	tty := filepath.Join(t.TempDir(), "ttys001")
 	os.WriteFile(tty, nil, 0o644)
+	asFile(t)
 	r := &fakeRunner{}
 	note, err := uploadImages(ImageMode{On: true, Client: "/dev/c", TTY: tty, Note: "kept"}, r)
 	got, _ := os.ReadFile(tty)
@@ -636,5 +647,92 @@ func TestUploadImagesWriteError(t *testing.T) {
 	got, _ := os.ReadFile(out.Name())
 	if err != nil || !strings.Contains(note, "input/output error") || strings.Contains(note, "stale") || !strings.HasPrefix(string(got), "\x1bPtmux;") {
 		t.Errorf("err %v, note %q, stdout %.40q", err, note, got)
+	}
+}
+
+// Outside tmux the upload goes to stdout and switches to the alternate screen first (T28: kitty
+// keeps pictures per screen, the board runs on the alternate one).
+func TestUploadImagesOutsideTmux(t *testing.T) {
+	useKit(t)
+	t.Setenv("TMUX", "")
+	out, _ := os.Create(filepath.Join(t.TempDir(), "stdout"))
+	old := os.Stdout
+	os.Stdout = out
+	note, err := uploadImages(ImageMode{On: true}, &fakeRunner{})
+	os.Stdout = old
+	out.Close()
+	got, _ := os.ReadFile(out.Name())
+	if err != nil || note != "" || !strings.HasPrefix(string(got), "\x1b[?1049h\x1b_Ga=T") {
+		t.Errorf("outside tmux: err %v note %q stdout %.30q", err, note, got)
+	}
+}
+
+// refresh-client failing (the client detached meanwhile, an old tmux) is not fatal and says nothing.
+func TestUploadImagesRefreshFailNotFatal(t *testing.T) {
+	useKit(t)
+	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
+	tty := filepath.Join(t.TempDir(), "ttys001")
+	os.WriteFile(tty, nil, 0o644)
+	asFile(t)
+	r := &fakeRunner{tmuxFail: map[string]error{"refresh-client": errors.New("can't find client: /dev/c")}}
+	note, err := uploadImages(ImageMode{On: true, Client: "/dev/c", TTY: tty}, r)
+	got, _ := os.ReadFile(tty)
+	if err != nil || note != "" || !strings.HasPrefix(string(got), "\x1b_Ga=T") {
+		t.Errorf("refresh-client failed: err %v note %q tty %.30q", err, note, got)
+	}
+}
+
+// Only a device is opened as a client's tty: a name that is a file (client_tty empty: the name
+// "client-123" is used) is not written, the upload goes through passthrough with a note.
+func TestOpenClientTTYOnlyDevices(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "client-123")
+	os.WriteFile(f, nil, 0o644)
+	if w, err := openClientTTY(f); err == nil {
+		w.Close()
+		t.Fatal("opened a file as a tty")
+	}
+	w, err := openClientTTY("/dev/null")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := w.Write([]byte("x")); n != 1 || err != nil {
+		t.Errorf("write to /dev/null: %d %v", n, err)
+	}
+	w.Close()
+}
+
+// A tty that takes bytes slowly is waited for; one that stops taking them is an error after ttyStall,
+// and the board's upload falls back (it must not hang on a terminal that stopped reading).
+func TestTTYWriterWaitsAndStalls(t *testing.T) {
+	var fds [2]int
+	if err := syscall.Pipe(fds[:]); err != nil {
+		t.Fatal(err)
+	}
+	syscall.SetNonblock(fds[1], true)
+	t.Cleanup(func() { syscall.Close(fds[0]); syscall.Close(fds[1]) })
+	old := ttyStall
+	ttyStall = 100 * time.Millisecond
+	t.Cleanup(func() { ttyStall = old })
+	big := make([]byte, 300<<10) // far more than a pipe holds
+	got := make(chan int)
+	go func() { // a slow reader: takes a little every few ms
+		n := 0
+		buf := make([]byte, 8<<10)
+		for n < len(big) {
+			m, _ := syscall.Read(fds[0], buf)
+			n += m
+			time.Sleep(5 * time.Millisecond) // all in all several times ttyStall: only progress keeps the writer waiting
+		}
+		got <- n
+	}()
+	if n, err := (ttyWriter{fds[1]}).Write(big); n != len(big) || err != nil {
+		t.Fatalf("slow reader: wrote %d of %d, %v", n, len(big), err)
+	}
+	<-got
+	// nobody reads: the pipe fills and the write gives up
+	start := time.Now()
+	n, err := (ttyWriter{fds[1]}).Write(big)
+	if err == nil || n >= len(big) || time.Since(start) > 3*time.Second || !strings.Contains(err.Error(), "stopped reading") {
+		t.Errorf("stalled: wrote %d, %v after %v", n, err, time.Since(start))
 	}
 }

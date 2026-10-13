@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/config"
@@ -130,7 +132,51 @@ func hintPixel(force bool) string {
 }
 
 // openTTY opens a client's tty for writing; tests replace it.
-var openTTY = func(path string) (io.WriteCloser, error) { return os.OpenFile(path, os.O_WRONLY, 0) }
+var openTTY = openClientTTY
+
+// ttyStall is how long a tty may take nothing at all before the upload gives up on it: the outer
+// terminal has stopped reading, and the board must still start.
+var ttyStall = 2 * time.Second
+
+// openClientTTY opens only a device (a client_name that is not a tty, "client-123", would otherwise
+// name a file in the current directory), without blocking and without becoming its controlling terminal.
+func openClientTTY(path string) (io.WriteCloser, error) {
+	if !strings.HasPrefix(path, "/dev/") {
+		return nil, fmt.Errorf("%q is not a device", path)
+	}
+	fd, err := syscall.Open(path, syscall.O_WRONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, err
+	}
+	return ttyWriter{fd}, nil
+}
+
+// ttyWriter writes to a non-blocking fd: a full tty is waited out while it keeps taking bytes, and
+// an error (a stall) when it takes none for ttyStall. (os.File would wait for it for ever.)
+type ttyWriter struct{ fd int }
+
+func (w ttyWriter) Write(p []byte) (done int, err error) {
+	last := time.Now()
+	for done < len(p) {
+		n, err := syscall.Write(w.fd, p[done:])
+		if n > 0 {
+			done, last = done+n, time.Now()
+		}
+		switch {
+		case err == nil || err == syscall.EINTR:
+		case err == syscall.EAGAIN:
+			if time.Since(last) > ttyStall {
+				return done, fmt.Errorf("the terminal stopped reading (%v with no progress)", ttyStall)
+			}
+			time.Sleep(time.Millisecond)
+		default:
+			return done, err
+		}
+	}
+	return done, nil
+}
+
+func (w ttyWriter) Close() error { return syscall.Close(w.fd) }
 
 // uploadImages sends the pictures where the terminal that stores them can be reached: to the tty of
 // the tmux client in the real terminal, or, if that cannot be opened or written, through tmux's
