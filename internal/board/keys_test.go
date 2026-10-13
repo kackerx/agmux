@@ -3591,3 +3591,28 @@ func TestScrollCards(t *testing.T) {
 		t.Errorf("k with the focus on screen: scrolled %v, off %d -> %d", m.scrolled, o, off(m))
 	}
 }
+
+// The board has no focus until the first event sets it: a wheel or ctrl+d as the very first event
+// must scroll (the focus appearing is not the focus moving out of view).
+func TestScrollAsFirstEvent(t *testing.T) {
+	var ss staticSrc
+	for i := range 22 {
+		ss = append(ss, store.Session{ID: fmt.Sprintf("s%02d", i), Name: fmt.Sprintf("n%02d", i), GroupKey: "/a", Status: "idle", ContextPct: -1})
+	}
+	first := map[string]func(Model) Model{
+		"wheel": func(m Model) Model {
+			tm, _ := m.Update(tea.MouseMsg{X: 10, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+			return tm.(Model)
+		},
+		"ctrl+d": func(m Model) Model { m, _ = press(t, m, "ctrl+d"); return m },
+	}
+	for name, ev := range first {
+		m := New(ss, &fakeRunner{})
+		m.getenv = func(string) string { return "" }
+		tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+		m = ev(tm.(Model))
+		if _, off, _, _ := m.window(); !m.scrolled || off == 0 {
+			t.Errorf("%s as the first event: scrolled %v, off %d", name, m.scrolled, off)
+		}
+	}
+}

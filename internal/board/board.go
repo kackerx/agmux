@@ -219,7 +219,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return tm, cmd
 		}
 		nm.scroll = 0 // a new card starts at the bottom
-		nm.followHidden()
+		// the first event sets the focus (current()): that is not the focus moving, and nothing is scrolled yet
+		if before != "" {
+			nm.followHidden()
+		}
 		capture := nm.capture()
 		return nm, tea.Batch(cmd, capture)
 	}
