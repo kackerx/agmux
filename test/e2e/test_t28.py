@@ -53,6 +53,27 @@ class Fixtures(unittest.TestCase):
         self.assertEqual([(c[1], c[3], c[4]) for c in cells if c[0] == 2], [(2 + k, 1, k) for k in range(6)])
         rows = parse_screen(raw); self.assertEqual(sum(1 for x in rows[1].cells if x[0] == PLACEHOLDER), 6, "parse_screen sees one cell per placeholder")
 
+    def test_png_can_be_non_square_and_bad_png_is_not_a_png(self):
+        import struct
+        w, h = struct.unpack(">II", png((1, 2, 3), 200, height=100)[16:24]); self.assertEqual((w, h), (200, 100)); self.assertTrue(BAD_PNG.startswith(b"\x89PNG"))
+
+    def test_state_set_has_every_pi_emote_state_directory(self):
+        env = Env(); self.addCleanup(env.cleanup); d = state_set(env.tmp / "cfg", "demo", {"read": 0, "idle": 2})
+        self.assertEqual(sorted(p.name for p in d.iterdir()), sorted(set(AVATAR_STATES) - {"read"})); self.assertEqual(len(list((d / "idle").glob("*.png"))), 2)
+
+    def test_states_fixture_cards_show_the_status_they_stand_for(self):
+        env = Env(); self.addCleanup(env.cleanup); exp = build_states_fixture(env); self.assertEqual(len(exp), 17)
+        t = Term(env, w=200, h=40); self.addCleanup(t.close)
+        self.assertTrue(wait(lambda: len(find_cards(t.snap())) == 17, 8), t.text()); cs = find_cards(t.snap())
+        word = {"think": "working", "read": "working", "write": "working", "tool": "working", "hi": None, "success": "done", "idle": "idle"}
+        for name, state in exp.items():
+            c = [x for x in cs if name in x.line(1)]; self.assertEqual(len(c), 1, name); l3 = c[0].line(3)
+            if name == "s-waiting": self.assertIn("waiting", l3)
+            elif name == "s-attention": self.assertIn("working", l3)
+            else: self.assertIn(word[state], l3, f"{name}: {l3}")
+        for tool in ("s-read:Read", "s-write:Write", "s-bash:Bash"):
+            n, tl = tool.split(":"); self.assertIn(tl, [x for x in cs if n in x.line(1)][0].line(3), "the pending tool is on the card's third line")
+
     def test_ptyrun_records_bytes_and_exit_status(self):  # baseline binary: starts on a bare pty, q quits, no graphics sequence (pre-T28 behaviour; T28 tests replace this expectation)
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
         r = PtyRun(env); self.addCleanup(r.close)
@@ -61,7 +82,7 @@ class Fixtures(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------------------------------------------- product tests (4648d7d)
-SETS = HERE.parent.parent / "internal" / "avatar" / "sets" / "aza_choi"  # the built-in set's source frames: idle.png, think_1..4, hi_1..4, talk_1..4
+SETS = SRC / "internal" / "avatar" / "sets" / "aza_choi"  # the built-in set's source frames: idle.png, think_1..4, hi_1..4, talk_1..4
 BUILTIN = [("idle", ["idle.png"]), ("working", [f"think_{i}.png" for i in range(1, 5)]), ("attention", [f"hi_{i}.png" for i in range(1, 5)]), ("done", [f"talk_{i}.png" for i in range(1, 5)])]
 # fixture (test_t3): who is in which state; the image set follows the mood: working -> working frames, idle -> idle, alert -> attention, done -> done frames
 MOOD = {"alpha-main": "working", "bravo-29": "working", "charlie-30": "idle", "pj-fallback": "idle", "bravo-bg": "idle", "delta-60": "attention", "告警会话": "attention",

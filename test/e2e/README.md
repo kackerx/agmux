@@ -10,7 +10,7 @@ AGMUX_BIN=/tmp/agmux python3 -m unittest -v                 # 全部，约 2 分
 AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 ```
 
-- 需要 `tmux`（3.x）和 `python3`（3.10+，只用标准库）。`AGMUX_BIN` 缺省为 `~/go/bin/agmux`。
+- 需要 `tmux`（3.x）和 `python3`（3.10+，只用标准库）。`AGMUX_BIN` 缺省为 `~/go/bin/agmux`。`AGMUX_SRC` = 被测二进制对应的源码树（读内置头像图集、README；缺省是本仓库，共享工作区里别人改一半的文件会被读到，所以测某个 commit 时指向它的 worktree）。
 - **tmux 必须用独立 socket `-L agmux-test`**（`lib.py` 里写死为缺省值），绝不碰用户自己的 tmux server。多个角色同机跑时用 `AGMUX_TEST_SOCK=<别的名字>` 换 socket（开发 `agmux-dev`、审查 `agmux-review`），因为每次测完会 `kill-server`，共用一个名字会互相把对方的 server 杀掉。
 - 同一个 socket 名同时只允许一个套件在跑（`.lock-<socket 名>` 文件上的 flock，不同 socket 名互不阻塞），第二个会排队。
 

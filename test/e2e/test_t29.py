@@ -197,7 +197,7 @@ class AvatarsCmd(Base):
 
 class Readme(unittest.TestCase):
     """The configuration example in README.md is a real config: it loads, and its [avatars] lines are what `agmux config` prints by default."""
-    README = (HERE.parent.parent / "README.md").read_text()
+    README = (SRC / "README.md").read_text()
 
     def block(self):
         m = re.search(r"### 配置.*?```toml\n(.*?)```", self.README, re.S); self.assertTrue(m, "no toml block under ### 配置"); return m.group(1)

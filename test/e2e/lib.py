@@ -8,6 +8,7 @@ import atexit, datetime, fcntl, json, os, pathlib, re, shlex, shutil, subprocess
 BIN = os.environ.get("AGMUX_BIN") or os.path.expanduser("~/go/bin/agmux")
 SOCK = os.environ.get("AGMUX_TEST_SOCK", "agmux-test")  # convention: agmux-test; override when another session shares the machine
 HERE = pathlib.Path(__file__).resolve().parent
+SRC = pathlib.Path(os.environ.get("AGMUX_SRC") or HERE.parent.parent)  # source tree of the binary under test (README, built-in avatar sets): set AGMUX_SRC to its worktree; the shared workspace may hold someone's half-done edits
 
 _lock = open(HERE / f".lock-{os.environ.get('AGMUX_TEST_SOCK', 'agmux-test')}", "w")  # one runner per tmux socket name; other roles use other sockets
 fcntl.flock(_lock, fcntl.LOCK_EX)
@@ -537,7 +538,7 @@ ID_BASE = 0x00C0DE00
 KITTY_ENV = "TMUX=/fake/tmux,1,0 "  # extra_env for Term / ptyrun: agmux believes it runs inside tmux (the fake tmux answers); TERM stays xterm-256color
 
 
-def png(rgb=(200, 60, 60), size=8, noise=False):
+def png(rgb=(200, 60, 60), size=8, noise=False, height=None):
     """A tiny valid PNG (solid colour); different colours make different bytes, so frames are tellable apart."""
     import struct, zlib
     def chunk(t, d):
@@ -545,8 +546,9 @@ def png(rgb=(200, 60, 60), size=8, noise=False):
         return c + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
     import random
     rnd = random.Random(sum(rgb))  # noise=True: incompressible pixels, to get an upload that needs several 4096-byte chunks
-    raw = b"".join(b"\x00" + (bytes(rnd.randrange(256) for _ in range(size * 3)) if noise else bytes(rgb) * size) for _ in range(size))
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+    height = height or size  # size = width in pixels
+    raw = b"".join(b"\x00" + (bytes(rnd.randrange(256) for _ in range(size * 3)) if noise else bytes(rgb) * size) for _ in range(height))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
 
 def write_avatar_set(cfg, name, states, **files):
@@ -556,7 +558,7 @@ def write_avatar_set(cfg, name, states, **files):
     for si, (st, n) in enumerate(states.items()):
         (base / st).mkdir(parents=True, exist_ok=True)
         for k in range(n):
-            (base / st / f"{k + 1:02d}.png").write_bytes(png((40 + 50 * si, 30 + 40 * k, 200 - 30 * k)))
+            (base / st / f"{k + 1:02d}.png").write_bytes(png(((40 + 31 * si) % 256, (30 + 40 * k) % 256, (200 - 30 * k) % 256)))
     for rel, data in files.items():
         (base / rel).parent.mkdir(parents=True, exist_ok=True); (base / rel).write_bytes(data if isinstance(data, bytes) else data.encode())
     return base
@@ -699,3 +701,54 @@ def upload_ids(env, cfg, extra=None):
         return {v["data"]: i for i, v in kitty_images(kitty_commands(bytes(r.data))).items()}
     finally:
         r.close()
+
+
+# ---------------------------------------------------------------- T30-T32 fixtures
+BAD_PNG = b"\x89PNG\r\n\x1a\nnot really"  # a .png whose header cannot be read: its size is unknown
+AVATAR_STATES = ("idle", "think", "read", "write", "tool", "hi", "success")  # pi-emote's state directories (T30); old names working / attention / done are aliases
+
+
+def state_set(cfg, name, frames=None, **files):
+    """A user image set with every T30 state directory: idle has 3 frames (the first is the calm face, the others blink), the others one each; frames overrides
+    ({"idle": 2, "read": 3, ...}; a state with 0 gets no directory)."""
+    n = {"idle": 3, **{s: 1 for s in AVATAR_STATES[1:]}, **(frames or {})}
+    return write_avatar_set(cfg, name, {s: k for s, k in n.items() if k}, **files)
+
+
+# every session of build_states_fixture: name -> (avatar state it must show, status, pendingTool, attentionType, attentionState, subagents)
+STATE_CASES = {
+    "s-idle": ("idle", "idle", None, None, None, []),
+    "s-think": ("think", "working", None, None, None, []),
+    "s-agents": ("think", "idle", None, None, None, [{"agentId": "y1", "status": "working", "pendingTool": None}]),  # raw idle, a subagent works -> `⏵ working · agents`
+    "s-read": ("read", "working", "Read", None, None, []), "s-grep": ("read", "working", "Grep", None, None, []), "s-glob": ("read", "working", "Glob", None, None, []),
+    "s-webfetch": ("read", "working", "WebFetch", None, None, []), "s-websearch": ("read", "working", "WebSearch", None, None, []),
+    "s-write": ("write", "working", "Write", None, None, []), "s-edit": ("write", "working", "Edit", None, None, []),
+    "s-multiedit": ("write", "working", "MultiEdit", None, None, []), "s-notebook": ("write", "working", "NotebookEdit", None, None, []),
+    "s-bash": ("tool", "working", "Bash", None, None, []), "s-mcp": ("tool", "working", "mcp__srv__do", None, None, []),
+    "s-attention": ("hi", "working", "Bash", "permission", None, []),  # needs you even though a tool is pending
+    "s-waiting": ("hi", "waiting", None, None, None, []),
+    "s-done": ("success", "idle", None, None, "unread", []),
+}
+
+
+def build_states_fixture(env, cases=None):
+    """One session per STATE_CASES entry (17), five per project group (so 4 columns at 200 wide, ~25 rows: use h >= 30), fake panes %201.. .
+    Returns {name: expected avatar state}. Replaces whatever show.json held; with_hud sessions are not needed here."""
+    cases = cases or STATE_CASES
+    now = datetime.datetime.now(datetime.timezone.utc); h = env.home; out, S = {}, []
+    for i, (name, (state, status, tool, att, attstate, subs)) in enumerate(cases.items()):
+        g = f"g{i // 5}"
+        S.append(dict(id=f"s{i:02d}", summary=name, agentType="claude", cwd=f"{h}/work/{g}", project=g, mainRepoRoot=f"{h}/work/{g}", gitBranch="main", status=status,
+                      attentionType=att, pendingTool=tool, tmuxPane=f"%{201 + i}", trackingMode="native", subagents=subs, nativeSessionId=f"n-s{i:02d}", logPath=None,
+                      lastActivityAt=iso(now - datetime.timedelta(seconds=90)), updatedAt=iso(now), backgroundDetail=None, lastPrompt=None, attentionState=attstate))
+        out[name] = state
+    env.write_show(S); env.pane_ids = {s["tmuxPane"]: s["id"] for s in S}
+    return out
+
+
+def sample_series(fn, secs, step=0.05):
+    """[(t, fn())] for secs seconds: fn reads the screen and returns what to track (an image id, a status word...)."""
+    t0, out = time.time(), []
+    while time.time() - t0 < secs:
+        out.append((time.time() - t0, fn())); time.sleep(step)
+    return out
