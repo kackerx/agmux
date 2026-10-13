@@ -663,6 +663,11 @@ class PtyRun:
                 break
             if not d: break
             self.data += d
+            try:  # a terminal answers what termenv / bubbletea ask at start-up; unanswered they wait seconds before going on
+                if b"\x1b]11;?" in d: os.write(self.fd, b"\x1b]11;rgb:0000/0000/0000\x1b\\")
+                if b"\x1b[6n" in d: os.write(self.fd, b"\x1b[1;1R")
+            except OSError:
+                break
 
     def send(self, s):
         os.write(self.fd, s if isinstance(s, bytes) else s.encode())
@@ -681,3 +686,16 @@ class PtyRun:
             except OSError: pass
         try: os.close(self.fd)
         except OSError: pass
+
+
+def upload_ids(env, cfg, extra=None):
+    """Start agmux on a bare pty as a kitty terminal would see it, let it upload, quit: {png bytes: image id}. Independent of how ids are numbered, so a test can
+    say 'this card shows the frame of such-and-such file' (needs the fixture sessions in env: it waits for the first card)."""
+    e = {"XDG_CONFIG_HOME": str(cfg), "TERM": "xterm-kitty", **(extra or {})}
+    r = PtyRun(env, extra=e)
+    try:
+        assert wait(lambda: b"alpha-main" in bytes(r.data), 8), bytes(r.data)[-300:]
+        r.send("q"); r.exited(5)
+        return {v["data"]: i for i, v in kitty_images(kitty_commands(bytes(r.data))).items()}
+    finally:
+        r.close()

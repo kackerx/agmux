@@ -6,30 +6,44 @@ Idle / done cards show the sprite exactly as `agmux avatars` prints it (no eye a
 import json, subprocess, unittest
 import test_t12 as _t12
 from lib import *
-from test_t2 import chars, run_avatars, parse_blocks
+from test_t2 import chars, run_avatars, parse_blocks, sprite_blocks
 from test_t3 import ready, by_name, NAMES, last_text_row, border_colours, C_FOCUS
 from test_t11 import PreviewBase, CAT_CMD
 
+def _fnv(s):
+    h = 2166136261
+    for b in s.encode(): h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+    return h
+
+
+HASHED_SPRITE = f"bot-0{_fnv('aza_choi') % 6 + 1}"  # a set drawn as a sprite (pixel mode) = Sprites[fnv32a(set id) % 6]
 IDLE = ("a2", "c1", "c2", "e1")  # a2 pj-fallback (no summary: named after its project), c1 charlie-30, c2 charlie-59, e1 echo-long
 UNIQUE = ["bot-02", "bot-03", "bot-04", "bot-05"]  # bot-01 and bot-06 print the same glyphs (they differ in colour only), so a card's sprite can only be told apart by glyphs for these
 IDS = ["bot-01", "bot-02", "bot-03", "bot-04", "bot-05", "bot-06"]
+LISTING = ["aza_choi"] + IDS  # T29: the picker lists the image sets first (the built-in one), then the sprites
 SPRITE_NAMES = ["Clawd", "Boxy", "Sprout", "Boo", "Mochi", "Cyclops"]
 
 
-def overlay(snap):
-    """The picker: dict(title, rows=[dict(id, name, sprite, marker, current)]) or None when it is not on screen."""
+def overlay(snap, sets=("aza_choi",)):
+    """The picker: dict(title, rows=[dict(id, name, sprite, marker, current)]) or None when it is not on screen. T29: image sets are listed first and have an id but no name
+    (name None); `sets` are the set ids to look for. sprite = the two 6-cell face rows left of the id (pixel glyphs, or placeholder cells in image mode)."""
     title = next((r for r in snap if "avatar for " in r.text), None)
     if not title:
         return None
     name = re.search(r"avatar for ([^│]*?)\s*│", title.text).group(1)
     rows = []
     for i, row in enumerate(snap):
-        m = re.search(r"(bot-\d\d)  (\S+)", row.text)
-        if not m:
-            continue
-        c = row.find(m.group(1))
+        m = re.search(r"(?<![\w-])(bot-\d\d)  (\S+)", row.text)
+        if m:
+            sid, sname = m.group(1), m.group(2)
+        else:
+            m = re.search(r"(?<![\w-])(" + "|".join(map(re.escape, sets)) + r")(?![\w-])", row.text)
+            if not m or "avatar for" in row.text:
+                continue
+            sid, sname = m.group(1), None
+        c = row.find(sid)
         top = "".join(x[0] for x in row.cells[c - 8:c - 2]); bottom = "".join(x[0] for x in snap[i + 1].cells[c - 8:c - 2])
-        rows.append(dict(id=m.group(1), name=m.group(2), sprite=(top, bottom), marker="▸" in row.text, current=row.cells[c][1] == C_FOCUS))
+        rows.append(dict(id=sid, name=sname, sprite=(top, bottom), marker="▸" in row.text, current=row.cells[c][1] == C_FOCUS, row=i, col=c))
     c0 = title.find("avatar for"); c1 = c0 + disp_width("avatar for " + name)
     left = max(i for i in range(c0) if title.cells[i][0] == "│"); right = min(i for i in range(c1, len(title.cells)) if title.cells[i][0] == "│")
     return dict(title="avatar for " + name, rows=rows, cols=(c0, c0 + 26), box=(left, right))
@@ -41,7 +55,7 @@ class Base(unittest.TestCase):
         self.cfg = self.env.tmp / "cfg"; (self.cfg / "agmux").mkdir(parents=True)
         self.conf = self.cfg / "agmux" / "config.toml"
         self.json = self.env.state / "agmux" / "avatars.json"
-        self.blocks = {b[0].split("  ")[0]: tuple(b[1:]) for b in parse_blocks(run_avatars(self.env).stdout)}
+        self.blocks = {b[0].split("  ")[0]: tuple(b[1:]) for b in sprite_blocks(run_avatars(self.env).stdout)}
 
     def config(self, text):
         self.conf.write_text(text)
@@ -75,9 +89,9 @@ class Base(unittest.TestCase):
         self.assertEqual(len(at), 1, f"exactly one cursor row: {ov}"); return at[0]
 
     def move_to(self, t, want):
-        """Move the cursor to sprite id `want` with j/k, whatever row it starts on."""
-        for _ in range(8):
-            i = self.cursor(t); w = IDS.index(want)
+        """Move the cursor to avatar id `want` with j/k, whatever row it starts on."""
+        for _ in range(9):
+            i = self.cursor(t); w = LISTING.index(want)
             if i == w:
                 return
             t.keys("j" if w > i else "k"); time.sleep(0.2)
@@ -91,12 +105,13 @@ class Picker(Base):
     def test_footer_lists_the_key(self):
         t = self.board(); self.assertIn("a avatar", last_text_row(t.snap()))
 
-    def test_a_opens_a_centred_list_of_the_six_sprites(self):
+    def test_a_opens_a_centred_list_of_the_set_then_the_six_sprites(self):
         t = self.board(); self.to_a2(t); cur = self.id_of(t, "a2")
         ov = self.open_picker(t)
         self.assertEqual(ov["title"], "avatar for pj-fallback", "the title names the focused card")
-        self.assertEqual([r["id"] for r in ov["rows"]], IDS); self.assertEqual([r["name"] for r in ov["rows"]], SPRITE_NAMES)
-        self.assertEqual([r["sprite"] for r in ov["rows"]], [self.blocks[i] for i in IDS], "each row shows the sprite `agmux avatars` prints for that id")
+        self.assertEqual([r["id"] for r in ov["rows"]], LISTING); self.assertEqual([r["name"] for r in ov["rows"]], [None] + SPRITE_NAMES, "the set row has an id only")
+        self.assertEqual([r["sprite"] for r in ov["rows"]][1:], [self.blocks[i] for i in IDS], "each sprite row shows the sprite `agmux avatars` prints for that id")
+        self.assertEqual(ov["rows"][0]["sprite"], self.blocks[HASHED_SPRITE], "pixel mode: the set row is drawn with the sprite its id hashes to (fnv32a('aza_choi') % 6)")
         self.assertEqual(len([r for r in ov["rows"] if r["current"]]), 1); self.assertIn([r["id"] for r in ov["rows"] if r["current"]][0], cur, "the current avatar (the card's) is drawn in the focus colour, only that one")
         mid = (ov["cols"][0] + ov["cols"][1]) // 2  # centred: the picker is not stuck in a corner
         self.assertLess(abs(mid - 100), 16, f"horizontally centred on 200 columns: {ov['cols']}")
@@ -110,9 +125,9 @@ class Picker(Base):
         t.keys("j"); time.sleep(0.2); self.assertEqual(self.cursor(t), 1)
         for _ in range(9):
             t.keys("j"); time.sleep(0.1)
-        self.assertEqual(self.cursor(t), 5, "j at the last row stays there")
-        t.keys("Down"); time.sleep(0.2); self.assertEqual(self.cursor(t), 5)
-        t.keys("Up"); time.sleep(0.2); self.assertEqual(self.cursor(t), 4, "arrows move too (the default up / down keys)")
+        self.assertEqual(self.cursor(t), 6, "j at the last row stays there")
+        t.keys("Down"); time.sleep(0.2); self.assertEqual(self.cursor(t), 6)
+        t.keys("Up"); time.sleep(0.2); self.assertEqual(self.cursor(t), 5, "arrows move too (the default up / down keys)")
 
     def test_cursor_starts_on_the_current_avatar(self):
         t = self.board(); self.to_a2(t); cur = self.id_of(t, "a2")
@@ -123,7 +138,7 @@ class Picker(Base):
     def test_j_j_enter_binds_the_avatar_two_below_the_current_one(self):
         self.env.avatars_json({"pj-fallback": "bot-02"})
         t = self.board(); self.to_a2(t)
-        self.open_picker(t); self.assertEqual(self.cursor(t), 1, "the cursor opens on bot-02, the current avatar")
+        self.open_picker(t); self.assertEqual(self.cursor(t), 2, "the cursor opens on bot-02, the current avatar (row 2: the set is row 0)")
         t.keys("j"); time.sleep(0.2); t.keys("j"); time.sleep(0.2); t.keys("Enter"); time.sleep(0.8)
         self.assertEqual(json.loads(self.json.read_text()), {"pj-fallback": "bot-04"})
         self.assertEqual(self.id_of(t, "a2"), ("bot-04",))
@@ -412,14 +427,14 @@ class ConfigErrors(Base):
     def test_config_prints_the_avatars_sections_and_round_trips(self):
         self.config('[avatars]\ndefault = "bot-02"\n[avatars.bind]\n"pj-fallback" = "bot-05"\n')
         out = self.cli("config").stdout
-        self.assertIn('avatar = ["a"]', out); self.assertIn("[avatars]\ndefault = \"bot-02\"", out); self.assertIn('"pj-fallback" = "bot-05"', out)
+        self.assertIn('avatar = ["a"]', out); self.assertIn('[avatars]\nrenderer = "auto"\ndefault = "bot-02"', out); self.assertIn('"pj-fallback" = "bot-05"', out)
         self.config(out)
         r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr); self.assertEqual(r.stdout, out, "idempotent")
         t = self.board(); self.assertEqual((self.id_of(t, "a2"), self.id_of(t, "c1")), (("bot-05",), ("bot-02",)))
 
     def test_default_dump_says_hash_and_has_no_binds(self):
         out = self.cli("config").stdout
-        self.assertIn('[avatars]\ndefault = "hash"', out); self.assertNotIn("pj-fallback", out)
+        self.assertIn('[avatars]\nrenderer = "auto"\ndefault = "hash"', out); self.assertNotIn("pj-fallback", out)
         self.config(out); self.assertEqual(self.cli("config").returncode, 0)
 
 

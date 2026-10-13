@@ -104,7 +104,8 @@ class Passthrough(PreviewBase):
         full = lambda: "".join(tm("capture-pane", "-p", "-J", "-t", self.panes["a3"]).stdout.split("\n")).rstrip()
         bad = []
         for i in range(20):
-            prev = full(); self.t.lit(text); time.sleep(0.8)
+            prev = full(); self.t.lit(text)
+            wait(lambda: len(full()) - len(prev) >= len(text), 4)  # each key is its own tmux send-keys, in order: a slow machine only makes the burst arrive later, never out of order
             added = full()[len(prev):]
             if added != text:
                 bad.append(added)

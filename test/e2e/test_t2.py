@@ -14,6 +14,11 @@ def parse_blocks(out):
     return blocks
 
 
+def sprite_blocks(out):
+    """The pixel sprites of `agmux avatars` (3-line blocks: header + 2 rows); the image-set lines (T29) come before them."""
+    return [b for b in parse_blocks(out) if len(b) == 3]
+
+
 def region(card, i):
     return (card.rows[i].sub(2, 8) + [(" ", None, None, False)] * 6)[:6]  # after "│ ": 6 cells
 
@@ -34,7 +39,9 @@ class AvatarsCmd(unittest.TestCase):
         r = run_avatars(self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
         blocks = parse_blocks(r.stdout)
-        self.assertEqual(len(blocks), 6, f"want 6 blocks separated by blank lines:\n{r.stdout}")
+        self.assertEqual(len(blocks), 7, f"want the image-set block + 6 sprite blocks separated by blank lines:\n{r.stdout}")
+        self.assertRegex(blocks[0][0], r"aza_choi  builtin  idle 1 · working 4 · attention 4 · done 4", "T29: the sets come first, one line each")
+        self.assertEqual(len(blocks[0]), 1); blocks = blocks[1:]
         ids, names = [], []
         for b in blocks:
             self.assertEqual(len(b), 3, f"block must be '<id>  <name>' + 2 render lines: {b}")
@@ -47,7 +54,7 @@ class AvatarsCmd(unittest.TestCase):
         self.assertEqual(len(set(ids)), 6, ids); self.assertEqual(len(set(names)), 6, names)
 
     def test_truecolor_in_tty(self):
-        piped = [tuple(b[1:]) for b in parse_blocks(run_avatars(self.env).stdout)]
+        piped = [tuple(b[1:]) for b in sprite_blocks(run_avatars(self.env).stdout)]
         r = subprocess.run(f"{self.env.prefix} {shlex.quote(BIN)} avatars", shell=True, capture_output=True, text=True)
         self.assertNotIn("\x1b", r.stdout, "piped output must carry no ANSI")
         t = Term(self.env, args="avatars; sleep 8", w=80, h=40); self.addCleanup(t.close)

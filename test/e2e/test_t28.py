@@ -60,5 +60,402 @@ class Fixtures(unittest.TestCase):
         r.send("q"); self.assertTrue(r.exited(5)); self.assertEqual(r.status, 0)
 
 
+# ---------------------------------------------------------------------------------------------------------------- product tests (4648d7d)
+SETS = HERE.parent.parent / "internal" / "avatar" / "sets" / "aza_choi"  # the built-in set's source frames: idle.png, think_1..4, hi_1..4, talk_1..4
+BUILTIN = [("idle", ["idle.png"]), ("working", [f"think_{i}.png" for i in range(1, 5)]), ("attention", [f"hi_{i}.png" for i in range(1, 5)]), ("done", [f"talk_{i}.png" for i in range(1, 5)])]
+# fixture (test_t3): who is in which state; the image set follows the mood: working -> working frames, idle -> idle, alert -> attention, done -> done frames
+MOOD = {"alpha-main": "working", "bravo-29": "working", "charlie-30": "idle", "pj-fallback": "idle", "bravo-bg": "idle", "delta-60": "attention", "告警会话": "attention",
+        "charlie-59": "done", "echo-long": "done"}
+
+
+def builtin_frames(env, cfg):
+    """{state: [image id of each frame in file-name order]} of the built-in set, read from what agmux uploads (so it holds whatever the id scheme is)."""
+    ids = upload_ids(env, cfg)
+    assert len(ids) >= 13, f"upload gave {len(ids)} images"
+    return {st: [ids[(SETS / st / f).read_bytes()] for f in files] for st, files in BUILTIN}
+
+
+def card_avatar(raw, card):
+    """The placeholder cells inside the card's avatar box (2 rows x 6 columns right of the border + margin)."""
+    return [c for c in ph_cells(raw) if card.r < c[0] <= card.r + 2 and card.c + 2 <= c[1] < card.c + 8]
+
+
+def avatar_cells(rows, card):
+    """Rendered avatar box (rows 1-2, columns c+2..c+7) as tuples, for pixel avatars."""
+    return [[(x[0], x[1], x[2], x[3]) for x in rows[card.r + k].cells[card.c + 2:card.c + 8]] for k in (1, 2)]
+
+
+def cards_of(raw):
+    return find_cards(parse_screen(raw))
+
+
+def named(cards, needle):
+    m = [c for c in cards if needle in c.line(1)]
+    assert len(m) == 1, f"{needle!r}: {len(m)} cards"
+    return m[0]
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        self.env = Env(); self.addCleanup(self.env.cleanup); build_fixture(self.env)
+        self.cfg = self.env.tmp / "cfg"; (self.cfg / "agmux").mkdir(parents=True); self.config()
+
+    def config(self, text="", default='default = "aza_choi"'):
+        """Unless the text names a default, every card gets the built-in image set (the hash would give a mix of sprites and the set)."""
+        if "default" not in text and default:
+            text = text.replace("[avatars]\n", "[avatars]\n" + default + "\n", 1) if "[avatars]\n" in text else text + "\n[avatars]\n" + default + "\n"
+        (self.cfg / "agmux" / "config.toml").write_text(text)
+
+    def board(self, tmux=True, term="xterm-kitty", passthrough=None, w=200, h=50, extra="", loose=False):
+        """tmux=True: agmux believes it runs in tmux (fake tmux answers client_termname=term, allow-passthrough=passthrough or on)."""
+        if tmux: self.env.set_term(term, passthrough)
+        t = Term(self.env, w=w, h=h, extra_env=f"XDG_CONFIG_HOME={self.cfg} " + (KITTY_ENV if tmux else "") + extra); self.addCleanup(t.close)
+        if loose:  # a terminal too small for all nine cards: just wait for the board
+            self.assertTrue(wait(lambda: "agmux ·" in t.text(), 8), t.text()); time.sleep(0.5); return t
+        cs = ready(t); self.assertTrue(cs, t.text()); return t
+
+    def images(self, t):
+        raw = t.raw(); return raw, cards_of(raw)
+
+    def assertAllImages(self, t, msg=""):
+        raw, cs = self.images(t); self.assertEqual(len(cs), 9, t.text())
+        for c in cs: self.assertEqual(len(card_avatar(raw, c)), 12, f"{msg} card {c.line(1)!r} has no complete 6x2 placeholder avatar:\n{c.text}")
+
+    def assertNoImages(self, t, msg=""):
+        raw = t.raw(); self.assertNotIn(PLACEHOLDER, raw, msg + "\n" + t.text())
+        cs = cards_of(raw); self.assertEqual(len(cs), 9)
+        return cs, parse_screen(raw)
+
+
+class Kitty(Base):
+    """termname xterm-kitty + allow-passthrough on (design「探测」): the avatar is 2 x 6 U+10EEEE cells, foreground = the frame's image id."""
+
+    def test_every_card_shows_a_complete_placeholder_avatar_with_the_right_id(self):
+        frames = builtin_frames(self.env, self.cfg); t = self.board(); raw, cs = self.images(t)
+        self.assertEqual(len(cs), 9)
+        for name, state in MOOD.items():
+            ids = frames[state]; cells = card_avatar(raw, named(cs, name))
+            self.assertEqual(len(cells), 12, f"{name}: {cells}")
+            self.assertEqual({c[2] for c in cells}, {cells[0][2]}, f"{name}: one id for the whole avatar")
+            self.assertIn(cells[0][2], ids, f"{name}: id {cells[0][2]:#x} not in {[hex(i) for i in ids]}")
+            self.assertEqual(sorted((c[0] - named(cs, name).r, c[1] - named(cs, name).c, c[3], c[4]) for c in cells),
+                             sorted((r, 2 + k, r - 1, k) for r in (1, 2) for k in range(6)), f"{name}: every cell carries its own row and column")
+
+    def test_no_pixel_avatar_left_and_the_text_stays_where_it_was(self):
+        t = self.board(); raw, cs = self.images(t)
+        t2 = Term(self.env, w=200, h=50, extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t2.close)  # same fixture, no tmux, TERM=xterm-256color: pixels
+        pix = ready(t2); self.assertTrue(pix)
+        for c in cs:
+            p = [x for x in pix if x.r == c.r and x.c == c.c]; self.assertEqual(len(p), 1)
+            self.assertEqual((c.w, len(c.rows)), (p[0].w, len(p[0].rows)))
+            for k in (1, 2, 3): self.assertEqual(c.rows[k].width_text(8, c.w), p[0].rows[k].width_text(8, c.w), f"row {k}: everything right of the avatar is identical in both modes")
+        self.assertEqual(raw.count("█"), 0, "no pixel avatar blocks")
+
+    def test_working_frames_cycle_in_order_one_step_per_500ms(self):
+        frames = builtin_frames(self.env, self.cfg); t = self.board(); seen = []; t0 = time.time()
+        while time.time() - t0 < 4.5:
+            raw, cs = self.images(t); seen.append((time.time() - t0, {n: card_avatar(raw, named(cs, n))[0][2] for n in MOOD}))
+            time.sleep(0.05)
+        for n, state in MOOD.items():
+            ids = frames[state]; seq = [s[n] for _, s in seen]; order = [seq[i + 1] for i in range(len(seq) - 1) if seq[i] != seq[i + 1]]
+            self.assertEqual(set(seq), set(ids), f"{n}: every frame of its state appears (idle: its one frame, never changing)")
+            for a, b in zip([seq[0]] + order, order): self.assertEqual(b, ids[(ids.index(a) + 1) % len(ids)], f"{n}: frames advance in file-name order and wrap: {order}")
+        w = [s[1]["alpha-main"] for s in seen]; ts = [s[0] for s in seen]
+        times = [ts[i + 1] for i in range(len(w) - 1) if w[i] != w[i + 1]]
+        gaps = [b - a for a, b in zip(times, times[1:])]
+        self.assertGreaterEqual(len(times), 6, f"changes seen: {times}")
+        self.assertTrue(all(0.35 <= g <= 0.7 for g in gaps), f"frame tick is 500ms, gaps = {gaps}")
+        self.assertTrue(all(s[1]["alpha-main"] == s[1]["bravo-29"] for s in seen), "the two working cards are on the same frame at every sample")
+
+    def test_the_xterm_ghostty_name_also_counts(self):
+        self.assertAllImages(self.board(term="xterm-ghostty"))
+
+    def test_passthrough_all_counts_as_on(self):
+        self.assertAllImages(self.board(passthrough="all"))
+
+    def test_resize_keeps_complete_avatars(self):
+        t = self.board(); t.resize(120, 50)
+        self.assertTrue(wait(lambda: (lambda cs: len(cs) == 9 and all(c.ok for c in cs))(find_cards(t.snap())), 5), t.text())
+        self.assertAllImages(t, "after resize")
+
+    def test_probe_asks_the_chosen_client_and_the_passthrough_option(self):
+        self.env.set_tmux(clients=[(100, "outer-1", "main"), (300, "outer-2", "work")])
+        self.board(extra="TMUX_PANE=%9 ")
+        q = [c for c in self.env.tmux_calls() if c[0] == "display-message" and "#{client_termname}" in c]
+        self.assertEqual(q, [["display-message", "-p", "-c", "outer-2", "#{client_termname}"]], "the client is the one `enter` would use (most recent)")
+        self.assertIn(["show-options", "-gv", "allow-passthrough"], self.env.tmux_calls())
+
+    def test_AGMUX_CLIENT_names_the_probed_client(self):
+        self.env.set_tmux(clients=[(100, "outer-1", "main"), (300, "outer-2", "work")])
+        self.board(extra="AGMUX_CLIENT=outer-1 ")
+        q = [c for c in self.env.tmux_calls() if c[0] == "display-message" and "#{client_termname}" in c]
+        self.assertEqual(q, [["display-message", "-p", "-c", "outer-1", "#{client_termname}"]])
+
+    def test_a_card_bound_to_a_sprite_stays_pixel_in_image_mode(self):
+        self.config('[avatars.bind]\n"bravo-29" = "bot-03"\n')
+        t = self.board(); raw, cs = self.images(t)
+        self.assertEqual(card_avatar(raw, named(cs, "bravo-29")), [])
+        self.assertEqual(len(card_avatar(raw, named(cs, "alpha-main"))), 12)
+        row = parse_screen(raw)[named(cs, "bravo-29").r + 1]
+        self.assertTrue(any(x[0] not in " " for x in row.cells[named(cs, "bravo-29").c + 2:named(cs, "bravo-29").c + 8]), "a pixel avatar is drawn instead")
+
+    def test_default_hash_picks_among_sprites_and_sets_by_the_card_name(self):
+        self.config('[avatars]\ndefault = "hash"\n')  # pool: bot-01..06 + aza_choi = 7 (design: hash pool grew from 6 to 7)
+        t = self.board(); raw, cs = self.images(t)
+        def fnv(s):
+            h = 2166136261
+            for b in s.encode(): h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+            return h
+        for name in MOOD:
+            c = named(cs, name) if name != "告警会话" else [x for x in cs if "告警会话" in x.line(1)][0]
+            key = NAMES_FULL.get(name, name)
+            self.assertEqual(bool(card_avatar(raw, c)), fnv(key) % 7 == 6, f"{name}: image iff fnv32a(name) % 7 == 6 (aza_choi is the 7th choice)")
+
+
+NAMES_FULL = {"告警会话": "告警会话-超长中文名字-用来测试宽度 1"}
+
+
+class NotKitty(Base):
+    def test_other_terminals_get_pixels(self):
+        cs, rows = self.assertNoImages(self.board(term="xterm-256color"))
+        self.assertTrue(any(x[0] not in " " for x in rows[cs[0].r + 1].cells[cs[0].c + 2:cs[0].c + 8]))
+
+    def test_passthrough_off_falls_back_quietly(self):
+        t = self.board(passthrough="off"); self.assertNoImages(t)
+        self.assertNotIn("passthrough", "\n".join(r.text for r in t.snap()[-3:]), "renderer=auto: no message when it quietly falls back")
+
+    def test_pixel_forces_pixels_and_does_not_even_ask_tmux(self):
+        self.config('[avatars]\nrenderer = "pixel"\n'); self.assertNoImages(self.board())
+        self.assertEqual([c for c in self.env.tmux_calls() if "#{client_termname}" in c or "allow-passthrough" in c], [])
+
+    def test_image_forces_images_without_the_terminal_check(self):
+        self.config('[avatars]\nrenderer = "image"\n'); self.assertAllImages(self.board(term="xterm-256color"))
+        self.assertEqual([c for c in self.env.tmux_calls() if "#{client_termname}" in c], [])
+
+    def test_image_with_passthrough_off_falls_back_and_says_so(self):
+        self.config('[avatars]\nrenderer = "image"\n'); t = self.board(passthrough="off"); self.assertNoImages(t)
+        foot = "\n".join(r.text for r in t.snap()[-3:]); self.assertIn("allow-passthrough on", foot, foot); self.assertTrue(t.alive())
+
+    def test_outside_tmux_TERM_decides(self):
+        self.assertNoImages(self.board(tmux=False))  # TERM=xterm-256color
+        t = self.board(tmux=False, extra="TERM=xterm-kitty "); self.assertAllImages(t)
+
+    def test_outside_tmux_ghostty_by_TERM_PROGRAM(self):
+        self.assertAllImages(self.board(tmux=False, extra="TERM_PROGRAM=ghostty "))
+
+    def test_outside_tmux_renderer_image_forces(self):
+        self.config('[avatars]\nrenderer = "image"\n'); self.assertAllImages(self.board(tmux=False))
+
+    def test_TERM_PROGRAM_inside_tmux_is_not_used(self):  # design: the server's TERM_PROGRAM is whatever started it; only client_termname counts
+        self.assertNoImages(self.board(term="xterm-256color", extra="TERM_PROGRAM=ghostty TERM=xterm-kitty "))
+
+
+def upload_ids_for(tc, fixtures):
+    """{png: id} of a fresh environment whose config dir was prepared by fixtures(cfg)."""
+    env = Env(); tc.addCleanup(env.cleanup); build_fixture(env); cfg = env.tmp / "cfg"; (cfg / "agmux").mkdir(parents=True); fixtures(cfg)
+    return upload_ids(env, cfg)
+
+
+class Upload(unittest.TestCase):
+    """What agmux writes to stdout before the TUI starts (PtyRun records it)."""
+
+    def run_board(self, extra, config=None, fixtures=None, quit=True, wait_for=b"alpha-main"):
+        env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
+        cfg = env.tmp / "cfg"; (cfg / "agmux").mkdir(parents=True)
+        if config: (cfg / "agmux" / "config.toml").write_text(config)
+        if fixtures: fixtures(cfg)
+        env.set_term("xterm-kitty", "on")
+        r = PtyRun(env, extra={"XDG_CONFIG_HOME": str(cfg), **extra}); self.addCleanup(r.close)
+        self.assertTrue(wait(lambda: wait_for in bytes(r.data), 8), bytes(r.data)[-400:])
+        if quit: r.send("q"); self.assertTrue(r.exited(5)); self.assertEqual(r.status, 0)
+        return env, r
+
+    def check_builtin(self, cmds):
+        """13 built-in frames, uploaded once each: a 24-bit non-zero id per frame (all different), the file's bytes, a=T U=1 f=100 q=2 c=6 r=2, chunks <= 4096."""
+        im = kitty_images(cmds); self.assertEqual(len(im), 13, sorted(im))
+        self.assertTrue(all(0 < i <= 0xFFFFFF for i in im), "ids fit the placeholder's 24-bit foreground and are never 0")
+        want = {(SETS / state / f).read_bytes() for state, files in BUILTIN for f in files}; self.assertEqual({d["data"] for d in im.values()}, want, "every frame of the built-in set, once")
+        for i, d in im.items():
+            ctl = d["ctl"]; self.assertEqual({x: ctl.get(x) for x in "a U f q c r".split()}, dict(a="T", U="1", f="100", q="2", c="6", r="2"), ctl)
+            self.assertTrue(all(n <= 4096 for n in d["chunks"]), d["chunks"]); self.assertTrue(all(n == 4096 for n in d["chunks"][:-1]), "full chunks until the last")
+        return im
+
+    def test_in_tmux_every_frame_is_uploaded_once_each_chunk_wrapped_with_doubled_escapes(self):
+        env, r = self.run_board({"TMUX": "/fake/tmux,1,0", "TERM": "xterm-256color"})
+        data = bytes(r.data); cmds = kitty_commands(data); self.check_builtin(cmds)
+        self.assertTrue(all(c["wrapped"] for c in cmds), "inside tmux every APC rides in \\ePtmux;..")
+        self.assertEqual(data.count(b"\x1bPtmux;\x1b\x1b_G"), len(cmds)); self.assertNotIn(b"\x1b_G", data.replace(b"\x1b\x1b_G", b""), "no bare (unwrapped) APC")
+        self.assertGreater(max(len(c["payload"]) for c in cmds), 4000); self.assertTrue(any(c["ctl"].get("m") == "1" for c in cmds), "large frames are chunked (m=1 .. m=0)")
+
+    def test_outside_tmux_the_alternate_screen_is_entered_exactly_once_before_the_upload(self):  # kitty keeps images per screen: uploaded on the main screen, the board (alt screen) shows none
+        env, r = self.run_board({"TERM": "xterm-kitty"}); data = bytes(r.data); first = data.find(b"\x1b_G")
+        self.assertGreater(first, 0); self.assertEqual(data[:first].count(b"\x1b[?1049h"), 1, "exactly one \\e[?1049h before the first image sequence")
+
+    def test_inside_tmux_no_screen_switch_is_added_before_the_upload(self):  # tmux's client is on the alternate screen already
+        env, r = self.run_board({"TMUX": "/fake/tmux,1,0"}); data = bytes(r.data); first = data.find(b"\x1bPtmux;")
+        self.assertGreaterEqual(first, 0); self.assertNotIn(b"\x1b[?1049h", data[:first])
+
+    def test_outside_tmux_bare_apc(self):
+        env, r = self.run_board({"TERM": "xterm-kitty"}); data = bytes(r.data); cmds = kitty_commands(data)
+        self.check_builtin(cmds); self.assertFalse(any(c["wrapped"] for c in cmds)); self.assertNotIn(b"Ptmux", data)
+
+    def test_upload_comes_before_the_first_frame_of_the_tui(self):
+        env, r = self.run_board({"TERM": "xterm-kitty"}); data = bytes(r.data)
+        self.assertLess(data.rfind(b"\x1b_G"), data.find(b"alpha-main"), "bubbletea must not interleave with the upload")
+
+    def test_nothing_is_deleted_on_quit(self):  # final design: a second board's exit must not blank the first's pictures
+        for extra in ({"TERM": "xterm-kitty"}, {"TMUX": "/fake/tmux,1,0"}):
+            env, r = self.run_board(extra); cmds = kitty_commands(bytes(r.data))
+            self.assertEqual(kitty_deletes(cmds), []); self.assertFalse([c for c in cmds if c["ctl"].get("a") == "d"], "no a=d anywhere in the output")
+
+    def test_pixel_terminals_get_no_graphics_bytes(self):
+        for extra, cfg in (({"TERM": "xterm-256color"}, None), ({"TERM": "xterm-kitty"}, '[avatars]\nrenderer = "pixel"\n')):
+            env, r = self.run_board(extra, config=cfg); self.assertNotIn(b"\x1b_G", bytes(r.data)); self.assertNotIn(b"Ptmux", bytes(r.data))
+
+    def test_ghostty_by_TERM_PROGRAM_uploads(self):
+        env, r = self.run_board({"TERM": "xterm-256color", "TERM_PROGRAM": "ghostty"}); self.check_builtin(kitty_commands(bytes(r.data)))
+
+    def test_ctrl_c_also_leaves_cleanly_without_a_delete(self):
+        env, r = self.run_board({"TERM": "xterm-kitty"}, quit=False); r.send("\x03"); self.assertTrue(r.exited(5))
+        self.assertEqual(kitty_deletes(kitty_commands(bytes(r.data))), [])
+
+    # ---- user sets
+    def test_a_user_set_is_uploaded_with_its_own_frames_each_with_its_own_id(self):
+        def mk(cfg): write_avatar_set(cfg, "mine", {"idle": 1, "working": 2})
+        env, r = self.run_board({"TERM": "xterm-kitty"}, fixtures=mk); im = kitty_images(kitty_commands(bytes(r.data)))
+        self.assertEqual(len(im), 16, "13 built-in frames + the user's 3"); self.assertEqual(len({d["data"] for d in im.values()}), 16)
+        d = env.tmp / "cfg" / "agmux" / "avatars" / "mine"
+        self.assertTrue({p.read_bytes() for p in d.rglob("*.png")} <= {v["data"] for v in im.values()})
+
+    def test_ids_are_stable_across_starts_and_follow_the_picture(self):
+        a = upload_ids_for(self, lambda cfg: write_avatar_set(cfg, "mine", {"idle": 2}))
+        b = upload_ids_for(self, lambda cfg: write_avatar_set(cfg, "mine", {"idle": 2}))
+        self.assertEqual(a, b, "the same frame has the same id in every start")
+        self.assertEqual(len(set(a.values())), len(a), "different frames, different ids")
+        def edited(cfg): d = write_avatar_set(cfg, "mine", {"idle": 2}); (d / "idle" / "01.png").write_bytes(png((1, 2, 3), 8))
+        c = upload_ids_for(self, edited)
+        old = [i for p, i in a.items() if p not in c]; new = [i for p, i in c.items() if p not in a]
+        self.assertEqual((len(old), len(new)), (1, 1)); self.assertNotEqual(old, new, "editing a picture changes its id (design: the hash covers the bytes)")
+        self.assertEqual({i for p, i in a.items() if p in c}, {i for p, i in c.items() if p in a}, "the untouched frames keep theirs")
+
+    def test_a_user_set_with_a_builtin_name_replaces_it(self):
+        env, r = self.run_board({"TERM": "xterm-kitty"}, fixtures=lambda cfg: write_avatar_set(cfg, "aza_choi", {"idle": 2}))
+        im = kitty_images(kitty_commands(bytes(r.data))); self.assertEqual(len(im), 2, "only the user's two frames: the built-in aza_choi is gone")
+        d = env.tmp / "cfg" / "agmux" / "avatars" / "aza_choi"; self.assertEqual({v["data"] for v in im.values()}, {(d / "idle" / "01.png").read_bytes(), (d / "idle" / "02.png").read_bytes()})
+
+    def test_only_png_files_count(self):
+        def mk(cfg): write_avatar_set(cfg, "mine", {"idle": 1}, **{"idle/notes.txt": "x", "idle/photo.jpg": b"\xff\xd8\xff", "working/readme.md": "y"})
+        env, r = self.run_board({"TERM": "xterm-kitty"}, fixtures=mk); im = kitty_images(kitty_commands(bytes(r.data)))
+        self.assertEqual(len(im), 14, "one extra frame: mine/idle/01.png")
+
+    def test_a_set_without_idle_is_skipped_and_reported_on_the_footer(self):
+        def mk(cfg): write_avatar_set(cfg, "noidle", {"working": 2})
+        env, r = self.run_board({"TERM": "xterm-kitty"}, fixtures=mk, quit=False, wait_for=b"no idle")
+        self.assertIn(b'avatar set "noidle" has no idle/*.png: skipped', bytes(r.data)); self.assertIsNone(r.status)
+        r.send("q"); self.assertTrue(r.exited(5)); self.assertEqual(r.status, 0)
+        self.assertEqual(len(kitty_images(kitty_commands(bytes(r.data)))), 13, "nothing of that set was uploaded")
+
+
+class Sets(Base):
+    def test_a_user_set_bound_to_a_card_is_drawn_with_its_own_frames(self):
+        d = write_avatar_set(self.cfg, "mine", {"idle": 1, "working": 3, "attention": 2, "done": 2}); ids = upload_ids(self.env, self.cfg)
+        mine = {st: [ids[p.read_bytes()] for p in sorted((d / st).glob("*.png"))] for st in ("idle", "working", "attention", "done")}
+        self.config('[avatars]\ndefault = "mine"\n'); t = self.board(); raw, cs = self.images(t)
+        for n, st in MOOD.items():
+            got = {c[2] for c in card_avatar(raw, named(cs, n))}; self.assertTrue(got and got <= set(mine[st]), f"{n}: {got} vs {mine[st]}")
+
+    def test_a_missing_state_shows_the_idle_frame(self):
+        d = write_avatar_set(self.cfg, "mine", {"idle": 1}); idle = upload_ids(self.env, self.cfg)[(d / "idle" / "01.png").read_bytes()]
+        self.config('[avatars]\ndefault = "mine"\n'); t = self.board(); raw, cs = self.images(t)
+        for n in MOOD: self.assertEqual({c[2] for c in card_avatar(raw, named(cs, n))}, {idle}, f"{n}: every state falls back to idle")
+
+    def test_a_set_without_idle_is_reported_and_the_board_keeps_running(self):
+        write_avatar_set(self.cfg, "noidle", {"working": 2}); write_avatar_set(self.cfg, "fine", {"idle": 1}); (self.cfg / "agmux" / "avatars" / "loose.txt").write_text("x")
+        t = self.board(); foot = "\n".join(r.text for r in t.snap()[-3:])
+        self.assertIn('avatar set "noidle" has no idle/*.png: skipped', foot); self.assertNotIn("fine", foot); self.assertNotIn("loose", foot); self.assertTrue(t.alive())
+        self.assertAllImages(t)  # the built-in set is still the default here
+
+    def test_a_bound_set_is_a_stable_sprite_in_pixel_mode(self):
+        def h(s):
+            x = 2166136261
+            for b in s.encode(): x = ((x ^ b) * 16777619) & 0xFFFFFFFF
+            return x
+        n = h("aza_choi") % 6 + 1  # Sprites[hash % 6]: bot-01..06 in order
+        self.config('[avatars]\nrenderer = "pixel"\n[avatars.bind]\n"bravo-29" = "aza_choi"\n"alpha-main" = "aza_choi"\n')
+        t = self.board(); raw = t.raw(); cs = cards_of(raw); rows = parse_screen(raw); first = avatar_cells(rows, named(cs, "bravo-29"))
+        self.assertNotIn(PLACEHOLDER, raw); self.assertTrue(any(x[0] != " " for r in first for x in r))
+        t.close(); self.config(f'[avatars]\nrenderer = "pixel"\n[avatars.bind]\n"bravo-29" = "bot-0{n}"\n"alpha-main" = "aza_choi"\n')
+        t = self.board(); raw = t.raw(); cs = cards_of(raw); rows = parse_screen(raw)
+        self.assertEqual(avatar_cells(rows, named(cs, "bravo-29")), first, f"a set id shows the sprite bot-0{n} (fnv32a('aza_choi') % 6) in pixel mode")
+        t.close(); self.board()  # and again: stable across runs
+        t = self.board(); self.assertEqual(avatar_cells(parse_screen(t.raw()), named(cards_of(t.raw()), "bravo-29")), first)
+
+    def test_bind_and_state_file_accept_set_ids(self):
+        self.config('[avatars]\ndefault = "bot-02"\n[avatars.bind]\n"bravo-29" = "aza_choi"\n'); t = self.board(); raw, cs = self.images(t)
+        self.assertEqual(len(card_avatar(raw, named(cs, "bravo-29"))), 12); self.assertEqual(card_avatar(raw, named(cs, "alpha-main")), [])
+        t.close(); (self.env.state / "agmux").mkdir(exist_ok=True)
+        (self.env.state / "agmux" / "avatars.json").write_text(json.dumps({"alpha-main": "aza_choi"})); self.config('[avatars]\ndefault = "bot-02"\n')
+        t = self.board(); raw, cs = self.images(t); self.assertEqual(len(card_avatar(raw, named(cs, "alpha-main"))), 12)
+
+
+class SetDirs(Base):
+    """Odd things found in the avatars directory."""
+
+    def cli(self, *a):
+        env = {"PATH": f"{self.env.bin}:/usr/bin:/bin", "HOME": str(self.env.home), "XDG_STATE_HOME": str(self.env.state), "XDG_CONFIG_HOME": str(self.cfg), "LANG": "en_US.UTF-8"}
+        return subprocess.run([BIN, *a], env=env, capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
+
+    def test_a_symlinked_set_directory_is_recognised(self):
+        real = write_avatar_set(self.env.tmp / "elsewhere", "linked", {"idle": 1, "working": 2}); (self.cfg / "agmux" / "avatars").mkdir(parents=True, exist_ok=True)
+        os.symlink(real, self.cfg / "agmux" / "avatars" / "linked")
+        self.assertIn("linked  user  idle 1 · working 2 · attention 0 · done 0", self.cli("avatars").stdout)
+        ids = upload_ids(self.env, self.cfg); self.assertIn((real / "idle" / "01.png").read_bytes(), ids, "uploaded too")
+        self.config('[avatars]\ndefault = "linked"\n'); t = self.board(); raw, cs = self.images(t)
+        self.assertEqual({c[2] for c in card_avatar(raw, named(cs, "charlie-30"))}, {ids[(real / "idle" / "01.png").read_bytes()]})
+
+    def test_a_dangling_symlink_and_a_plain_file_are_ignored(self):
+        d = self.cfg / "agmux" / "avatars"; d.mkdir(parents=True, exist_ok=True); os.symlink(self.env.tmp / "nowhere", d / "dangling"); (d / "file.png").write_bytes(png())
+        r = self.cli("avatars"); self.assertEqual(r.returncode, 0, r.stderr); self.assertEqual(r.stdout.split("\n\n")[0], "aza_choi  builtin  idle 1 · working 4 · attention 4 · done 4"); self.assertEqual(r.stderr, "")
+
+    def test_a_set_named_hash_is_skipped_and_reported(self):
+        write_avatar_set(self.cfg, "hash", {"idle": 1}); r = self.cli("avatars")
+        self.assertEqual(r.returncode, 0); self.assertNotIn("hash  user", r.stdout)
+        self.assertIn('avatar set "hash" skipped: "hash" is reserved', r.stderr)
+        t = self.board(); foot = "\n".join(x.text for x in t.snap()[-3:]); self.assertIn('avatar set "hash" skipped', foot); self.assertTrue(t.alive())
+        self.config('[avatars]\ndefault = "hash"\n'); self.assertEqual(self.cli("config").returncode, 0, "default = hash still means hashing")
+
+    def test_dot_files_and_dot_directories_do_not_count(self):  # macOS leaves ._* copies on some volumes
+        d = write_avatar_set(self.cfg, "mine", {"idle": 1}, **{"idle/._01.png": b"junk", "idle/.hidden.png": png((9, 9, 9)), "working/._x.png": b"junk"})
+        write_avatar_set(self.cfg, ".hidden", {"idle": 1})
+        out = self.cli("avatars"); self.assertIn("mine  user  idle 1 · working 0 · attention 0 · done 0", out.stdout); self.assertNotIn(".hidden  ", out.stdout); self.assertEqual(out.stderr, "")
+        self.assertEqual(len(upload_ids(self.env, self.cfg)), 14)
+
+
+class Config(Base):
+    def cli(self, *args, config=None):
+        if config is not None: self.config(config)
+        env = {"PATH": f"{self.env.bin}:/usr/bin:/bin", "HOME": str(self.env.home), "XDG_STATE_HOME": str(self.env.state), "XDG_CONFIG_HOME": str(self.cfg), "LANG": "en_US.UTF-8"}
+        return subprocess.run([BIN, *args], env=env, capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
+
+    def test_default_table_has_renderer_auto_before_default(self):
+        self.config("", default=None); out = self.cli("config").stdout; self.assertIn('[avatars]\nrenderer = "auto"\ndefault = "hash"\n', out)
+
+    def test_renderer_values_round_trip(self):
+        for v in ("auto", "image", "pixel"):
+            r = self.cli("config", config=f'[avatars]\nrenderer = "{v}"\n'); self.assertEqual(r.returncode, 0, r.stderr); self.assertIn(f'renderer = "{v}"', r.stdout)
+
+    def test_bad_renderer_is_one_line_naming_the_choices(self):
+        r = self.cli("config", config='[avatars]\nrenderer = "kitty"\n')
+        self.assertNotEqual(r.returncode, 0); self.assertIn('avatars.renderer: "kitty" is not auto, image or pixel', r.stderr); self.assertEqual(len(r.stderr.strip().splitlines()), 1, r.stderr)
+
+    def test_default_and_bind_accept_set_ids_and_reject_unknown_ones(self):
+        write_avatar_set(self.cfg, "mine", {"idle": 1})
+        r = self.cli("config", config='[avatars]\ndefault = "mine"\n[avatars.bind]\n"x" = "aza_choi"\n'); self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('default = "mine"', r.stdout); self.assertIn('"x" = "aza_choi"', r.stdout)
+        r = self.cli("config", config='[avatars]\ndefault = "nosuch"\n')
+        self.assertNotEqual(r.returncode, 0); self.assertIn('avatars.default: "nosuch"', r.stderr); self.assertIn("aza_choi", r.stderr); self.assertIn("mine", r.stderr); self.assertIn("bot-01", r.stderr)
+        r = self.cli("config", config='[avatars.bind]\n"x" = "nosuch"\n'); self.assertNotEqual(r.returncode, 0); self.assertIn('avatars.bind."x": "nosuch" is not an avatar id', r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
