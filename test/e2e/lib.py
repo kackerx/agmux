@@ -881,22 +881,24 @@ def build_many_fixture(env, n=22, per_group=6):
     return [s["summary"] for s in S]
 
 
-SHEET_BG = (18, 18, 22)  # the dark background of a pi-agent-portrait sheet
+SHEET_OUT = (255, 255, 255)  # outside the dark grid a sheet is light (pi's cut() finds the grid where the dark background ends)
 
 
 def sheet_colour(r, c):
-    """A colour of its own for grid cell (row r, column c): never dark, all 30 different (for a 6 x 5 sheet)."""
+    """A colour of its own for grid cell (row r, column c): dark by pi's test (mean <= 200), all different for up to 6 x 5 cells."""
     return (80 + 30 * c, 90 + 25 * r, 200 - 20 * c - 10 * r)
 
 
-def sheet_png(cols=6, rows=5, cw=180, ch=150, margin=40, edge=12):
-    """A synthetic portrait sheet: a dark background with `margin` pixels around a cols x rows grid of cw x ch cells; cell (r, c) is solid sheet_colour(r, c) except `edge` pixels
-    at its left and right sides, which are one step brighter (outside the centred square when cw > ch: a correct crop never contains them). Returns (png bytes, width, height)."""
-    w, h = 2 * margin + cols * cw, 2 * margin + rows * ch
+def sheet_png(cols=6, rows=5, cw=180, ch=150, pad=40, edge=12, blank_from=None):
+    """A synthetic portrait sheet like draw-portrait's cut() expects: the dark grid (cols x rows cells of cw x ch) in the top left corner, `pad` light pixels to its right and below.
+    Cell (r, c) is solid sheet_colour(r, c) except `edge` pixels at its left and right sides, one step brighter (outside the centred 97% square when cw > ch: a correct cut never
+    contains them). Cells with index >= blank_from (row-major) are light, like the empty cells at the end of a 19-cell sheet. Returns (png bytes, width, height)."""
+    w, h = cols * cw + pad, rows * ch + pad
     def px(x, y):
-        gx, gy = x - margin, y - margin
-        if not (0 <= gx < cols * cw and 0 <= gy < rows * ch): return SHEET_BG
-        c, r = gx // cw, gy // ch; ix = gx % cw; col = sheet_colour(r, c)
+        if x >= cols * cw or y >= rows * ch: return SHEET_OUT
+        c, r = x // cw, y // ch
+        if blank_from is not None and r * cols + c >= blank_from: return SHEET_OUT
+        col = sheet_colour(r, c); ix = x % cw
         return tuple(v + 1 for v in col) if ix < edge or ix >= cw - edge else col
     return png_pixels(w, h, px), w, h
 
