@@ -23,7 +23,7 @@ import (
 // Actions, in the order `agmux config` prints them.
 var Actions = []string{
 	"up", "down", "left", "right", "page_down", "page_up", "jump", "fold", "preview", "focus_preview", "leave_preview",
-	"reply", "handoff", "search", "next_match", "prev_match", "flash", "restart", "kill", "review", "avatar", "quit", "confirm",
+	"reply", "handoff", "search", "next_match", "prev_match", "flash", "group", "restart", "kill", "review", "avatar", "quit", "confirm",
 }
 
 var defaultKeys = map[string][]string{
@@ -31,7 +31,7 @@ var defaultKeys = map[string][]string{
 	"page_down": {"ctrl+d"}, "page_up": {"ctrl+u"},
 	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"tab"},
 	// search / flash are T19 / T20
-	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "flash": {"s"},
+	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "flash": {"s"}, "group": {"g"},
 	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"},
 	"quit": {"q", "esc"}, "confirm": {"y"},
 }
@@ -55,6 +55,7 @@ type Config struct {
 	Colors map[string]string   // name → "#rrggbb" or an ANSI index "0".."255"
 
 	MaxColumns int    // [layout] max_columns: the most columns of cards, if the terminal is wide enough
+	GroupBy    string // [layout] group_by: how cards are grouped at start: one of GroupModes
 	Flow       string // [layout] flow: "bands" (a row of groups at a time) or "stack" (group k in column k mod n)
 
 	AvatarRenderer string            // [avatars] renderer: "auto", "image" or "pixel"
@@ -64,7 +65,7 @@ type Config struct {
 
 // Default is the configuration with no file.
 func Default() *Config {
-	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, Flow: "bands", AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
+	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, Flow: "bands", GroupBy: "cwd", AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
 	for k, v := range defaultKeys {
 		c.Keys[k] = slices.Clone(v) // callers may change c; the defaults stay
 	}
@@ -101,6 +102,9 @@ func Load() (*Config, error) {
 	return Parse(path, data)
 }
 
+// GroupModes are the ways to group cards, in the order the group key goes through them.
+var GroupModes = []string{"cwd", "project", "session", "state"}
+
 // The range of [layout] max_columns.
 const minMaxColumns, maxMaxColumns = 1, 8
 
@@ -115,6 +119,7 @@ func Parse(path string, data []byte) (*Config, error) {
 		Layout struct {
 			MaxColumns int    `toml:"max_columns"`
 			Flow       string `toml:"flow"`
+			GroupBy    string `toml:"group_by"`
 		} `toml:"layout"`
 		Avatars struct {
 			Renderer string            `toml:"renderer"`
@@ -203,6 +208,12 @@ func Parse(path string, data []byte) (*Config, error) {
 			return nil, fmt.Errorf("%s: layout.flow: %q is not a flow (use \"bands\" or \"stack\")", path, f)
 		}
 		c.Flow = raw.Layout.Flow
+	}
+	if md.IsDefined("layout", "group_by") {
+		if g := raw.Layout.GroupBy; !slices.Contains(GroupModes, g) {
+			return nil, fmt.Errorf("%s: layout.group_by: %q is not a grouping (use %s)", path, g, strings.Join(GroupModes, ", "))
+		}
+		c.GroupBy = raw.Layout.GroupBy
 	}
 	if r := raw.Avatars.Renderer; r != "" {
 		if r != "auto" && r != "image" && r != "pixel" {
@@ -299,7 +310,7 @@ func (c *Config) String() string {
 	for _, n := range Colors {
 		fmt.Fprintf(&b, "%s = %q\n", n, c.Colors[n])
 	}
-	fmt.Fprintf(&b, "\n[layout]\nmax_columns = %d\nflow = %q\n", c.MaxColumns, c.Flow)
+	fmt.Fprintf(&b, "\n[layout]\nmax_columns = %d\nflow = %q\ngroup_by = %q\n", c.MaxColumns, c.Flow, c.GroupBy)
 	fmt.Fprintf(&b, "\n[avatars]\nrenderer = %q\ndefault = %q\n\n[avatars.bind]\n", c.AvatarRenderer, c.AvatarDefault)
 	names := slices.Sorted(maps.Keys(c.AvatarBind))
 	for _, n := range names {

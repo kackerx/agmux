@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -352,5 +353,39 @@ func TestFlow(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "\n") {
 			t.Errorf("%q: %v, want one line with %q", toml, err, want)
 		}
+	}
+}
+
+func TestGroupBy(t *testing.T) {
+	if Default().GroupBy != "cwd" {
+		t.Errorf("default %q", Default().GroupBy)
+	}
+	for _, g := range GroupModes {
+		c, err := Parse("cfg", []byte(fmt.Sprintf("[layout]\ngroup_by = %q\n", g)))
+		if err != nil || c.GroupBy != g {
+			t.Errorf("%s: %v %q", g, err, c.GroupBy)
+		}
+		if back, err := Parse("cfg", []byte(c.String())); err != nil || back.GroupBy != g || !strings.Contains(c.String(), fmt.Sprintf("group_by = %q\n", g)) {
+			t.Errorf("printed back: %v\n%s", err, c.String())
+		}
+	}
+	if !slices.Equal(GroupModes, []string{"cwd", "project", "session", "state"}) {
+		t.Errorf("the order g goes through: %v", GroupModes)
+	}
+	if c, _ := Parse("cfg", []byte("[layout]\nflow = \"stack\"\n")); c.GroupBy != "cwd" {
+		t.Error("a section without the key keeps the default")
+	}
+	for toml, want := range map[string]string{
+		"[layout]\ngroup_by = \"branch\"\n": `cfg: layout.group_by: "branch" is not a grouping (use cwd, project, session, state)`,
+		"[layout]\ngroup_by = \"\"\n":       `layout.group_by: "" is not a grouping`,
+		"[layout]\ngroup_by = 3\n":          "cfg: toml:",
+	} {
+		_, err := Parse("cfg", []byte(toml))
+		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "\n") {
+			t.Errorf("%q: %v, want one line with %q", toml, err, want)
+		}
+	}
+	if k := Default().Keys["group"]; !slices.Equal(k, []string{"g"}) {
+		t.Errorf("group key %v", k)
 	}
 }

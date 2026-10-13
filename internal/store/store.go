@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,8 @@ type Session struct {
 	Done                                       bool // ccmux's "done": idle, no subagent running, attentionState set
 	AgentsWorking                              bool // Status is "working" only because subagents are
 	Model, Effort                              string
+	Project, TmuxSession                       string // ccmux's project (worktrees under their main repo); the tmux session the pane is in, "" with no pane
+	GroupLabel                                 string // what the board's current grouping calls this card's group ("" = the cwd as a path); set by the board, not the poller
 	Agent                                      string // the agent definition (claude --agent <name>) from the transcript's agent-setting line; "" if none
 	ContextPct                                 int    // <0 = unknown
 	Subagents                                  []Subagent
@@ -168,6 +171,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		ID: r.ID, Name: r.Summary, AgentType: r.AgentType, CWD: r.CWD, Branch: r.GitBranch,
 		Status: r.Status, Attention: r.AttentionType, PendingTool: r.PendingTool, TmuxPane: r.TmuxPane,
 		ContextPct: -1, Subagents: r.Subagents, LastActivity: r.LastActivityAt,
+		Project: r.Project, TmuxSession: tmuxSession(r.TmuxTarget),
 	}
 	if s.Name == "" {
 		s.Name = r.Project
@@ -207,6 +211,13 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		s.Model = hudModel
 	}
 	return s
+}
+
+// tmuxSession is the session name in a tmuxTarget "<session> # <window>:<idx>.<pane>": everything
+// before the first " # " (a session name may hold spaces, a window name " # " or "/" or ":").
+func tmuxSession(target string) string {
+	name, _, _ := strings.Cut(target, " # ")
+	return name
 }
 
 // avatarState is what an image avatar shows: hi when the session needs you, then for a working one

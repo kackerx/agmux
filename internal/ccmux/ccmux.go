@@ -26,6 +26,7 @@ type Session struct {
 	AttentionState  string     `json:"attentionState"` // "unread" / "read" / null
 	PendingTool     string     `json:"pendingTool"`
 	TmuxPane        string     `json:"tmuxPane"`
+	TmuxTarget      string     `json:"tmuxTarget"` // "<session> # <window>:<idx>.<pane>"; null for a background session
 	TrackingMode    string     `json:"trackingMode"`
 	Subagents       []Subagent `json:"subagents"`
 	NativeSessionID string     `json:"nativeSessionId"`

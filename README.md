@@ -35,6 +35,7 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 | `n` / `N` | 保留着过滤时，在命中的卡之间按布局顺序跳到下一张 / 上一张（首尾回绕） |
 | `s` | 定位（像 flash.nvim）：按 `s` 后输入要找的字符——名字、分支、目录里的子串，不分大小写；命中处黄底，后面一格出现标签字母，按标签焦点就跳过去（只移焦点，不跳转）；继续打字缩小范围，`backspace` 删一个字，`esc` 取消。标签永远不是任何命中后面紧跟的字符，所以接着打字不会撞上标签 |
 | `f` | 折叠 / 展开焦点所在的组 |
+| `g` | 换分组方式，按 `cwd`（目录，默认）→ `project`（ccmux 的项目：worktree 归到主仓库名下）→ `session`（tmux session，没有 pane 的后台会话归 `(no pane)`，排最后）→ `state`（working / waiting / done / idle 四组，按这个顺序）循环，底栏显示 `g group:<当前>`；换了之后各组都是展开的（折叠不跨方式），焦点还在原来的卡上；cwd 以外的组标题直接写名字，搜索不往标题里画路径命中 |
 | `p` | 开关右侧预览（终端至少 100 列）；预览里会画出 pane 的光标（块状 = 反色，竖线 / 下划线 = focus 色下划线；光标被隐藏或预览往回滚时不画） |
 | `tab` | 打开预览（没开的话）并进入；在预览里时除 `tab` 外所有按键都发给那个 pane（含 `ctrl-c`、`shift+tab`），再按 `tab` 回到卡片（预览留着，`p` 才关它），滚轮往回翻。直通里 `tab` 到不了 pane，要补全请在真终端里按 |
 | `i` | 回复：开预览并把按键交给这个会话（等于 `p` + `tab`），之后打的字直接进它的 pane；`tab` 回到卡片 |
@@ -103,6 +104,7 @@ border = "#585b70"  # 所有非焦点卡的边框统一用这个色（默认空 
 [layout]
 max_columns = 4                     # 终端够宽时最多几列卡片（1–8）；每列至少 40 列宽，所以窄终端到不了这个数（5 列约需 ≥ 200 列）
 flow = "bands"                      # 组怎么排：bands（默认）每 n 个组一行，行高 = 最高的组，矮的组下面留空；stack 第 k 个组进第 k mod n 列，每列自己往下堆（没有空洞，列高不齐）
+group_by = "cwd"                    # 启动时的分组方式：cwd | project | session | state；运行中按 g 换
 
 [avatars]
 renderer = "auto"                   # auto：kitty / ghostty 里用图片，其它终端用像素；image：强制图片；pixel：强制像素

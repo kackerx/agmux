@@ -3,6 +3,7 @@ package board
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -53,7 +54,7 @@ func TestView(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	ss := fixture(t)
 	for _, w := range []int{60, 114, 120, 200} {
-		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "", false, nil, w, nil, nil, -1)
+		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "", false, nil, w, nil, nil, -1, "cwd")
 		lines := strings.Split(out, "\n")
 		if len(lines) != 200 {
 			t.Errorf("w=%d: %d lines, want the full height", w, len(lines))
@@ -81,7 +82,7 @@ func TestView(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", "/Users/dev") // the fixture's home, so headers shorten to ~ on any machine
-	out, _, _ := view(ss, 200, 50, "", 0, now, "", false, nil, 200, nil, nil, -1)
+	out, _, _ := view(ss, 200, 50, "", 0, now, "", false, nil, 200, nil, nil, -1, "cwd")
 	plain := ansi.Strip(out)
 	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "⏵ working", "● done", "q quit"} {
 		if !strings.Contains(plain, want) {
@@ -94,7 +95,7 @@ func TestScrollKeepsFocusVisible(t *testing.T) {
 	ss := fixture(t)
 	last := groups(ss)
 	id := last[len(last)-1].sessions[0].ID
-	out, rects, off := view(ss, 60, 20, id, 0, now, "", false, nil, 60, nil, nil, -1)
+	out, rects, off := view(ss, 60, 20, id, 0, now, "", false, nil, 60, nil, nil, -1, "cwd")
 	if off == 0 || len(strings.Split(out, "\n")) != 20 {
 		t.Fatalf("expected a scrolled 20-line screen, off=%d", off)
 	}
@@ -276,7 +277,7 @@ func TestCardGeometry(t *testing.T) {
 
 func TestMultilineMessage(t *testing.T) {
 	ss := fixture(t)
-	out, _, _ := view(ss, 120, 30, "", 0, now, "ccmux kill x: boom\n  at stack\n  at more", false, nil, 120, nil, nil, -1)
+	out, _, _ := view(ss, 120, 30, "", 0, now, "ccmux kill x: boom\n  at stack\n  at more", false, nil, 120, nil, nil, -1, "cwd")
 	lines := strings.Split(out, "\n")
 	if len(lines) != 30 || !strings.HasPrefix(ansi.Strip(lines[0]), " agmux") || !strings.Contains(out, "boom") || strings.Contains(out, "at stack") {
 		t.Errorf("multi-line message: %d lines (want 30), top bar %q", len(lines), ansi.Strip(lines[0]))
@@ -352,9 +353,9 @@ func TestOrderIgnoresCcmuxOrder(t *testing.T) {
 		reversed[len(ss)-1-i] = s
 	}
 	rotated := append(append([]store.Session{}, ss[5:]...), ss[:5]...)
-	want, _, _ := view(ss, 200, 60, "", 0, now, "", false, nil, 200, nil, nil, -1)
+	want, _, _ := view(ss, 200, 60, "", 0, now, "", false, nil, 200, nil, nil, -1, "cwd")
 	for name, order := range map[string][]store.Session{"reversed": reversed, "rotated": rotated} {
-		if got, _, _ := view(order, 200, 60, "", 0, now, "", false, nil, 200, nil, nil, -1); got != want {
+		if got, _, _ := view(order, 200, 60, "", 0, now, "", false, nil, 200, nil, nil, -1, "cwd"); got != want {
 			t.Errorf("%s ccmux order renders differently", name)
 		}
 	}
@@ -591,5 +592,48 @@ func TestBranchOmitsPrefix(t *testing.T) {
 	}
 	if got, want := line2(s, 2+12, []int{0, 1, 2}), fg(cBranch, branchIcon+"…alert-group"); got != want {
 		t.Errorf("highlight on the omitted part: %q, want %q", got, want)
+	}
+}
+
+// regroup: the key and title of a group in each grouping; groups come out in key order.
+func TestRegroup(t *testing.T) {
+	mk := func(id, cwd, project, tmux, status string, done bool) store.Session {
+		pane := ""
+		if tmux != "" {
+			pane = "%" + id
+		}
+		return store.Session{ID: id, Name: id, CWD: cwd, GroupKey: cwd, Project: project, TmuxSession: tmux, TmuxPane: pane, Status: status, Done: done, ContextPct: -1}
+	}
+	ss := []store.Session{
+		mk("a", "/w/shopcart", "shopcart", "dev", "working", false),
+		mk("b", "/w/shopcart-wt/x", "shopcart", "dev", "idle", false), // a worktree: the same project
+		mk("c", "/w/agmux", "agmux", "ops", "waiting", false),
+		mk("d", "/w/agmux", "agmux", "", "idle", true), // background (no pane), done
+		mk("e", "/w/x", "", "ops", "idle", false),
+	}
+	type g struct {
+		key, title string
+		ids        string
+	}
+	for mode, want := range map[string][]g{
+		"cwd":     {{"/w/agmux", tildePath("/w/agmux"), "cd"}, {"/w/shopcart", tildePath("/w/shopcart"), "a"}, {"/w/shopcart-wt/x", tildePath("/w/shopcart-wt/x"), "b"}, {"/w/x", tildePath("/w/x"), "e"}},
+		"project": {{"(no project)", "(no project)", "e"}, {"agmux", "agmux", "cd"}, {"shopcart", "shopcart", "ab"}},
+		"session": {{"dev", "dev", "ab"}, {"ops", "ops", "ce"}, {"\U0010FFFF(no pane)", "(no pane)", "d"}}, // by name, no pane last
+		"state":   {{"0working", "working", "a"}, {"1waiting", "waiting", "c"}, {"2done", "done", "d"}, {"3idle", "idle", "be"}},
+	} {
+		var got []g
+		for _, gr := range groups(regroup(ss, mode)) {
+			ids := ""
+			for _, s := range gr.sessions {
+				ids += s.ID
+			}
+			got = append(got, g{gr.key, gr.title(), ids})
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s:\n got  %v\n want %v", mode, got, want)
+		}
+	}
+	if ss[0].GroupLabel != "" || regroup(ss, "state")[0].GroupKey == ss[0].GroupKey {
+		t.Error("regroup changed its input or did not regroup")
 	}
 }

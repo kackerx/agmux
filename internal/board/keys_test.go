@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -239,7 +240,7 @@ func TestErrorsGoToMessageLine(t *testing.T) {
 func TestMouse(t *testing.T) {
 	r := &fakeRunner{}
 	m := newModel(r)
-	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, nil, m.w, nil, nil, -1)
+	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, nil, m.w, nil, nil, -1, "cwd")
 	var b1 rect
 	for _, rc := range rects {
 		if rc.id == "b1" {
@@ -369,7 +370,7 @@ func TestBackgroundHintOnce(t *testing.T) {
 func TestFold(t *testing.T) {
 	r := &fakeRunner{}
 	m := newModel(r)
-	_, before, _ := view(sessions, m.w, m.h, "", 0, now, "", false, nil, m.w, nil, nil, -1)
+	_, before, _ := view(sessions, m.w, m.h, "", 0, now, "", false, nil, m.w, nil, nil, -1, "cwd")
 
 	m, _ = press(t, m, "f") // fold /a (focus was on a1)
 	v := ansi.Strip(m.View())
@@ -379,7 +380,7 @@ func TestFold(t *testing.T) {
 	if m.focus != headerID("/a") {
 		t.Fatalf("focus %q, want the folded title", m.focus)
 	}
-	_, after, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, m.folded, m.w, nil, nil, -1)
+	_, after, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, m.folded, m.w, nil, nil, -1, "cwd")
 	for _, b := range before {
 		for _, a := range after {
 			if a.id == "b1" && b.id == "b1" && a != b {
@@ -1629,7 +1630,7 @@ func TestConfiguredColors(t *testing.T) {
 	if !strings.Contains(avatar.Render(sp, "claude", avatar.Alert, 0), ";2;10;11;12") {
 		t.Error("the eyes blink in the configured attention color")
 	}
-	if f := ansi.Strip(footer(false, 300)); !strings.HasPrefix(f, " n/k h/l move · enter jump") {
+	if f := ansi.Strip(footer(false, 300, "cwd")); !strings.HasPrefix(f, " n/k h/l move · enter jump") {
 		t.Errorf("footer from the key bindings: %q", f)
 	}
 }
@@ -1743,8 +1744,8 @@ func TestOverlay(t *testing.T) {
 	if got := ansi.Strip(overlay("abc", []string{"XXXXX"}, 3)); got != "XXX" {
 		t.Errorf("a box wider than the screen is cut: %q", got)
 	}
-	if !strings.Contains(ansi.Strip(footer(false, 300)), "a avatar · q quit") {
-		t.Errorf("footer: %s", ansi.Strip(footer(false, 300)))
+	if !strings.Contains(ansi.Strip(footer(false, 300, "cwd")), "a avatar · q quit") {
+		t.Errorf("footer: %s", ansi.Strip(footer(false, 300, "cwd")))
 	}
 }
 
@@ -1819,7 +1820,7 @@ func TestEveryColorWired(t *testing.T) {
 	has("bar mid", contextBar(40), "bar_mid")
 	has("bar high", contextBar(70), "bar_high")
 	has("bar empty", contextBar(10), "bar_empty")
-	has("disabled footer keys", footer(true, 300), "disabled")
+	has("disabled footer keys", footer(true, 300, "cwd"), "disabled")
 	has("group title", header(group{key: "/x", sessions: []store.Session{idle}}, 40, false, false, nil), "dir")
 	has("preview box", strings.Join(previewLines(idle, true, previewMsg{}, 60, 10, 0, false), "\n"), "idle")
 }
@@ -1892,7 +1893,7 @@ func TestSearchFilter(t *testing.T) {
 	if m = tm.(Model); m.query != "a" {
 		t.Errorf("ctrl+h is backspace: %q", m.query)
 	}
-	if !strings.Contains(ansi.Strip(footer(false, 300)), "enter jump · / search · s flash · f fold") {
+	if !strings.Contains(ansi.Strip(footer(false, 300, "cwd")), "enter jump · / search · s flash · f fold") {
 		t.Error("footer: … enter jump · / search · s flash · f fold …")
 	}
 }
@@ -2350,7 +2351,7 @@ func TestSearchOpensFoldedForEverything(t *testing.T) {
 	}
 	m = setup()
 	ss, _ := m.shown()
-	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, nil, m.cardsW(), nil, nil, -1)
+	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, nil, m.cardsW(), nil, nil, -1, "cwd")
 	clicked := false
 	for _, r := range rects {
 		if r.id == "a2" {
@@ -4081,5 +4082,92 @@ func TestFlashBranchWithAgent(t *testing.T) {
 	}
 	if m2 := typed(t, m, "sxx"); len(m2.flash.ms) != 1 {
 		t.Errorf("no hit in the shown part: %+v", m2.flash.ms)
+	}
+}
+
+func groupedSessions() staticSrc {
+	return staticSrc{
+		{ID: "a", Name: "alpha", GroupKey: "/w/one", CWD: "/w/one", Project: "proj", TmuxSession: "dev", TmuxPane: "%1", Status: "working", ContextPct: -1},
+		{ID: "b", Name: "bravo", GroupKey: "/w/two", CWD: "/w/two", Project: "proj", TmuxSession: "dev", TmuxPane: "%2", Status: "idle", ContextPct: -1},
+		{ID: "c", Name: "charlie", GroupKey: "/w/two", CWD: "/w/two", Project: "other", TmuxSession: "", Status: "waiting", ContextPct: -1},
+	}
+}
+
+var titleRe = regexp.MustCompile(`[▾▸] [^━]*?\(\d+\)`)
+
+// titles are the group titles on screen, in reading order.
+func titles(m Model) string {
+	var out []string
+	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+		out = append(out, titleRe.FindAllString(l, -1)...)
+	}
+	return strings.Join(out, " | ")
+}
+
+// g goes cwd → project → session → state → cwd; the footer says which; the focus stays on its card;
+// the titles are names (not paths) except for cwd; every group is open after a switch.
+func TestGroupCycle(t *testing.T) {
+	m := psized(groupedSessions(), 120, 40)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "g group:cwd") {
+		t.Fatalf("footer:\n%s", v)
+	}
+	m, _ = press(t, m, "j") // the focus on the second card of its group or the next group's first
+	focus := m.focus
+	want := []struct{ mode, titles string }{
+		{"project", "▾ other (1) | ▾ proj (2)"},
+		{"session", "▾ dev (2) | ▾ (no pane) (1)"},
+		{"state", "▾ working (1) | ▾ waiting (1) | ▾ idle (1)"},
+		{"cwd", "▾ /w/one (1) | ▾ /w/two (2)"},
+	}
+	for _, c := range want {
+		m, _ = press(t, m, "g")
+		if got := titles(m); got != c.titles || !strings.Contains(ansi.Strip(m.View()), "g group:"+c.mode) || m.focus != focus {
+			t.Errorf("%s: titles %q, want %q (focus %q, was %q)", c.mode, got, c.titles, m.focus, focus)
+		}
+	}
+}
+
+// Folds belong to a grouping: a fold made in one is gone after g, and does not hide anything in the
+// next; the fold in the new one works as ever.
+func TestGroupFoldsDoNotCarryOver(t *testing.T) {
+	m := psized(groupedSessions(), 120, 40)
+	m, _ = press(t, m, "f") // fold the focused group (cwd /w/one)
+	if v := titles(m); !strings.Contains(v, "▸ /w/one (1)") {
+		t.Fatalf("not folded: %q", v)
+	}
+	m, _ = press(t, m, "g")
+	if v := titles(m); strings.Contains(v, "▸") || len(m.folded) != 0 {
+		t.Errorf("a fold survived the switch: %q %v", v, m.folded)
+	}
+	m, _ = press(t, m, "f")
+	if v := titles(m); !strings.Contains(v, "▸") {
+		t.Errorf("cannot fold in project: %q", v)
+	}
+	m, _ = press(t, m, "g", "g", "g") // back round to cwd: expanded
+	if v := titles(m); strings.Contains(v, "▸") {
+		t.Errorf("back in cwd: %q", v)
+	}
+}
+
+// The configured grouping is the one at the start; the title of a name is not searched for paths.
+func TestGroupStartAndSearch(t *testing.T) {
+	m := psized(groupedSessions(), 120, 40)
+	m.cfg = config.Default()
+	m.cfg.GroupBy = "project"
+	if got := titles(m); got != "▾ other (1) | ▾ proj (2)" {
+		t.Errorf("start in project: %q", got)
+	}
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "two") // matches the cwd /w/two of bravo and charlie: not a part of a project's name
+	m, _ = press(t, m, "enter")
+	for _, l := range strings.Split(m.View(), "\n") {
+		if strings.Contains(ansi.Strip(l), "(2)") || strings.Contains(ansi.Strip(l), "other (1)") {
+			if strings.Contains(l, matched("j")) || strings.Contains(l, matched("e")) || strings.Contains(l, matched("r")) { // where the cwd hits would fall
+				t.Errorf("a name title with the cwd's search hits: %q", l)
+			}
+		}
 	}
 }

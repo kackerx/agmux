@@ -74,18 +74,19 @@ const (
 )
 
 type Model struct {
-	src    Source
-	run    Runner
-	now    func() time.Time
-	getenv func(string) string // AGMUX_CLIENT, TMUX_PANE
-	w, h   int
-	frame  int
-	focus  string // session ID; follows the session across polls
-	msg    string // one line above the footer: ccmux stderr, hints
-	mode   mode
-	target store.Session   // what the open x prompt / avatar list acts on, fixed when it opened
-	pick   int             // the avatar grid's cursor, an index into avatar.Listing()
-	folded map[string]bool // group keys folded with f; this run only
+	src     Source
+	run     Runner
+	now     func() time.Time
+	getenv  func(string) string // AGMUX_CLIENT, TMUX_PANE
+	w, h    int
+	frame   int
+	focus   string // session ID; follows the session across polls
+	msg     string // one line above the footer: ccmux stderr, hints
+	mode    mode
+	target  store.Session   // what the open x prompt / avatar list acts on, fixed when it opened
+	pick    int             // the avatar grid's cursor, an index into avatar.Listing()
+	folded  map[string]bool // group keys folded with f; this run only; cleared when the grouping changes
+	groupBy string          // how the cards are grouped now (g changes it); "" = [layout] group_by
 
 	query      string // the / filter; "" = every card
 	searching  bool   // the filter's input box has the keys
@@ -266,10 +267,18 @@ func (m Model) foldedNow() map[string]bool {
 	return m.folded
 }
 
+// groupMode is how the cards are grouped now: what g chose, else [layout] group_by.
+func (m Model) groupMode() string {
+	if m.groupBy != "" {
+		return m.groupBy
+	}
+	return m.cfg.GroupBy
+}
+
 // shown is what the / filter lets through (every session without one), best match first, and
 // where each card matched. The card pass-through is locked on stays, matching or not.
 func (m Model) shown() ([]store.Session, map[string]hit) {
-	ss := m.src.Sessions()
+	ss := regroup(m.src.Sessions(), m.groupMode())
 	if m.query == "" {
 		return ss, nil
 	}
@@ -523,7 +532,7 @@ func (m *Model) flashFollow() {
 // visibleFocus is the focus once the filter is gone: a card that f had folded away is not there to
 // hold it, so the focus goes to its group's title.
 func (m Model) visibleFocus() string {
-	for _, s := range m.src.Sessions() {
+	for _, s := range regroup(m.src.Sessions(), m.groupMode()) {
 		if s.ID == m.focus && m.folded[s.GroupKey] {
 			return headerID(s.GroupKey)
 		}
@@ -610,6 +619,10 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "search": // even when the filter shows nothing: / edits it
 		m.searching, m.searchFrom, m.msg = true, m.focus, ""
+		return m, nil
+	case "group": // the next grouping; every group open in it, the focus where it was
+		i := slices.Index(config.GroupModes, m.groupMode())
+		m.groupBy, m.folded, m.scrolled, m.msg = config.GroupModes[(i+1)%len(config.GroupModes)], map[string]bool{}, false, ""
 		return m, nil
 	case "next_match", "prev_match": // around the cards a kept filter shows, in layout order
 		if m.query == "" {
@@ -1012,7 +1025,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 	m.current()
 	// ponytail: re-lays out the board per click to find the card; fine for tens of sessions.
 	ss, _ := m.shown()
-	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, m.foldedNow(), m.cardsW(), nil, nil, m.pin())
+	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, m.foldedNow(), m.cardsW(), nil, nil, m.pin(), m.groupMode())
 	y := e.Y - 1 + off // row 0 is the top bar
 	for _, r := range rects {
 		if e.X >= r.x && e.X < r.x+r.w && y >= r.y && y < r.y+r.h {
@@ -1063,7 +1076,7 @@ func (m Model) View() string {
 		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.passThrough())
 	}
 	ss, hits := m.shown()
-	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits, m.pin())
+	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits, m.pin(), m.groupMode())
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
 		cursor := ""
 		if m.searching {
@@ -1103,7 +1116,7 @@ func (m Model) View() string {
 			hint = p + " prev · " + hint
 		}
 		last := strings.LastIndexByte(out, '\n') + 1
-		out = out[:last] + ansi.Truncate(fg(cFocus, " "+hint)+fg(cMuted, " ·")+footer(ok && focused.TmuxPane == "", m.w), m.w, "…")
+		out = out[:last] + ansi.Truncate(fg(cFocus, " "+hint)+fg(cMuted, " ·")+footer(ok && focused.TmuxPane == "", m.w, m.groupMode()), m.w, "…")
 	}
 	switch { // the footer is always the last line
 	case m.mode == flashing:

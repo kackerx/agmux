@@ -564,3 +564,29 @@ func TestAgentSources(t *testing.T) {
 		t.Errorf("a session without a log: %q", b)
 	}
 }
+
+// tmuxTarget is "<session> # <window>:<idx>.<pane>": the session is all before the first " # "
+// (spaces in a session name, "/" ":" and " # " in a window name stay out of it); null is no pane.
+func TestTmuxSession(t *testing.T) {
+	for target, want := range map[string]string{
+		"alpha # main:0.1":           "alpha",
+		"my session # build/api:3.0": "my session",
+		"s # a # b:c:1.2":            "s",
+		"fl-agmux # board:0.0":       "fl-agmux",
+		"":                           "",
+		"no-separator":               "no-separator",
+		"  # win:0.0":                " ",
+	} {
+		if got := tmuxSession(target); got != want {
+			t.Errorf("%q: %q, want %q", target, got, want)
+		}
+	}
+	raw, err := ccmux.Parse([]byte(`[{"id":"a","project":"shopcart","tmuxTarget":"dev # main:0.1"},{"id":"b","project":"shopcart","tmuxTarget":null}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ss := poller(t, raw).Sessions()
+	if a, b := byID(t, ss, "a"), byID(t, ss, "b"); a.Project != "shopcart" || a.TmuxSession != "dev" || b.Project != "shopcart" || b.TmuxSession != "" {
+		t.Errorf("a %+v b %+v", a, b)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -83,7 +84,16 @@ func columns(w int) (n, colW int) {
 
 type group struct {
 	key      string
+	name     string // its title when it is a name (project, session, state), "" when it is the cwd in key, shown as a path
 	sessions []store.Session
+}
+
+// title is what the group is called: its name, or its key as a path.
+func (g group) title() string {
+	if g.name != "" {
+		return g.name
+	}
+	return tildePath(g.key)
 }
 
 // groups splits sessions by GroupKey. The order comes only from the data (groups by key,
@@ -96,7 +106,7 @@ func groups(ss []store.Session) []group {
 		if !ok {
 			i = len(gs)
 			idx[s.GroupKey] = i
-			gs = append(gs, group{key: s.GroupKey})
+			gs = append(gs, group{key: s.GroupKey, name: s.GroupLabel})
 		}
 		gs[i].sessions = append(gs[i].sessions, s)
 	}
@@ -108,6 +118,53 @@ func groups(ss []store.Session) []group {
 		})
 	}
 	return gs
+}
+
+// noPaneGroup is the title of the sessions that have no tmux pane in the "session" grouping.
+const noPaneGroup = "(no pane)"
+
+// stateGroups are the groups of the "state" grouping, in this order.
+var stateGroups = []string{"working", "waiting", "done", "idle"}
+
+// stateOf is the group of a session in the "state" grouping: what its card's status line says.
+func stateOf(s store.Session) string {
+	switch {
+	case s.Status == "working":
+		return "working"
+	case s.Status == "waiting":
+		return "waiting"
+	case s.Done:
+		return "done"
+	}
+	return "idle"
+}
+
+// regroup gives every session the group key and title of the grouping mode (one of
+// config.GroupModes): cwd (the path), project (ccmux's project, "" is "(no project)"), session
+// (the tmux session; "(no pane)" last) or state (the order of stateGroups). Groups sort by key, so
+// project and session go by name, state in its order. The sessions are copies.
+func regroup(ss []store.Session, mode string) []store.Session {
+	out := make([]store.Session, len(ss))
+	for i, s := range ss {
+		switch mode {
+		case "project":
+			s.GroupKey = s.Project
+			if s.GroupKey == "" {
+				s.GroupKey = "(no project)"
+			}
+			s.GroupLabel = s.GroupKey
+		case "session":
+			s.GroupKey, s.GroupLabel = s.TmuxSession, s.TmuxSession
+			if s.TmuxSession == "" { // no pane: tmuxTarget is null
+				s.GroupKey, s.GroupLabel = "\U0010FFFF"+noPaneGroup, noPaneGroup // sorts after every name
+			}
+		case "state":
+			st := stateOf(s)
+			s.GroupKey, s.GroupLabel = strconv.Itoa(slices.Index(stateGroups, st))+st, st
+		}
+		out[i] = s
+	}
+	return out
 }
 
 // rect is where a card sits in the body, in cells; band is which row of groups it is in.
@@ -190,6 +247,9 @@ type hit struct{ name, branch, dir []int }
 
 // dirHits: the group title shows every match in its path, from any of its cards.
 func dirHits(g group, hits map[string]hit) []int {
+	if g.name != "" { // a name, not the cards' paths
+		return nil
+	}
 	var pos []int
 	for _, s := range g.sessions {
 		pos = append(pos, hits[s.ID].dir...)
@@ -235,7 +295,7 @@ func header(g group, w int, folded, focused bool, hl []int) string {
 	if focused {
 		c = cFocus
 	}
-	title := fg(c, mark) + midTrunc(hilite(tildePath(g.key), hl, c), w-2-len(count)) + fg(cMuted, count)
+	title := fg(c, mark) + midTrunc(hilite(g.title(), hl, c), w-2-len(count)) + fg(cMuted, count)
 	if rule := w - ansi.StringWidth(title) - 1; rule > 0 { // a heavy line to the column's right edge
 		title += " " + fg(c, strings.Repeat("━", rule)) // the title's own color: dir, or focus on a focused folded title
 	}
@@ -535,6 +595,7 @@ func footerFor(c *config.Config) []footerKey {
 	add(false, "%s search", "search")
 	add(false, "%s flash", "flash")
 	add(false, "%s fold", "fold")
+	add(false, "%s group:{group}", "group") // {group}: the grouping now, said by footer
 	add(false, "%s preview", "preview")
 	add(true, "%s focus preview", "focus_preview")
 	add(true, "%s reply", "reply")
@@ -761,7 +822,7 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 		count := fmt.Sprintf(" (%d)", len(g.sessions))
 		if hr, ok := at[headerID(g.key)]; ok { // folded: the title is the target
 			found = false
-			scan(midTrunc(tildePath(g.key), hr.w-2-len(count)), hr.x+2, hr.y-off, hr.id, true)
+			scan(midTrunc(g.title(), hr.w-2-len(count)), hr.x+2, hr.y-off, hr.id, true)
 			continue
 		}
 		for i, s := range g.sessions {
@@ -771,7 +832,7 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 			}
 			if i == 0 { // an open group's title: the first card is where it goes
 				found = false
-				scan(midTrunc(tildePath(g.key), r.w-2-len(count)), r.x+2, r.y-1-off, s.ID, true)
+				scan(midTrunc(g.title(), r.w-2-len(count)), r.x+2, r.y-1-off, s.ID, true)
 			}
 			tw := r.w - 2 - avatar.Width - 2
 			x0, y := r.x+1+avatar.Width+2, r.y-off
@@ -838,14 +899,14 @@ func joinClusters(cs []cluster) string {
 func abs(n int) int { return max(n, -n) }
 
 // footer is ccmux's key line; keys that need a tmux pane go dark for background sessions.
-func footer(noPane bool, w int) string {
+func footer(noPane bool, w int, group string) string {
 	parts := make([]string, len(footerKeys))
 	for i, k := range footerKeys {
 		c := cMuted
 		if k.needPane && noPane {
 			c = cOff
 		}
-		parts[i] = fg(c, k.text)
+		parts[i] = fg(c, strings.ReplaceAll(k.text, "{group}", group))
 	}
 	return ansi.Truncate(" "+strings.Join(parts, fg(cMuted, " · ")), w, "…")
 }
@@ -853,7 +914,7 @@ func footer(noPane bool, w int) string {
 // view assembles top bar, body (scrolled so the focused card is visible, or to pin >= 0 if the
 // wheel set it), message line and footer. The cards get the first cw columns; right (the preview,
 // one line per body row) fills the rest.
-func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool, cw int, right []string, hits map[string]hit, pin int) (string, []rect, int) {
+func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool, cw int, right []string, hits map[string]hit, pin int, group string) (string, []rect, int) {
 	top := " " + lipgloss.NewStyle().Bold(true).Render("agmux") + fg(cMuted, fmt.Sprintf(" · %d sessions", len(ss)))
 	body, rects := layout(groups(ss), cw, focus, frame, now, folded, hits)
 	bodyH := max(h-3, 1) // top bar, message line, footer
@@ -876,7 +937,7 @@ func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, 
 	}
 	out := append([]string{top}, vis...)
 	// ccmux stderr is often multi-line; one line keeps the screen exactly h tall
-	out = append(out, ansi.Truncate(firstLine(msg), w, "…"), footer(noPane, w))
+	out = append(out, ansi.Truncate(firstLine(msg), w, "…"), footer(noPane, w, group))
 	return strings.Join(out, "\n"), rects, off
 }
 
