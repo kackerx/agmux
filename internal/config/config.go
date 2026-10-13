@@ -299,7 +299,7 @@ func (c *Config) String() string {
 	return b.String()
 }
 
-func avatarIDs() string { return strings.Join(avatar.Choices(), ", ") }
+func avatarIDs() string { return strings.Join(avatar.Listing(), ", ") }
 
 // norm spells a configured key the way bubbletea's KeyMsg.String() does: "space" is " ",
 // with alt+ too.

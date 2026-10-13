@@ -42,6 +42,9 @@ func TestLoadSets(t *testing.T) {
 		"kit/idle/a.png":       file("idle-a"),
 		"kit/idle/notes.txt":   file("not a frame"),
 		"kit/idle/c.PNG":       file("upper case is not .png"),
+		"kit/idle/._a.png":     file("macOS AppleDouble copy"),
+		".hidden/idle/1.png":   file("a hidden directory is not a set"),
+		"hash/idle/1.png":      file("hash is reserved"),
 		"kit/working/2.png":    file("work-2"),
 		"kit/working/1.png":    file("work-1"),
 		"kit/attention/x.gif":  file("not a frame"),
@@ -49,7 +52,7 @@ func TestLoadSets(t *testing.T) {
 		"noidle/working/1.png": file("w"),
 		"solo/idle/i.png":      file("solo"),
 	})
-	if len(probs) != 1 || !strings.Contains(probs[0], `"noidle"`) || !strings.Contains(probs[0], "idle") {
+	if len(probs) != 2 || !strings.Contains(probs[0], `"hash"`) || !strings.Contains(probs[0], "reserved") || !strings.Contains(probs[1], `"noidle"`) || !strings.Contains(probs[1], "idle") {
 		t.Errorf("problems: %q", probs)
 	}
 	if len(Sets) != 2 || Sets[0].ID != "kit" || Sets[1].ID != "solo" {
@@ -72,16 +75,42 @@ func TestLoadSets(t *testing.T) {
 	if len(kit.Frames[Alert]) != 0 || len(kit.Frames[Normal]) != 0 {
 		t.Errorf("attention / done should be empty: %v", kit.Frames)
 	}
-	// ids count up from baseID in load order: kit idle a b, working 1 2, then solo
-	idle0 := kit.FrameID(Dim, 0)
-	if idle0 != baseID || kit.FrameID(Dim, 1) != baseID+1 || kit.FrameID(Scan, 0) != baseID+2 || Sets[1].FrameID(Dim, 0) != baseID+4 {
-		t.Errorf("ids: %x %x %x %x", idle0, kit.FrameID(Dim, 1), kit.FrameID(Scan, 0), Sets[1].FrameID(Dim, 0))
+	// an ID is a hash of set, state, file name and bytes: 24 bits, not 0, the same wherever it is loaded
+	idle0, idle1 := kit.FrameID(Dim, 0), kit.FrameID(Dim, 1)
+	if idle0 != frameID("kit", "idle", "a.png", []byte("idle-a")) || idle1 != frameID("kit", "idle", "b.png", []byte("idle-b")) {
+		t.Errorf("ids: %x %x", idle0, idle1)
 	}
-	if kit.FrameID(Dim, 2) != idle0 || kit.FrameID(Scan, 3) != baseID+3 { // frames cycle
+	seen := map[uint32]bool{}
+	for _, id := range []uint32{idle0, idle1, kit.FrameID(Scan, 0), kit.FrameID(Scan, 1), Sets[1].FrameID(Dim, 0)} {
+		if id == 0 || id > 0xffffff || seen[id] {
+			t.Errorf("ID %x is 0, over 24 bits or repeated", id)
+		}
+		seen[id] = true
+	}
+	if frameID("kit", "idle", "a.png", []byte("idle-a")) == frameID("kit", "idle", "a.png", []byte("edited")) || // an edited picture is a new ID
+		frameID("kit", "idle", "a.png", nil) == frameID("zed", "idle", "a.png", nil) {
+		t.Error("different pictures, same ID")
+	}
+	if kit.FrameID(Dim, 2) != idle0 || kit.FrameID(Scan, 3) != kit.FrameID(Scan, 1) { // frames cycle
 		t.Errorf("cycle: %x %x", kit.FrameID(Dim, 2), kit.FrameID(Scan, 3))
 	}
 	if kit.FrameID(Alert, 5) != kit.FrameID(Dim, 5) || kit.FrameID(Normal, 0) != idle0 { // no frames: idle's
 		t.Errorf("missing state does not fall back to idle")
+	}
+}
+
+// A set directory may be a symbolic link (the same pictures shared by several configs, say).
+func TestLoadSetsSymlink(t *testing.T) {
+	root, real := t.TempDir(), t.TempDir()
+	if err := writeFiles(real, map[string]string{"idle/1.png": "x", "working/1.png": "y"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	sets, probs := loadSets(os.DirFS(root), "user")
+	if len(probs) != 0 || len(sets) != 1 || sets[0].ID != "linked" || len(sets[0].Frames[Dim]) != 1 || len(sets[0].Frames[Scan]) != 1 {
+		t.Errorf("symlinked set: %v %q", sets, probs)
 	}
 }
 
@@ -147,6 +176,12 @@ func TestPlaceholder(t *testing.T) {
 
 // capture is what Upload writes, split into the escape sequences it is made of.
 func capture(t *testing.T, tmux bool) (seqs []string, png []byte) {
+	seqs, png, _ = captureAlt(t, tmux)
+	return
+}
+
+// captureAlt also says whether Upload switched to the alternate screen first.
+func captureAlt(t *testing.T, tmux bool) (seqs []string, png []byte, alt bool) {
 	t.Helper()
 	png = bytes.Repeat([]byte("0123456789"), 1000) // 10000 bytes: 13336 base64 characters, 4 chunks
 	useSets(t, fstest.MapFS{"s/idle/1.png": &fstest.MapFile{Data: png}})
@@ -154,19 +189,35 @@ func capture(t *testing.T, tmux bool) (seqs []string, png []byte) {
 	if err := Upload(&b, Sets, tmux); err != nil {
 		t.Fatal(err)
 	}
-	out := b.String()
+	out, alt := strings.CutPrefix(b.String(), "\x1b[?1049h")
 	if tmux { // inside the wrapper an ESC \ is doubled, so only the wrappers' own starts split cleanly
 		for _, w := range strings.Split(out, "\x1bPtmux;")[1:] {
 			seqs = append(seqs, "\x1bPtmux;"+w)
 		}
-		return seqs, png
+		return seqs, png, alt
 	}
 	for _, w := range strings.SplitAfter(out, "\x1b\\") {
 		if w != "" {
 			seqs = append(seqs, w)
 		}
 	}
-	return seqs, png
+	return seqs, png, alt
+}
+
+// kitty keeps images per screen. The board runs on the alternate one, so outside tmux the upload
+// goes there too; in tmux the client is on it already and tmux would not pass the switch on.
+func TestUploadAlternateScreen(t *testing.T) {
+	if _, _, alt := captureAlt(t, false); !alt {
+		t.Error("outside tmux the upload must start with \\e[?1049h")
+	}
+	if _, _, alt := captureAlt(t, true); alt {
+		t.Error("in tmux there is no screen switch")
+	}
+	var b bytes.Buffer
+	Upload(&b, Sets, false)
+	if strings.Count(b.String(), "\x1b[?1049h") != 1 || !strings.HasPrefix(b.String(), "\x1b[?1049h\x1b_G") {
+		t.Errorf("once, before the first image: %.40q", b.String())
+	}
 }
 
 func TestUpload(t *testing.T) {
@@ -186,7 +237,7 @@ func TestUpload(t *testing.T) {
 		}
 		want := more // later chunks carry only m
 		if i == 0 {
-			want = fmt.Sprintf("a=T,U=1,f=100,q=2,i=%d,c=6,r=2,%s", baseID, more)
+			want = fmt.Sprintf("a=T,U=1,f=100,q=2,i=%d,c=6,r=2,%s", Sets[0].FrameID(Dim, 0), more)
 		}
 		if head != want {
 			t.Errorf("chunk %d control %q, want %q", i, head, want)
@@ -221,6 +272,7 @@ func TestUploadTmux(t *testing.T) {
 // and the sets, and a set takes the sprite of its name away from the pick.
 func TestForSets(t *testing.T) {
 	useSets(t, fstest.MapFS{"kit/idle/1.png": file("a"), "bot-01/idle/1.png": file("b")})
+	t.Cleanup(func() { HashImages = false })
 	if !Known("kit") || !Known("bot-02") || Known("nope") {
 		t.Errorf("Known: kit %v bot-02 %v nope %v", Known("kit"), Known("bot-02"), Known("nope"))
 	}
@@ -233,6 +285,16 @@ func TestForSets(t *testing.T) {
 	if got := For(nil, map[string]string{"s": "nope"}, "kit", "s"); got != "kit" {
 		t.Errorf("unknown id falls through: %s", got)
 	}
+	// as pictures the hash picks among the sets and the sprites no set shadows, each once
+	HashImages = true
+	ch := Choices()
+	count := map[string]int{}
+	for _, id := range ch {
+		count[id]++
+	}
+	if len(ch) != len(Sprites)+1 || count["bot-01"] != 1 || count["kit"] != 1 { // bot-01 is a set now: 5 sprites + 2 sets
+		t.Errorf("Choices: %v", ch)
+	}
 	picked := map[string]bool{}
 	for i := range 400 {
 		picked[For(nil, nil, "hash", fmt.Sprintf("session-%d", i))] = true
@@ -240,7 +302,18 @@ func TestForSets(t *testing.T) {
 	if !picked["kit"] || !picked["bot-01"] || len(picked) != len(Sprites)+1 { // bot-01 is the set now: 5 sprites + 2 sets
 		t.Errorf("hash picked %v", picked)
 	}
-	// without sets nothing changes: the hash picks only sprites
+	// as pixels a set is one fixed sprite, which would turn up twice as often: the pool is the sprites only
+	HashImages = false
+	for i, id := range Choices() {
+		if id != Sprites[i].ID {
+			t.Errorf("pixel pool: %v", Choices())
+		}
+	}
+	for i := range 100 {
+		if id := For(nil, nil, "hash", fmt.Sprintf("session-%d", i)); id == "kit" {
+			t.Fatal("the hash picked an image set in pixel mode")
+		}
+	}
 	Sets = nil
 	for i := range 100 {
 		if _, ok := ByID(For(nil, nil, "hash", fmt.Sprintf("session-%d", i))); !ok {

@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/fs"
 	"os"
@@ -27,16 +28,14 @@ var states = [...]struct {
 	Dir  string
 }{{Dim, "idle"}, {Scan, "working"}, {Alert, "attention"}, {Normal, "done"}}
 
-// baseID is the image ID of the first frame loaded; the rest count up from it. Fixed, so a restart
-// overwrites what the last run left in the terminal instead of piling up.
-const baseID = 0x00c0de00
-
 // Set is one image avatar. Its ID shares the sprite ID namespace.
 type Set struct {
 	ID     string
 	Source string            // "builtin" or "user"
 	Frames map[Mood][][]byte // PNG data per state, in file name order; Dim (idle) is always there
-	ids    map[Mood][]uint32 // the image ID of each frame
+	ids    map[Mood][]uint32 // the image ID of each frame: a hash of the set, state, file name and bytes, so the
+	// same picture always has the same ID (a restart overwrites it; two boards, or a user edit between
+	// them, can't mix pictures up) and a different one almost surely a different ID
 }
 
 // Sets are the image sets, filled by LoadSets; empty means pixel sprites only.
@@ -85,46 +84,46 @@ func LoadSets() {
 		}
 	}
 	Sets, problems = all, append(problems1, problems2...)
-	number(Sets)
 }
 
 // UseSets makes the sets under fsys the only ones; for tests. It returns what it skipped.
 func UseSets(fsys fs.FS) []string {
 	Sets, problems = loadSets(fsys, "user")
-	number(Sets)
 	return problems
 }
 
-// number gives every frame its image ID, in load order.
-func number(sets []*Set) {
-	next := uint32(baseID)
-	for _, s := range sets {
-		s.ids = map[Mood][]uint32{}
-		for _, st := range states {
-			for range s.Frames[st.Mood] {
-				s.ids[st.Mood] = append(s.ids[st.Mood], next)
-				next++
-			}
-		}
-	}
+// frameID is a 24-bit image ID (it rides in the placeholders' foreground color); never 0, which
+// means "no image" to kitty.
+func frameID(set, state, file string, data []byte) uint32 {
+	h := fnv.New32a()
+	io.WriteString(h, set+"\x00"+state+"\x00"+file+"\x00")
+	h.Write(data)
+	return max(h.Sum32()&0xffffff, 1)
 }
 
-// loadSets reads every <id>/<state>/*.png under fsys. Only .png files count; a missing root is no sets.
+// loadSets reads every <id>/<state>/*.png under fsys. Only .png files count, not hidden ones (macOS
+// leaves ._ copies next to files on some volumes); a directory may be a symbolic link; a missing
+// root is no sets.
 func loadSets(fsys fs.FS, source string) (sets []*Set, problems []string) {
 	dirs, _ := fs.ReadDir(fsys, ".") // ReadDir sorts by name
 	for _, d := range dirs {
-		if !d.IsDir() {
+		if fi, err := fs.Stat(fsys, d.Name()); err != nil || !fi.IsDir() || strings.HasPrefix(d.Name(), ".") { // Stat follows links, the entry's own IsDir does not
 			continue
 		}
-		s := &Set{ID: d.Name(), Source: source, Frames: map[Mood][][]byte{}}
+		if d.Name() == "hash" { // [avatars] default = "hash" would mean this set
+			problems = append(problems, `avatar set "hash" skipped: "hash" is reserved for picking one by hashing; rename the directory`)
+			continue
+		}
+		s := &Set{ID: d.Name(), Source: source, Frames: map[Mood][][]byte{}, ids: map[Mood][]uint32{}}
 		for _, st := range states {
 			files, _ := fs.ReadDir(fsys, path.Join(d.Name(), st.Dir))
 			for _, f := range files {
-				if f.IsDir() || !strings.HasSuffix(f.Name(), ".png") {
+				if f.IsDir() || !strings.HasSuffix(f.Name(), ".png") || strings.HasPrefix(f.Name(), ".") {
 					continue
 				}
 				if data, err := fs.ReadFile(fsys, path.Join(d.Name(), st.Dir, f.Name())); err == nil {
 					s.Frames[st.Mood] = append(s.Frames[st.Mood], data)
+					s.ids[st.Mood] = append(s.ids[st.Mood], frameID(d.Name(), st.Dir, f.Name(), data))
 				}
 			}
 		}
@@ -196,9 +195,15 @@ const chunkSize = 4096
 // Upload sends every frame of sets to the terminal as a virtual placement of Width × Height/2 cells
 // (U=1: nothing is drawn until placeholders show it). q=2 silences the terminal's replies, which
 // inside tmux would arrive as keystrokes. In tmux each sequence goes through its DCS passthrough.
+// Outside tmux it first switches to the alternate screen, where the board will run.
 // The images are never deleted: they are small, stay in the terminal until it closes, and the next
 // start overwrites them under the same IDs (a second board's exit must not blank the first's).
 func Upload(w io.Writer, sets []*Set, tmux bool) error {
+	if !tmux { // kitty keeps images per screen; the board runs on the alternate one, so upload there (tmux's client is already on it)
+		if _, err := io.WriteString(w, "\x1b[?1049h"); err != nil {
+			return err
+		}
+	}
 	for _, s := range sets {
 		for _, st := range states {
 			for i, png := range s.Frames[st.Mood] {

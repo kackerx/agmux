@@ -285,17 +285,24 @@ func ByID(id string) (Sprite, bool) {
 	return Sprite{}, false
 }
 
-// Choices are what a hash picks from: the sprites, then the image sets (a set shadows a sprite
-// of the same ID).
+// HashImages makes the hash pick image sets too, which is only right when they are drawn as
+// pictures: as pixels a set shows one fixed sprite, and that sprite would turn up twice as often.
+// The board sets it before the first poll.
+var HashImages bool
+
+// Choices are what a hash picks from: the sprites (but a set shadows a sprite of the same ID), and
+// with HashImages the image sets.
 func Choices() []string {
 	var ids []string
 	for _, s := range Sprites {
-		if _, shadowed := SetByID(s.ID); !shadowed {
+		if _, shadowed := SetByID(s.ID); !shadowed || !HashImages {
 			ids = append(ids, s.ID)
 		}
 	}
-	for _, s := range Sets {
-		ids = append(ids, s.ID)
+	if HashImages {
+		for _, s := range Sets {
+			ids = append(ids, s.ID)
+		}
 	}
 	return ids
 }

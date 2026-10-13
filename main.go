@@ -138,8 +138,9 @@ func runBoard() error {
 		return err
 	}
 	p.AvatarBind, p.AvatarDefault = cfg.AvatarBind, cfg.AvatarDefault
+	img := board.DetectImages(cfg) // before the first poll: it decides what a hash may pick
 	if err := p.Refresh(); err != nil {
 		return err
 	}
-	return board.Run(p, cfg)
+	return board.Run(p, cfg, img)
 }

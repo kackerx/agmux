@@ -117,25 +117,24 @@ func New(src Source, run Runner) Model {
 		cfg: cfg, keymap: cfg.KeyMap()}
 }
 
-// Run polls p in the background and runs the board until the user quits.
-func Run(p *store.Poller, cfg *config.Config) error {
+// Run polls p in the background and runs the board until the user quits. img is DetectImages's
+// answer: when it says pictures, they are uploaded first.
+func Run(p *store.Poller, cfg *config.Config, img ImageMode) error {
 	useConfig(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go p.Run(ctx)
 	m := New(p, realRunner{})
 	m.cfg, m.keymap = cfg, cfg.KeyMap()
-	on, note := imageMode(m.run, os.Getenv, cfg.AvatarRenderer)
-	if on { // before the screen is taken over: bubbletea must not interleave with the upload
-		inTmux := os.Getenv("TMUX") != ""
-		if err := avatar.Upload(os.Stdout, avatar.Sets, inTmux); err != nil {
+	if img.On { // before the screen is taken over: bubbletea must not interleave with the upload
+		if err := avatar.Upload(os.Stdout, avatar.Sets, os.Getenv("TMUX") != ""); err != nil {
 			return err
 		}
 		useImages = true
 	}
 	lines := slices.Clone(avatar.Problems())
-	if note != "" {
-		lines = append(lines, note)
+	if img.Note != "" {
+		lines = append(lines, img.Note)
 	}
 	if len(lines) > 0 {
 		m = m.say(cRed, strings.Join(lines, "; "))

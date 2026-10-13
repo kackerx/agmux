@@ -1,9 +1,11 @@
 package board
 
 import (
+	"os"
 	"strings"
 
 	"github.com/kackerx/agmux/internal/avatar"
+	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -31,6 +33,20 @@ func avatarName(id string) string {
 
 // kittyTerm: the TERM values whose terminals draw kitty graphics with Unicode placeholders.
 func kittyTerm(t string) bool { return t == "xterm-kitty" || t == "xterm-ghostty" }
+
+// ImageMode is whether avatars are drawn as pictures, and the one line to say on the board's bottom row.
+type ImageMode struct {
+	On   bool
+	Note string
+}
+
+// DetectImages is imageMode for the real tmux and environment. It also tells the avatar package
+// whether a hash may pick image sets, so call it before the first poll.
+func DetectImages(cfg *config.Config) ImageMode {
+	on, note := imageMode(realRunner{}, os.Getenv, cfg.AvatarRenderer)
+	avatar.HashImages = on
+	return ImageMode{on, note}
+}
 
 // imageMode decides whether avatars are drawn as pictures, from [avatars] renderer: "pixel" never;
 // "auto" when the terminal is kitty or ghostty (in tmux: the attached client's TERM, the client

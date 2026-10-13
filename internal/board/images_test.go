@@ -79,6 +79,15 @@ func TestImageMode(t *testing.T) {
 			}
 		}
 	}
+	// no client to ask (none attached, or tmux says no): not kitty as far as anyone knows
+	for name, r := range map[string]*fakeRunner{
+		"no clients":         {tmuxOut: map[string]string{"list-clients": "", "display-message": "xterm-kitty\n", "show-options": "on\n"}},
+		"list-clients fails": {tmuxFail: map[string]error{"list-clients": errors.New("no server")}, tmuxOut: map[string]string{"display-message": "xterm-kitty\n", "show-options": "on\n"}},
+	} {
+		if on, _ := imageMode(r, env(inTmux), "auto"); on {
+			t.Errorf("%s: pictures without a client to ask", name)
+		}
+	}
 	avatar.UseSets(fstest.MapFS{}) // no sets: nothing to draw
 	if on, _ := imageMode(&fakeRunner{}, env(map[string]string{"TERM": "xterm-kitty"}), "auto"); on {
 		t.Error("pictures with no image sets")
@@ -111,18 +120,20 @@ func TestImageCard(t *testing.T) {
 		return fmt.Sprintf("%x", r<<16|g<<8|b)
 	}
 	idle, working, attention := kitSession("idle"), kitSession("working"), kitSession("waiting")
-	if a, b, c := id(idle, 0), id(idle, 1), id(idle, 2); a != "c0de00" || b != "c0de01" || c != a {
+	kit, _ := avatar.SetByID("kit")
+	hex := func(m avatar.Mood, frame int) string { return fmt.Sprintf("%x", kit.FrameID(m, frame)) }
+	if a, b, c := id(idle, 0), id(idle, 1), id(idle, 2); a != hex(avatar.Dim, 0) || b != hex(avatar.Dim, 1) || c != a || a == b {
 		t.Errorf("idle frames: %s %s %s", a, b, c)
 	}
-	if a, b := id(working, 0), id(working, 1); a != "c0de02" || b != "c0de03" {
+	if a, b := id(working, 0), id(working, 1); a != hex(avatar.Scan, 0) || b != hex(avatar.Scan, 1) || a == b || a == hex(avatar.Dim, 0) {
 		t.Errorf("working frames: %s %s", a, b)
 	}
-	if a, b := id(attention, 0), id(attention, 3); a != "c0de04" || b != a {
+	if a, b := id(attention, 0), id(attention, 3); a != hex(avatar.Alert, 0) || b != a {
 		t.Errorf("attention frames: %s %s", a, b)
 	}
 	done := kitSession("idle")
 	done.Done = true
-	if a := id(done, 0); a != "c0de00" { // the set has no done frames: idle's
+	if a := id(done, 0); a != hex(avatar.Dim, 0) { // the set has no done frames: idle's
 		t.Errorf("done falls back to idle: %s", a)
 	}
 }
@@ -185,10 +196,15 @@ func TestAvatarPickerSets(t *testing.T) {
 		if got := strings.Contains(view, "\U0010EEEE"); got != images {
 			t.Errorf("images=%v: placeholders in the list: %v", images, got)
 		}
-		if images && !strings.Contains(view, "38;2;192;222;1m") { // kit's idle frame: bot-03 has 0xc0de00, kit 0xc0de01
+		sgr := func(m avatar.Mood) string {
+			kit, _ := avatar.SetByID("kit")
+			id := kit.FrameID(m, 0)
+			return fmt.Sprintf("38;2;%d;%d;%dm", id>>16&255, id>>8&255, id&255)
+		}
+		if images && !strings.Contains(view, sgr(avatar.Dim)) { // kit's idle frame
 			t.Errorf("the set's row is not its first idle frame:\n%q", view)
 		}
-		if images && strings.Contains(view, "38;2;192;222;2m") { // its done frame, 0xc0de02
+		if images && strings.Contains(view, sgr(avatar.Normal)) { // not its done frame
 			t.Errorf("the list shows the done frame:\n%q", view)
 		}
 		if strings.Contains(ansi.Strip(view), "bot-03  Sprout") || !strings.Contains(ansi.Strip(view), "bot-03  ") {
