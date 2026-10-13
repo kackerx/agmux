@@ -174,7 +174,9 @@
 - 做法：store 读 jsonl **开头 64KB**（现在读尾部 64KB 取模型的逻辑旁边再加一次读头），取第一条 agent-setting 的值存 `Session.Agent`，按 session ID 缓存（不会变）；没有就空。卡片第 2 行右侧靠右显示它（和第 1 行的时间同一规则：始终显示，分支放不下才截），新颜色项 `colors.agent` 默认 `#bd93f9`；`agmux show` 也多一列。README 颜色表加行。
 - 验收：单测 jsonl 第 1 行有 agent-setting → Agent="orchestrator"；没有 → ""；只在尾部有（头 64KB 外）不要求读到（写进注释）；第 2 行布局：分支 + 右侧 agent，窄时分支截断 agent 保留。黑盒 夹具 jsonl 带 agent-setting 的卡第 2 行右侧出现 `orchestrator` 且是 colors.agent 色；无的卡第 2 行照旧。
 
-### T38 浮窗（嵌套 tmux client）里图片模式失效（待开工，**插队优先**）
+### T38 浮窗（嵌套 tmux client）里图片模式失效（dev 查完，定稿 A–E，实现中）
+- dev 实测（kitty + tmux 3.8，用户的 tmux.conf 与 fl-toggle.sh 原样）：1. chooseClient 选对（外层 kitty client），错在 imageMode 用 `display-message -p -c <client>` 查 termname——**tmux 3.8 里 display-message 不带 -t 时 -c 不生效**，按最近活动 client 展开 → 拿到嵌套的 tmux-256color；2. 单层 passthrough 经嵌套 client 到不了 kitty（被 popup pty 再解析一次）；3. 包两层能到，但常驻 session 先起、popup 后 attach 时上传无处可写全丢。
+- 定稿：A termname 并进 list-clients 字段；B 选中 client 是 tmux-/screen- 时改看最近活动的非 tmux client；**C tmux 里上传直写选中 client 的 tty（#{client_tty}），不再要求 allow-passthrough，打不开 tty 回落 passthrough 单层并底栏提示，写完 refresh-client，单次 write ≤ 一块**；D auto 判 off 底栏给原因；E 接受非 -h 的 AGMUX_CLIENT（-h 优先）。design.md 上传一节由 dev 改写。
 - 用户现象（2026-10-13 下午）：~/go/bin/agmux 已是 c2b26dd，但在常驻浮窗里开看板，卡片和 `a` 格子全是像素头像（图集名字在、画的是 hash 出的 sprite）= 图片模式被判 off；底栏没有任何提示（auto 模式判 off 时 note 为空）。
 - 用户的浮窗脚本 `~/.config/tmux/scripts/fl-toggle.sh`：程序跑在常驻 session `fl-agmux`（`new-session -d … agmux board`），浮窗是 `display-popup -E "tmux attach-session -t fl-agmux"`——**同一个 server 上多了一个 termname 为 tmux-256color 的嵌套 client**（实测 list-clients：/dev/ttys001 xterm-kitty sess=agmux；/dev/ttys042 tmux-256color sess=fl-agmux，后者活动时间更新）。脚本用 `set-environment -t fl-agmux AGMUX_CLIENT <client>`（**没有 -h**），而 chooseClient 只读 `show-environment -h`，所以 AGMUX_CLIENT 实际没生效，走「最近活动且不在自己 session 的 client」。从别的 fl-* 浮窗切过来时脚本还会 unset AGMUX_CLIENT。
 - 先查后改（dev 在自己的 kitty + tmux 里用同一个脚本复现，把结论写进 design.md）：1. 这种布局下 chooseClient 选到哪个 client、为什么（TMUX_PANE → own 是否解析成功；popup client 和 agmux 进程启动的先后）；2. 单层 `\ePtmux;` 包装的上传经「嵌套 client → popup pty → 外层 tmux」能不能到 kitty（之前截图 9 在浮窗里见过图，说明某种情况下能）；3. 需不需要按嵌套层数多包一层。
