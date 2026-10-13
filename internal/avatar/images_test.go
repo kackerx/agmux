@@ -252,6 +252,37 @@ func TestUpload(t *testing.T) {
 	}
 }
 
+// failAt fails its nth write (counting from 1) and no other.
+type failAt struct {
+	n, writes int
+	got       bytes.Buffer
+}
+
+func (f *failAt) Write(p []byte) (int, error) {
+	f.writes++
+	if f.writes == f.n {
+		return 0, fmt.Errorf("pty closed")
+	}
+	return f.got.Write(p)
+}
+
+// An upload that fails after switching to the alternate screen switches back, so the error is
+// readable; in tmux there is no switch to undo.
+func TestUploadFailureLeavesAlternateScreen(t *testing.T) {
+	useSets(t, fstest.MapFS{"s/idle/1.png": file("a")})
+	w := &failAt{n: 2} // the first image chunk
+	if err := Upload(w, Sets, false); err == nil || !strings.Contains(err.Error(), "pty closed") {
+		t.Fatalf("error: %v", err)
+	}
+	if got := w.got.String(); got != "\x1b[?1049h\x1b[?1049l" {
+		t.Errorf("wrote %q, want the switch there and back", got)
+	}
+	w = &failAt{n: 1}
+	if err := Upload(w, Sets, true); err == nil || w.got.Len() != 0 {
+		t.Errorf("in tmux: %v %q", err, w.got.String())
+	}
+}
+
 // In tmux every sequence is its own DCS passthrough with its ESCs doubled.
 func TestUploadTmux(t *testing.T) {
 	plain, _ := capture(t, false)

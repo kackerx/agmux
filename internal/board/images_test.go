@@ -14,6 +14,7 @@ import (
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
+	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -294,5 +295,28 @@ func TestAvatarPickerScrolls(t *testing.T) {
 		}
 		os.Remove(filepath.Join(dir, "avatars.json"))
 		p.Refresh() // the session wears the default again
+	}
+}
+
+// DetectImages tells the avatar package whether a hash may pick image sets: only when pictures are
+// drawn. Outside tmux it asks nobody but the environment.
+func TestDetectImagesSetsHashPool(t *testing.T) {
+	useKit(t)
+	t.Cleanup(func() { avatar.HashImages = false })
+	t.Setenv("TMUX", "")
+	t.Setenv("TERM", "xterm-kitty")
+	t.Setenv("TERM_PROGRAM", "")
+	cfg := config.Default()
+	if img := DetectImages(cfg); !img.On || !avatar.HashImages {
+		t.Errorf("auto in kitty: %+v, HashImages %v", img, avatar.HashImages)
+	}
+	cfg.AvatarRenderer = "pixel"
+	if img := DetectImages(cfg); img.On || avatar.HashImages {
+		t.Errorf("pixel: %+v, HashImages %v", img, avatar.HashImages)
+	}
+	cfg.AvatarRenderer = "auto"
+	t.Setenv("TERM", "xterm-256color")
+	if img := DetectImages(cfg); img.On || avatar.HashImages {
+		t.Errorf("auto elsewhere: %+v, HashImages %v", img, avatar.HashImages)
 	}
 }

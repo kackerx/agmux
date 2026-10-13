@@ -140,6 +140,9 @@ func Run(p *store.Poller, cfg *config.Config, img ImageMode) error {
 		m = m.say(cRed, strings.Join(lines, "; "))
 	}
 	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	if err != nil && img.On && os.Getenv("TMUX") == "" { // the upload switched screens: bubbletea may not have switched back
+		io.WriteString(os.Stdout, "\x1b[?1049l")
+	}
 	return err
 }
 

@@ -198,11 +198,16 @@ const chunkSize = 4096
 // Outside tmux it first switches to the alternate screen, where the board will run.
 // The images are never deleted: they are small, stay in the terminal until it closes, and the next
 // start overwrites them under the same IDs (a second board's exit must not blank the first's).
-func Upload(w io.Writer, sets []*Set, tmux bool) error {
+func Upload(w io.Writer, sets []*Set, tmux bool) (err error) {
 	if !tmux { // kitty keeps images per screen; the board runs on the alternate one, so upload there (tmux's client is already on it)
 		if _, err := io.WriteString(w, "\x1b[?1049h"); err != nil {
 			return err
 		}
+		defer func() { // a failed upload must not leave the user on a blank alternate screen to read the error on
+			if err != nil {
+				io.WriteString(w, "\x1b[?1049l")
+			}
+		}()
 	}
 	for _, s := range sets {
 		for _, st := range states {
@@ -218,7 +223,7 @@ func Upload(w io.Writer, sets []*Set, tmux bool) error {
 					if off == 0 {
 						seq = fmt.Sprintf("\x1b_Ga=T,U=1,f=100,q=2,i=%d,c=%d,r=%d,m=%d;%s\x1b\\", s.ids[st.Mood][i], Width, Height/2, more, b64[off:end])
 					}
-					if _, err := io.WriteString(w, passthrough(seq, tmux)); err != nil {
+					if _, err = io.WriteString(w, passthrough(seq, tmux)); err != nil {
 						return err
 					}
 				}
