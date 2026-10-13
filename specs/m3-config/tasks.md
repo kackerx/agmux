@@ -217,3 +217,18 @@
 ## 第六 + 七批整批回归（tester 2026-10-13，6997705，套件 42c0edf）
 - go vet / go test -race 全绿；e2e 701 条全过（tmux 3.8）。两条红均为测试侧（几何适配期望列写错；眨眼换帧间隔被 capture-pane 采样停顿晚记，断言改成均值 0.4–0.6s 且不漏拍），已改。有一轮出过 2 个 error 未留输出、未复现（当时 load≈7.5），记为未复现。
 - 没覆盖：真 kitty / ghostty 观感与 q=2 是否静默、?1049l 失败兜底、真 pi sheet、≥100 用户图集耗时、flash 叠在占位符上、--force 竞态稳定复现。
+
+## 第八批（用户 2026-10-13 晚验收第六 + 七批通过后的意见）
+
+### T41 分支名放不下时省略前缀、保留后缀（待开工）
+- 用户：`feature/permission-dashboard`、`hotfix/alert-group` 放不下时现在从尾部截（`hotfix/alert-gro…`），有用的是后缀。改：放不下时先从左边一段一段去掉 `/` 前的前缀，剩余部分前面加一个 `…`（`…alert-group`、`…permission-dashboard`），直到放得下；只剩最后一段还放不下才像现在一样从尾部截。没有 `/` 的分支照旧尾部截。第 2 行右侧有 agent 角色时同样适用。搜索 / flash 的命中高亮按显示出来的字符算（前缀被省略的部分不画高亮）。
+- 验收：单测 宽度刚好放下全名不省略；少 1 格 → `…alert-group`；三段 `a/b/c` 逐段去；只剩末段仍放不下 → `…alert-gr…`→ 定稿写成末段尾截 `alert-gr…`（前面不再加 …，避免两个省略号）；无 `/` 尾截。黑盒 窄列抓屏。
+
+### T42 组标题横线颜色改成和组名一致（待开工）
+- 用户：横线现在 muted 灰不醒目，要和分组名同色（`dir` 色）。改：━ 用 `dir` 色（焦点在标题上时随标题用 focus 色）。design.md T40 那句同步。
+- 验收：单测 标题行的 ━ 转义码 = dir 色；黑盒抓屏带色核对。
+
+### T43 分组方式可切换：cwd / project / session / state，`g` 循环（待开工）
+- 用户：现在只有按 cwd 一种；参考 ccmux 加 project、tmux session，再加一个 state。`g` 切换。
+- 定稿：四种 `group_by`：`cwd`（现状，默认）→ `project`（ccmux 的 `project` 字段：worktree 归到主仓库名下，标题 = 项目名，如 `shopcart (8)`）→ `session`（`tmuxTarget` 的 session 名，没有 pane 的后台会话归 `(no pane)`）→ `state`（working / waiting / done / idle 四组，按这个顺序，不按名排）。`g`（新动作 `group`，默认 g）按上面顺序循环；底栏显示 `g group:cwd`；config `[layout] group_by` 定启动时的方式；折叠状态按「方式 + 标题」记，切换方式后各组展开。组内卡片排序不变（名字序）；state 分组里卡片仍显示自己的状态行。标题的路径缩写只用于 cwd；project / session / state 标题直接写名字。`flow` 两种模式都适用。
+- 验收：单测 四种分组的 key 与标题、state 的固定顺序、g 循环、配置值校验（非法报一行）、折叠记忆按方式隔离、`agmux config` 打印 group_by。黑盒 夹具里给两个 worktree + 主仓库同 project → project 模式合成一组；session 模式按 tmuxTarget；state 模式四组顺序；g 三次回到 cwd；底栏文案。
