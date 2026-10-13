@@ -182,3 +182,8 @@
 - 先查后改（dev 在自己的 kitty + tmux 里用同一个脚本复现，把结论写进 design.md）：1. 这种布局下 chooseClient 选到哪个 client、为什么（TMUX_PANE → own 是否解析成功；popup client 和 agmux 进程启动的先后）；2. 单层 `\ePtmux;` 包装的上传经「嵌套 client → popup pty → 外层 tmux」能不能到 kitty（之前截图 9 在浮窗里见过图，说明某种情况下能）；3. 需不需要按嵌套层数多包一层。
 - 改：a. 嵌套识别——选中的 client termname 以 tmux- / screen- 开头时，视为嵌套一层，终端类型改看同 server 上最近活动、termname 不是 tmux-/screen- 的 client，上传按实测结果决定包装层数；b. **auto 判 off 时底栏给一行原因**（哪个 client、它的 termname / passthrough），用户能自诊；c. chooseClient 同时接受 `show-environment -t <own>`（非 -h）的 AGMUX_CLIENT（优先 -h），README 两种写法都写明。
 - 验收：单测 嵌套 client 的探测表、note 文案、非 -h 的 AGMUX_CLIENT；黑盒 fake tmux 给两 client（kitty + tmux-256color，后者更新且在自己 session）→ 图片模式 on、上传包装层数符合定稿；只有 tmux-256color client → off 且底栏有原因。真机：dev 用用户脚本在浮窗里看到图。
+
+### T39 卡片更紧凑一点（待开工，排 T38 → T36 → T37 之后）
+- 用户 2026-10-13（浮窗 OK 后）：卡片的 margin 和 padding 都再少一点点。定稿三处各减 1：列间距 colGap 2 → 1；同列相邻卡片之间的空行 1 → 0（圆角边框相接）；边框内左右各 1 格的留白 → 0（头像紧贴左边框，头像和文字之间的 2 格不动，右侧时间 / 模型紧贴右边框）。最小列宽 40 不动（文字区因此多 2 格）；组标题行、顶栏、底栏不动。
+- 牵连：rects / 鼠标命中 / flash 标签坐标 / `a` 格子定位 / 滚动的 scrollOff 都按新几何；相关单测和 e2e 的坐标断言要跟着改。README 若有画卡片示意图同步。
+- 验收：单测 两张同列卡 rect.y 相差 cardH；列 x 相差 colW+1；卡片第 1 行 `│` 后紧跟头像格、末尾时间后紧跟 `│`；黑盒 抓屏对比：120 列 2 列布局下第二列起始列号、22 张卡在 30 行里比之前多显示一张。
