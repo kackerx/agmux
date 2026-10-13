@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -635,5 +636,107 @@ func TestRegroup(t *testing.T) {
 	}
 	if ss[0].GroupLabel != "" || regroup(ss, "state")[0].GroupKey == ss[0].GroupKey {
 		t.Error("regroup changed its input or did not regroup")
+	}
+}
+
+// Line 2 at every width 0..45, ASCII and wide-character branches, with and without an agent:
+// fits in w; whole when it fits; else "…" + whole trailing segments, or the last segment cut;
+// a hit on rune p is drawn on that rune when shown, nowhere when not, never on another rune.
+func TestShownBranchExhaustive(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	branches := []string{"feature/permission-dashboard", "abc/defgh/ijklmn", "功能/权限看板/告警组x", "nodash-branch-name", "a/b", "x/功能分支"}
+	for _, br := range branches {
+		runes := []rune(br)
+		for _, agent := range []string{"", "orch"} {
+			for w := 0; w <= 45; w++ {
+				s := store.Session{Branch: br, Agent: agent}
+				plain := ansi.Strip(line2(s, w, nil))
+				if ansi.StringWidth(plain) > w {
+					t.Errorf("%q agent=%q w=%d: %q is %d wide", br, agent, w, plain, ansi.StringWidth(plain))
+				}
+				shown := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(plain, branchIcon), agent))
+				room := branchRoom(s, w) - ansi.StringWidth(branchIcon)
+				if ansi.StringWidth(br) <= room && shown != br {
+					t.Errorf("%q w=%d agent=%q: fits (room %d) but shows %q", br, w, agent, room, shown)
+				}
+				if strings.HasPrefix(shown, "…") && !strings.HasSuffix(shown, "…") { // a lone "…" is the tail cut at a tiny width
+					rest := strings.TrimPrefix(shown, "…")
+					if !strings.HasSuffix(br, "/"+rest) {
+						t.Errorf("%q w=%d: %q is not … + whole trailing segments", br, w, shown)
+					}
+				}
+				for p, r := range runes {
+					out := line2(s, w, []int{p})
+					lit := litRunes(out)
+					n := len(lit)
+					has := n == 1 && lit[0] == string(r)
+					// is rune p on screen? only if the shown text keeps it at its place
+					if n > 1 {
+						t.Errorf("%q w=%d p=%d: %d highlights", br, w, p, n)
+					}
+					if n == 0 && w >= 10 && r != '/' && strings.ContainsRune(strings.TrimSuffix(shown, "…"), r) && strings.Count(br, string(r)) == 1 {
+						t.Errorf("%q w=%d agent=%q p=%d (%q): shown in %q but not highlighted", br, w, agent, p, string(r), shown)
+					}
+					if n == 1 && lit[0] == "…" { // the hit the tail cut dropped must not leave its background on the "…"
+						t.Errorf("%q w=%d agent=%q p=%d: the hit's background bleeds onto the …: %q", br, w, agent, p, out)
+						continue
+					}
+					if n == 1 && !has {
+						t.Errorf("%q w=%d agent=%q p=%d (%q): the highlight is on %q: %q", br, w, agent, p, string(r), litRunes(out), ansi.Strip(out))
+					}
+				}
+			}
+		}
+	}
+}
+
+var sgrRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// litRunes: the visible graphemes drawn while a match background is on (48;2 set, not yet reset).
+func litRunes(out string) []string {
+	var lit []string
+	on := false
+	rest := out
+	for rest != "" {
+		loc := sgrRe.FindStringIndex(rest)
+		text := rest
+		if loc != nil {
+			text = rest[:loc[0]]
+		}
+		if on {
+			for _, c := range text {
+				lit = append(lit, string(c))
+			}
+		}
+		if loc == nil {
+			break
+		}
+		seq := rest[loc[0]:loc[1]]
+		switch {
+		case strings.Contains(seq, "48;2;"):
+			on = true
+		case seq == "\x1b[0m" || seq == "\x1b[m" || strings.Contains(seq, ";49") || seq == "\x1b[49m":
+			on = false
+		}
+		rest = rest[loc[1]:]
+	}
+	return lit
+}
+
+// A search hit the cut of the name line drops leaves its background on nothing: not on the "…".
+func TestNameCutHitDoesNotBleed(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	s := store.Session{Name: "abcdefgh"}
+	for w := 3; w < 8; w++ {
+		for p := range 8 {
+			out := line1(s, w, now, []int{p})
+			if lit := litRunes(out); len(lit) > 1 || len(lit) == 1 && lit[0] == "…" {
+				t.Errorf("w=%d p=%d: highlighted %q in %q", w, p, lit, out)
+			}
+		}
 	}
 }

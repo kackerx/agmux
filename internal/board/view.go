@@ -378,7 +378,7 @@ func spread(left, right string, w int) string {
 	if rw > 0 {
 		rw++
 	}
-	left = ansi.Truncate(left, max(w-rw, 0), "…")
+	left = ansi.Truncate(left, max(w-rw, 0), "\x1b[0m…")
 	return pad(left, w-ansi.StringWidth(right)) + right
 }
 
@@ -406,6 +406,10 @@ func status(s store.Session) (word, detail string) {
 	}
 	return fg(cMuted, "● "+s.Status), ""
 }
+
+// cutMark is the "…" that ends a cut line, in color c: after a reset, so that the background of a
+// search hit the cut dropped does not stay on it.
+func cutMark(c lipgloss.Color) string { return "\x1b[0m" + fg(c, "…") }
 
 // branchIcon is nf-dev-git_branch and a space, before the branch on line 2.
 const branchIcon = "\ue725 "
@@ -454,10 +458,10 @@ func line2(s store.Session, w int, hl []int) string {
 		left = hilite(branchIcon+text, shifted, cBranch)
 	}
 	if s.Agent == "" {
-		return ansi.Truncate(left, w, fg(cBranch, "…"))
+		return ansi.Truncate(left, w, cutMark(cBranch))
 	}
 	agent := ansi.Truncate(s.Agent, w, "…")
-	left = ansi.Truncate(left, room, fg(cBranch, "…"))
+	left = ansi.Truncate(left, room, cutMark(cBranch))
 	return pad(left, w-ansi.StringWidth(agent)) + fg(cAgent, agent)
 }
 
