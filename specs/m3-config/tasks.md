@@ -245,7 +245,7 @@
 - README：浮窗一节加 --stay 的用法和 fl-toggle 式脚本示例（new-session -d … agmux board --stay）；底栏 stay 模式下 `q hide · Q quit`。
 - 验收：单测 stay 下 jump 发 switch-client + detach-client（目标 = own session 的 client）且不 Quit；quit 只 detach；exit Quit；非 stay 行为不变；own 无 client 时退化 + 提示。黑盒 真 tmux：常驻 session + popup attach，enter 后 popup 关、外层 client 到目标 pane、进程仍在、再 attach 看到同一焦点；q 同样；Q 退出进程。
 
-### T45 在看板里看过的 done 就算已读（dev @975ae2a + 补丁 @8dc339c；审查退回 3 必改：同尺寸再 attach 不发 WINCH（reviewer 真 tmux 实测）→ hidden 期间轮询 `#{session_attached}` 清除；dwell 焦点换卡 / 非 done 两处清零无测试；MarkSeen 比较 statusChangedAt 无测试；修复 @7cefc08 送复审）
+### T45 在看板里看过的 done 就算已读（dev @975ae2a + 补丁 @8dc339c；审查退回 3 必改：同尺寸再 attach 不发 WINCH（reviewer 真 tmux 实测）→ hidden 期间轮询 `#{session_attached}` 清除；dwell 焦点换卡 / 非 done 两处清零无测试；MarkSeen 比较 statusChangedAt 无测试；修复 @7cefc08 复审通过——reviewer 真 tmux 实测 session_attached 在 detach 返回后立刻为 0、20 轮无窗口；等整套回归）
 - dev 核实 statusChangedAt 只在状态变化时变。定稿：hideBoard 自己 detach 后 hidden=true，期间 dwell 不计，任何输入 / resize 清除；脚本从浮窗 detach 的情况不知道，接受。多看板互相误删 seen 条目接受；seen.json 复用 avatar.FileBindings 接受。
 - 用户 2026-10-13：done 的卡要跳过去 pane 才变 idle（ccmux 在 pane 获焦后清 attentionState），想在看板里 focus 到它就算看过，省得反复确认。
 - ccmux 没有 ack 命令，`show --json` 的 attentionGeneration 不随每次 done 递增（实测 state=unread 而 gen=0 的会话存在），所以 agmux 自己记：**已读 = (session id, statusChangedAt)**（status 变成 idle 的时刻；dev 核实该字段在「再次工作后又完成」时会变）。记录写 `$XDG_STATE_HOME/agmux/seen.json`，启动读、轮询时清掉已不存在的会话。
