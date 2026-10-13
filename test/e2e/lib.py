@@ -899,3 +899,10 @@ def sheet_png(cols=6, rows=5, cw=180, ch=150, margin=40, edge=12):
         c, r = gx // cw, gy // ch; ix = gx % cw; col = sheet_colour(r, c)
         return tuple(v + 1 for v in col) if ix < edge or ix >= cw - edge else col
     return png_pixels(w, h, px), w, h
+
+
+# the 30 cells of a pi-agent-portrait sheet, left to right, top to bottom (scripts/draw-portrait FRAMES + NEW_FRAMES); `--layout 19` = the first 19 on a 5 x 4 grid
+PI_FRAMES = ["idle/idle.png", "idle/idle_blink.png", "hi/hi1.png", "hi/hi2.png", "talk/talk_close.png", "talk/talk_small.png", "talk/talk_mid.png", "talk/talk_wide.png",
+             "think/think.png", "think/think_hard.png", "read/read1.png", "read/read2.png", "write/write1.png", "write/write2.png", "tool/tool1.png", "tool/tool2.png",
+             "failure/failure1.png", "failure/failure2.png", "compact/compact1.png", "success/success1.png", "success/success2.png", "sleep/sleep1.png", "sleep/sleep2.png",
+             "wait/wait1.png", "wait/wait2.png", "interrupted/interrupted1.png", "search/search1.png", "bash/bash1.png", "error/error1.png", "heard/heard1.png"]
