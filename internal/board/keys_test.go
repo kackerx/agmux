@@ -3760,3 +3760,21 @@ func TestScrollWheelOtherModes(t *testing.T) {
 		}
 	}
 }
+
+// The wheel scrolls the focused card out of view (the point of the wheel); the 500ms frames that
+// follow, with no poll change, leave the scroll alone.
+func TestScrollSurvivesFrames(t *testing.T) {
+	_, m := scrollFixture(22)
+	m, _ = press(t, m, "j") // a focus that is set (a frame skips an empty one)
+	for range 10 {
+		m = wheelOn(m, tea.MouseButtonWheelDown)
+	}
+	_, want, _, _ := layoutOf(m)
+	for range 3 {
+		tm, _ := m.Update(frameMsg{})
+		m = tm.(Model)
+	}
+	if _, got, _, _ := layoutOf(m); !m.scrolled || got != want || want == 0 {
+		t.Errorf("after frames: scrolled %v off %d, want %d", m.scrolled, got, want)
+	}
+}
