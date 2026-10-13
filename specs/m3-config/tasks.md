@@ -161,3 +161,15 @@
 - 用户用 GPT 按 pi-agent-portrait 的 6×5 格式生成一张 sheet（prompt 由 orchestrator 给），导入成一个用户图集，文件名沿用 pi 的（idle/idle.png、idle/idle_blink.png、hi/hi1.png … 共 30 格，见 pi-agent-portrait scripts/draw-portrait 的 FRAMES + NEW_FRAMES），这样同一套在 pi 里也能用；我们只读其中七个状态。
 - 切法照 draw-portrait：找深色背景的边界，等分成 6×5 格（`--layout 19` 为 5×4），每格取中间的正方形，缩到 128×128 存 PNG。写到 `$XDG_CONFIG_HOME/agmux/avatars/<id>/`，已存在则报错除非 `--force`。只用标准库（image/png + 最近邻）。
 - 验收：单测 合成一张 6×5 的假 sheet（每格不同色、深色边）→ 30 个文件、名字对、每个 128²、颜色对应；5×4 布局；非 PNG / 目录已存在报错；黑盒 跑命令后 `agmux avatars` 列出该集七状态帧数，看板 `a` 里能选。
+
+## 第七批（用户 2026-10-13 下午：agents / shell 要醒目；显示 agent 角色定义；默认头像仍是像素）
+
+### T36 后台 agents / shell 醒目 + 图片模式默认头像只在图集里挑（待开工）
+- 用户截图：`⏵ working · agents ⚇ 1` 里 `agents` 和 `⚇ 1` 是 muted 灰，看不出有东西在跑。改：状态行的 ` · agents` 详情和 `⚇ n` / `⚙ n` 计数段都用 `working` 色（和状态词同色），不新增颜色项；让位顺序不变。
+- 用户以为新版没装：装了（13:02，c2b26dd），但没绑定的会话按 hash 在「5 个像素 + 10 个图集」里挑，三分之一还是像素。改：**图片模式下 hash 池只含图集**，像素头像只能按 `a` 手选；像素模式照旧只含 sprite。design.md「选择与绑定」那句同步改。
+- 验收：单测 agents 详情 / 计数的转义码是 working 色；图片模式 Choices 不含 sprite、像素模式不含集。黑盒 带 subagents 的卡第 3 行 `agents` 和 `⚇` 段是 working 色；图片模式 100 个无绑定会话全是占位符头像。
+
+### T37 卡片显示 agent 角色定义（待开工）
+- 用户问能不能拿到会话用的哪个 agent 定义（`claude --agent orchestrator` 那个）。能：Claude Code 的 transcript jsonl 里有 `{"type":"agent-setting","agentSetting":"orchestrator",...}` 行（第 1 行，resume 时再写一次）；statusline payload 和 ccmux 都没有。
+- 做法：store 读 jsonl **开头 64KB**（现在读尾部 64KB 取模型的逻辑旁边再加一次读头），取第一条 agent-setting 的值存 `Session.Agent`，按 session ID 缓存（不会变）；没有就空。卡片第 2 行右侧靠右显示它（和第 1 行的时间同一规则：始终显示，分支放不下才截），新颜色项 `colors.agent` 默认 `#bd93f9`；`agmux show` 也多一列。README 颜色表加行。
+- 验收：单测 jsonl 第 1 行有 agent-setting → Agent="orchestrator"；没有 → ""；只在尾部有（头 64KB 外）不要求读到（写进注释）；第 2 行布局：分支 + 右侧 agent，窄时分支截断 agent 保留。黑盒 夹具 jsonl 带 agent-setting 的卡第 2 行右侧出现 `orchestrator` 且是 colors.agent 色；无的卡第 2 行照旧。
