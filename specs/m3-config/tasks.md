@@ -137,6 +137,7 @@
 - 设计第 5–6 条。CC0 来源逐个核对许可页后再收，CREDITS.md 记 URL / 作者 / 许可；README 署名。
 - 验收：单测 格子布局（焦点卡下方 / 放不下换上方、5×4、格内 id 行、光标起点、滚动行、enter 绑定、消息行 id）；内置集数 = 15、sprite = 5；黑盒 120×40 按 a 抓屏：框在焦点卡下方、20 格、最后一排 5 个像素头像、l/j 移动、enter 后卡片换图、矮终端（高 20）时上方或滚动仍能选到最后一个。
 
-### T33 内置头像换成 pi-agent-portrait 的 10 个角色（待开工，T32 之后）
+### T33 内置头像换成 pi-agent-portrait 的 10 个角色（dev @de20b1e 送审 / 送测）
+- 数字：141 帧、PNG 803 KB、直通后 1.08 MB，载入 73 ms、写出 1.3 ms，浮窗起到看板出现 0.67 s 时头像已全在。aza_choi / cipher / default / red 上游无 success 目录 → 回落 idle（验收「每状态 ≥1」对 success 不要求）。
 - 设计 design.md「内置头像换成 pi-agent-portrait 的角色」。只拿 10 个角色目录里七个状态（含别名）下不带 `_v\d+` 的 PNG，预缩 64×64 embed；删 party-*；`_v\d+` 忽略规则加到 loadSets（用户集同样）；格宽 10；CREDITS / README。
 - 验收：单测 内置集数 10 且每个 idle/think/read/write/tool/hi/success 帧数 ≥1、不含 `_v2`；用户集里 `idle_v2.png` 被忽略、`idle_2.png` 仍算帧；格宽 10 的布局。黑盒 `agmux avatars` 列 10 个内置 + 5 sprite；`a` 格子 15 格、名字不贴邻格；上传帧数 = 各集基础 take 之和。
