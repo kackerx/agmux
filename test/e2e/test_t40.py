@@ -1,5 +1,5 @@
 """T40 [layout] flow = "bands" (default: each n groups are a row as tall as its tallest group) | "stack" (group k goes to column k mod n and every column stacks its groups on its own,
-no alignment between columns); group title rows are drawn `▾ ~/path (n) ━━━━` to the column's right edge (muted), folded titles too, and a title that fills the column has no line.
+no alignment between columns); group title rows are drawn `▾ ~/path (n) ━━━━` to the column's right edge (T42: dir colour, was muted), folded titles too, and a title that fills the column has no line.
 Spec: specs/m3-config/tasks.md「第七批」T40 (+ T39: column gap 1, no padding inside the border)."""
 import re, subprocess, unittest
 from lib import *
@@ -78,7 +78,7 @@ class Config(Base):
 
 
 class Titles(Base):
-    def test_every_title_has_a_muted_heavy_rule_to_the_right_edge_of_its_column(self):
+    def test_every_title_has_a_heavy_rule_in_the_dir_colour_to_the_right_edge_of_its_column(self):
         t = self.board(many=False, w=200, h=50); snap = t.snap(); ti = [(r, c, row) for r, c, row in titles(snap)]; self.assertGreaterEqual(len(ti), 4)
         cards = find_cards(snap); colw = cards[0].w; checked = 0
         for r, c, row in ti:
@@ -87,7 +87,7 @@ class Titles(Base):
             if j >= len(cells): continue  # the one that fills its column (below)
             k = j
             while k < len(cells) and cells[k][0] == "━": k += 1
-            self.assertTrue(all(all(abs(a - b) <= 2 for a, b in zip(cells[x][1][1:], MUTED[1:])) for x in range(j, k)), "the rule is muted"); self.assertEqual(k - c, colw, f"title + rule fill the column ({colw}) exactly: {row.text[c:k + 2]!r}")
+            self.assertTrue(all(cells[x][1] == cells[c][1] for x in range(j, k)), "T42: the rule is in the colour of the title mark (dir, not muted)"); self.assertNotEqual(cells[j][1], MUTED); self.assertEqual(k - c, colw, f"title + rule fill the column ({colw}) exactly: {row.text[c:k + 2]!r}")
             self.assertEqual(cells[j - 1][0], " ", "a space between the count and the rule"); checked += 1
         self.assertGreaterEqual(checked, 3)
 

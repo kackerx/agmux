@@ -72,7 +72,7 @@ class Layout(unittest.TestCase):
                         self.assertGreater(tr, max(c.r for h in range(g // n * n - n, g // n * n) for c in gs[h][2]) + 4)
                 self.assertIn("agmux · 9 sessions", snap[0].text, "top bar")
                 bar = last_text_row(snap)
-                for k in (BAR_KEYS if W >= 140 else BAR_KEYS[:1]):  # the English key line is ~133 columns wide; narrower terminals truncate it with …
+                for k in (BAR_KEYS if W >= 170 else BAR_KEYS[:1]):  # the English key line is ~167 columns wide since T43 added `g group:cwd` (was ~133); narrower terminals truncate it with …
                     self.assertIn(k, bar, "bottom bar hints")
 
     def test_resize(self):
@@ -153,7 +153,7 @@ class Content(unittest.TestCase):
 
     def test_line2_is_the_branch_alone(self):
         a1, a2 = self.card("a1"), self.card("a2")
-        self.assertIn("\ue725 feature/qa", a1.line(2)); self.assertIn("…", a1.line(2), "a long branch is cut with …")
+        self.assertIn("\ue725 qa-acceptance", a1.line(2)); self.assertIn("…", a1.line(2), "a long branch is cut with …"); self.assertNotIn("feature/", a1.line(2), "T41: the prefix is left out first; the last segment alone is still too long, so its tail is cut (no leading …)"); self.assertNotIn("\ue725 …", a1.line(2))
         self.assertIn("\ue725 main", a2.line(2))
         self.assertGreaterEqual(a2.rows[2].find("\ue725"), 9, "the branch icon U+E725 sits right after the avatar columns")
         self.assertNotIn("⑂", self.t.text(), "the old branch glyph is gone")

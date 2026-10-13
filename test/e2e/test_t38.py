@@ -164,7 +164,10 @@ class Fallback(Base):
         self.assertTrue(ok and n == N_BUILTIN, "passthrough took over"); self.assertIn(b"stopped reading", bytes(r.data)); self.assertGreater(took, 1.5, "it waited for the tty first"); self.assertLess(took, 8)
 
     def test_a_slow_reader_that_keeps_making_progress_is_waited_for(self):
-        slow = self.tty(chunk=8192, delay=0.05); self.env.set_tmux(session="fl-own", clients=[(100, "outer", "main", "xterm-kitty", slow.path)]); r = self.run_board(settle=0.3, wait_for=b" sessions", timeout=60)
+        # a macOS pty read returns <= 1KB whatever `chunk` is, so the pace is ~1KB per `delay`: 0.01 -> ~100KB/s, the ~1MB upload takes ~11 s (every read well inside the 2 s no-progress limit, the whole far over it).
+        # (0.05 made it ~55 s: right at the old 60 s wait, red whenever the machine was busy)
+        slow = self.tty(chunk=8192, delay=0.01); self.env.set_tmux(session="fl-own", clients=[(100, "outer", "main", "xterm-kitty", slow.path)]); t0 = time.time(); r = self.run_board(settle=0.3, wait_for=b" sessions", timeout=90); took = time.time() - t0
+        self.assertGreater(took, 4, f"the upload is slow enough that a fixed 2 s timeout would have fallen back ({took:.1f}s)")
         wait(lambda: len(kitty_images(kitty_commands(slow.bytes()))) == N_BUILTIN, 20)
         self.assertEqual(len(kitty_images(kitty_commands(slow.bytes()))), N_BUILTIN, "everything arrived on the tty"); self.assertNotIn(b"stopped reading", bytes(r.data)); self.assertNotIn(b"Ptmux", bytes(r.data))
 

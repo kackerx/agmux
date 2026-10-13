@@ -70,6 +70,7 @@ if [ -e "$d/tmux.fail" ] && [ "$(cat "$d/tmux.fail")" = "$1" ]; then printf 'tmu
 case "$1" in
   display-message) case " $* " in *" ; "*) echo "0 0 0 default 50"; exit 0;; esac
     case " $* " in *client_termname*) if [ -e "$d/tmux.termname" ]; then cat "$d/tmux.termname"; else echo xterm-256color; fi; exit 0;; esac  # T28: renderer auto-detect  # T24: the preview's `display-message <cursor format> ; capture-pane`: cursor hidden, then an empty screen
+    case " $* " in *session_attached*) if [ -e "$d/tmux.attached" ]; then cat "$d/tmux.attached"; else echo 0; fi; exit 0;; esac  # T45: `#{{session_attached}}` while a --stay board is hidden (0 = nobody has attached again; a test writes 1)
     if [ -e "$d/tmux.session" ]; then cat "$d/tmux.session"; else echo fl-own; fi; exit 0;;
   show|show-options) case " $* " in *allow-passthrough*) if [ -e "$d/tmux.passthrough" ]; then cat "$d/tmux.passthrough"; else echo on; fi; exit 0;; esac; exit 0;;  # T28
   list-clients) [ -e "$d/tmux.clients" ] || exit 0  # T38: five fields; a row with three gets the default termname (tmux.termname, xterm-256color) and a tty file of its own in $d/tty-<name>
