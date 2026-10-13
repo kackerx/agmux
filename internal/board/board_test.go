@@ -51,7 +51,7 @@ func TestView(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	ss := fixture(t)
 	for _, w := range []int{60, 114, 120, 200} {
-		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "", false, nil, w, nil, nil)
+		out, rects, _ := view(ss, w, 200, ss[0].ID, 0, now, "", false, nil, w, nil, nil, -1)
 		lines := strings.Split(out, "\n")
 		if len(lines) != 200 {
 			t.Errorf("w=%d: %d lines, want the full height", w, len(lines))
@@ -79,7 +79,7 @@ func TestView(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", "/Users/dev") // the fixture's home, so headers shorten to ~ on any machine
-	out, _, _ := view(ss, 200, 50, "", 0, now, "", false, nil, 200, nil, nil)
+	out, _, _ := view(ss, 200, 50, "", 0, now, "", false, nil, 200, nil, nil, -1)
 	plain := ansi.Strip(out)
 	for _, want := range []string{"agmux · 15 sessions", "▾ ~/proj/sqlmux (4)", "sqlmux-orchestrator", "⏵ working", "● done", "q quit"} {
 		if !strings.Contains(plain, want) {
@@ -92,7 +92,7 @@ func TestScrollKeepsFocusVisible(t *testing.T) {
 	ss := fixture(t)
 	last := groups(ss)
 	id := last[len(last)-1].sessions[0].ID
-	out, rects, off := view(ss, 60, 20, id, 0, now, "", false, nil, 60, nil, nil)
+	out, rects, off := view(ss, 60, 20, id, 0, now, "", false, nil, 60, nil, nil, -1)
 	if off == 0 || len(strings.Split(out, "\n")) != 20 {
 		t.Fatalf("expected a scrolled 20-line screen, off=%d", off)
 	}
@@ -201,7 +201,7 @@ func TestCardLines(t *testing.T) {
 
 func TestMultilineMessage(t *testing.T) {
 	ss := fixture(t)
-	out, _, _ := view(ss, 120, 30, "", 0, now, "ccmux kill x: boom\n  at stack\n  at more", false, nil, 120, nil, nil)
+	out, _, _ := view(ss, 120, 30, "", 0, now, "ccmux kill x: boom\n  at stack\n  at more", false, nil, 120, nil, nil, -1)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 30 || !strings.HasPrefix(ansi.Strip(lines[0]), " agmux") || !strings.Contains(out, "boom") || strings.Contains(out, "at stack") {
 		t.Errorf("multi-line message: %d lines (want 30), top bar %q", len(lines), ansi.Strip(lines[0]))
@@ -277,9 +277,9 @@ func TestOrderIgnoresCcmuxOrder(t *testing.T) {
 		reversed[len(ss)-1-i] = s
 	}
 	rotated := append(append([]store.Session{}, ss[5:]...), ss[:5]...)
-	want, _, _ := view(ss, 200, 60, "", 0, now, "", false, nil, 200, nil, nil)
+	want, _, _ := view(ss, 200, 60, "", 0, now, "", false, nil, 200, nil, nil, -1)
 	for name, order := range map[string][]store.Session{"reversed": reversed, "rotated": rotated} {
-		if got, _, _ := view(order, 200, 60, "", 0, now, "", false, nil, 200, nil, nil); got != want {
+		if got, _, _ := view(order, 200, 60, "", 0, now, "", false, nil, 200, nil, nil, -1); got != want {
 			t.Errorf("%s ccmux order renders differently", name)
 		}
 	}

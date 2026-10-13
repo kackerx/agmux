@@ -130,6 +130,10 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyShiftTab}
 	case "ctrl+]":
 		return tea.KeyMsg{Type: tea.KeyCtrlCloseBracket}
+	case "ctrl+d":
+		return tea.KeyMsg{Type: tea.KeyCtrlD}
+	case "ctrl+u":
+		return tea.KeyMsg{Type: tea.KeyCtrlU}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
 	case "right":
@@ -235,7 +239,7 @@ func TestErrorsGoToMessageLine(t *testing.T) {
 func TestMouse(t *testing.T) {
 	r := &fakeRunner{}
 	m := newModel(r)
-	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, nil, m.w, nil, nil)
+	_, rects, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, nil, m.w, nil, nil, -1)
 	var b1 rect
 	for _, rc := range rects {
 		if rc.id == "b1" {
@@ -365,7 +369,7 @@ func TestBackgroundHintOnce(t *testing.T) {
 func TestFold(t *testing.T) {
 	r := &fakeRunner{}
 	m := newModel(r)
-	_, before, _ := view(sessions, m.w, m.h, "", 0, now, "", false, nil, m.w, nil, nil)
+	_, before, _ := view(sessions, m.w, m.h, "", 0, now, "", false, nil, m.w, nil, nil, -1)
 
 	m, _ = press(t, m, "f") // fold /a (focus was on a1)
 	v := ansi.Strip(m.View())
@@ -375,7 +379,7 @@ func TestFold(t *testing.T) {
 	if m.focus != headerID("/a") {
 		t.Fatalf("focus %q, want the folded title", m.focus)
 	}
-	_, after, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, m.folded, m.w, nil, nil)
+	_, after, _ := view(sessions, m.w, m.h, m.focus, 0, now, "", false, m.folded, m.w, nil, nil, -1)
 	for _, b := range before {
 		for _, a := range after {
 			if a.id == "b1" && b.id == "b1" && a != b {
@@ -2341,7 +2345,7 @@ func TestSearchOpensFoldedForEverything(t *testing.T) {
 	}
 	m = setup()
 	ss, _ := m.shown()
-	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, nil, m.cardsW(), nil, nil)
+	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, nil, m.cardsW(), nil, nil, -1)
 	clicked := false
 	for _, r := range rects {
 		if r.id == "a2" {
@@ -3486,5 +3490,104 @@ func TestFlashViewDoesNotWriteFreed(t *testing.T) {
 	}
 	if _, ok := hitOf(m, "b1"); !ok {
 		t.Error("nor into its hits")
+	}
+}
+
+// 22 cards: the wheel and ctrl+d / ctrl+u scroll the cards without moving the focus; the view
+// goes back to following the focus when a key moves it out of view; the top bar says what is cut.
+func TestScrollCards(t *testing.T) {
+	var ss staticSrc
+	for i := range 22 {
+		ss = append(ss, store.Session{ID: fmt.Sprintf("s%02d", i), Name: fmt.Sprintf("n%02d", i), GroupKey: "/a", Status: "idle", ContextPct: -1})
+	}
+	m := New(ss, &fakeRunner{})
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m = tm.(Model)
+	wheel := func(m Model, b tea.MouseButton) Model {
+		tm, _ := m.Update(tea.MouseMsg{X: 10, Y: 10, Action: tea.MouseActionPress, Button: b})
+		return tm.(Model)
+	}
+	off := func(m Model) int { _, o, _, _ := m.window(); return o }
+	_, _, most, bodyH := m.window()
+	if most == 0 {
+		t.Fatal("fixture fits on screen")
+	}
+	top := func(m Model) string { return ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0]) }
+	if v := top(m); !strings.Contains(v, "↓ more") || strings.Contains(v, "↑ more") {
+		t.Errorf("at the top: %q", v)
+	}
+	focus := m.focus
+	m = wheel(m, tea.MouseButtonWheelDown)
+	if off(m) != 3 || m.focus != focus {
+		t.Errorf("wheel down: off %d, focus %q -> %q", off(m), focus, m.focus)
+	}
+	if v := top(m); !strings.Contains(v, "↓ more") || !strings.Contains(v, "↑ more") {
+		t.Errorf("in the middle: %q", v)
+	}
+	for range 100 {
+		m = wheel(m, tea.MouseButtonWheelDown)
+	}
+	if off(m) != most {
+		t.Errorf("wheel to the end: off %d, most %d", off(m), most)
+	}
+	if v := top(m); strings.Contains(v, "↓ more") || !strings.Contains(v, "↑ more") {
+		t.Errorf("at the bottom: %q", v)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "n21") {
+		t.Error("the last card is not on screen at the bottom")
+	}
+	for range 100 {
+		m = wheel(m, tea.MouseButtonWheelUp)
+	}
+	if off(m) != 0 {
+		t.Errorf("wheel to the top: off %d", off(m))
+	}
+	m, _ = press(t, m, "ctrl+d")
+	if off(m) != bodyH/2 || m.focus != focus {
+		t.Errorf("ctrl+d: off %d, want %d, focus %q", off(m), bodyH/2, m.focus)
+	}
+	m, _ = press(t, m, "ctrl+u")
+	if off(m) != 0 {
+		t.Errorf("ctrl+u: off %d", off(m))
+	}
+	// scrolled to the bottom, the focus (the first card) is out of view: j brings it back into view
+	for range 100 {
+		m = wheel(m, tea.MouseButtonWheelDown)
+	}
+	m, _ = press(t, m, "j")
+	if m.scrolled || !strings.Contains(ansi.Strip(m.View()), "n01") {
+		t.Errorf("j with the focus off screen: scrolled %v, view\n%s", m.scrolled, ansi.Strip(m.View()))
+	}
+	m.top, m.scrolled = 1, true
+	if v := top(m); !strings.Contains(v, "↑ more") {
+		t.Errorf("one line scrolled off: %q", v)
+	}
+	// polls took cards away while scrolled to the end: the view stays inside what is left
+	src := &mutSrc{ss: slices.Clone(ss)}
+	m.src = src
+	for range 100 {
+		m = wheel(m, tea.MouseButtonWheelDown)
+	}
+	src.ss = src.ss[:4]
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "n00") || !strings.Contains(v, "n03") {
+		t.Errorf("after the list shrank:\n%s", v)
+	}
+	m.src, m.scrolled = ss, false
+	// the focus below the view: k brings it back
+	m, _ = press(t, m, strings.Split(strings.Repeat("j", 21), "")...)
+	for range 100 {
+		m = wheel(m, tea.MouseButtonWheelUp)
+	}
+	m, _ = press(t, m, "k")
+	if m.scrolled || !strings.Contains(ansi.Strip(m.View()), "n20") {
+		t.Errorf("k with the focus below the view: scrolled %v", m.scrolled)
+	}
+	// the focus still in view: k leaves the scroll alone
+	m = wheel(m, tea.MouseButtonWheelUp)
+	o := off(m)
+	m, _ = press(t, m, "k")
+	if !m.scrolled || off(m) != o {
+		t.Errorf("k with the focus on screen: scrolled %v, off %d -> %d", m.scrolled, o, off(m))
 	}
 }

@@ -578,8 +578,12 @@ func put(line string, x int, s string) string {
 	return pad(ansi.Truncate(line, x, ""), x) + "\x1b[0m" + s + "\x1b[0m" + right
 }
 
-// scrollOff is how many body lines scroll off the top so the focused card shows in bodyH lines.
-func scrollOff(rects []rect, focus string, bodyH int) int {
+// scrollOff is how many body lines scroll off the top: top when the wheel or the page keys set it
+// (top >= 0; held inside the bodyLen lines), else just enough for the focused card to show in bodyH lines.
+func scrollOff(rects []rect, focus string, bodyH, bodyLen, top int) int {
+	if top >= 0 {
+		return min(top, max(bodyLen-bodyH, 0))
+	}
 	for _, r := range rects {
 		if r.id == focus && r.y+r.h > bodyH {
 			return r.y + r.h - bodyH
@@ -772,13 +776,20 @@ func footer(noPane bool, w int) string {
 	return ansi.Truncate(" "+strings.Join(parts, fg(cMuted, " · ")), w, "…")
 }
 
-// view assembles top bar, body (scrolled so the focused card is visible), message line and footer.
-// The cards get the first cw columns; right (the preview, one line per body row) fills the rest.
-func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool, cw int, right []string, hits map[string]hit) (string, []rect, int) {
+// view assembles top bar, body (scrolled so the focused card is visible, or to pin >= 0 if the
+// wheel set it), message line and footer. The cards get the first cw columns; right (the preview,
+// one line per body row) fills the rest.
+func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool, cw int, right []string, hits map[string]hit, pin int) (string, []rect, int) {
 	top := " " + lipgloss.NewStyle().Bold(true).Render("agmux") + fg(cMuted, fmt.Sprintf(" · %d sessions", len(ss)))
 	body, rects := layout(groups(ss), cw, focus, frame, now, folded, hits)
 	bodyH := max(h-3, 1) // top bar, message line, footer
-	off := scrollOff(rects, focus, bodyH)
+	off := scrollOff(rects, focus, bodyH, len(body), pin)
+	if off > 0 {
+		top += fg(cMuted, " · ↑ more")
+	}
+	if off+bodyH < len(body) {
+		top += fg(cMuted, " · ↓ more")
+	}
 	vis := body[min(off, len(body)):]
 	vis = vis[:min(bodyH, len(vis))]
 	for len(vis) < bodyH {

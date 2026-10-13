@@ -106,6 +106,8 @@ type Model struct {
 	scroll    int        // lines the preview is scrolled back with the wheel
 	pvLines   int        // lines in the last capture, the most scroll can show
 	keys      *serial    // forwarded keys reach the pane in the order they were typed
+	scrolled  bool       // the cards were scrolled by the wheel or page keys, not by the focus: top is the offset
+	top       int        // lines scrolled off the top of the cards while scrolled; the focus leaving the view ends it
 
 	cfg    *config.Config
 	keymap map[string]string // key (as KeyMsg.String() spells it) → action
@@ -217,6 +219,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return tm, cmd
 		}
 		nm.scroll = 0 // a new card starts at the bottom
+		nm.followHidden()
 		capture := nm.capture()
 		return nm, tea.Batch(cmd, capture)
 	}
@@ -459,9 +462,8 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // the hits drawn before, whose labels stay where they can.
 func (m *Model) flashRead(prev []flashMatch) []flashMatch {
 	gs, _, _, _ := m.current()
-	_, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.foldedNow(), nil)
-	bodyH := max(m.h-3, 1)
-	return flashScan(gs, rects, m.focus, m.flash.pat, scrollOff(rects, m.focus, bodyH), bodyH, m.cardsW(), m.now(), prev, m.flash.freed)
+	rects, off, _, bodyH := m.window()
+	return flashScan(gs, rects, m.focus, m.flash.pat, off, bodyH, m.cardsW(), m.now(), prev, m.flash.freed)
 }
 
 // flashScan: the pattern changed, so the hits are read anew with new labels, and what was freed is forgotten.
@@ -531,6 +533,47 @@ func (m Model) searchKey(k tea.KeyMsg) Model {
 	return m
 }
 
+// window lays the board out and gives the cards, the offset in effect, the most it can scroll
+// and the body's height.
+func (m *Model) window() (rects []rect, off, last, bodyH int) {
+	gs, _, _, _ := m.current()
+	body, rects := layout(gs, m.cardsW(), m.focus, m.frame, m.now(), m.foldedNow(), nil)
+	bodyH = max(m.h-3, 1)
+	return rects, scrollOff(rects, m.focus, bodyH, len(body), m.pin()), max(len(body)-bodyH, 0), bodyH
+}
+
+// pin is the offset the wheel or the page keys set, -1 when the view follows the focus.
+func (m Model) pin() int {
+	if m.scrolled {
+		return m.top
+	}
+	return -1
+}
+
+// slide scrolls the cards without moving the focus: dir -1 up, 1 down; three lines, or half a body for a page.
+func (m Model) slide(dir int, page bool) Model {
+	_, off, last, bodyH := m.window()
+	n := 3
+	if page {
+		n = max(bodyH/2, 1)
+	}
+	m.top, m.scrolled = min(max(off+dir*n, 0), last), true
+	return m
+}
+
+// followHidden goes back to following the focus once it is not fully in view.
+func (m *Model) followHidden() {
+	if !m.scrolled {
+		return
+	}
+	rects, off, _, bodyH := m.window()
+	for _, r := range rects {
+		if r.id == m.focus && (r.y < off || r.y+r.h > off+bodyH) {
+			m.scrolled = false
+		}
+	}
+}
+
 // do runs a configured action on the focused card.
 func (m Model) do(action string) (tea.Model, tea.Cmd) {
 	switch action {
@@ -567,6 +610,16 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	key := gs[gi].key
+	if action == "page_down" || action == "page_up" {
+		if m.w == 0 { // no layout before the first WindowSizeMsg
+			return m, nil
+		}
+		dir := 1
+		if action == "page_up" {
+			dir = -1
+		}
+		return m.slide(dir, true), nil
+	}
 	if d, ok := directions[action]; ok {
 		if m.w == 0 { // no layout before the first WindowSizeMsg
 			return m, nil
@@ -903,13 +956,20 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 		cmd := m.capture()
 		return m, cmd
 	}
+	if m.mode == browsing && m.w > 0 && e.Action == tea.MouseActionPress && (e.Button == tea.MouseButtonWheelUp || e.Button == tea.MouseButtonWheelDown) {
+		dir := 1
+		if e.Button == tea.MouseButtonWheelUp {
+			dir = -1
+		}
+		return m.slide(dir, false), nil
+	}
 	if m.mode != browsing || e.Action != tea.MouseActionPress || e.Button != tea.MouseButtonLeft || e.Y < 1 || e.Y > m.h-3 {
 		return m, nil
 	}
 	m.current()
 	// ponytail: re-lays out the board per click to find the card; fine for tens of sessions.
 	ss, _ := m.shown()
-	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, m.foldedNow(), m.cardsW(), nil, nil)
+	_, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), "", false, m.foldedNow(), m.cardsW(), nil, nil, m.pin())
 	y := e.Y - 1 + off // row 0 is the top bar
 	for _, r := range rects {
 		if e.X >= r.x && e.X < r.x+r.w && y >= r.y && y < r.y+r.h {
@@ -960,7 +1020,7 @@ func (m Model) View() string {
 		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.passThrough())
 	}
 	ss, hits := m.shown()
-	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits)
+	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits, m.pin())
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
 		cursor := ""
 		if m.searching {
