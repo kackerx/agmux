@@ -172,6 +172,8 @@ const chunkSize = 4096
 // Upload sends every frame of sets to the terminal as a virtual placement of Width × Height/2 cells
 // (U=1: nothing is drawn until placeholders show it). q=2 silences the terminal's replies, which
 // inside tmux would arrive as keystrokes. In tmux each sequence goes through its DCS passthrough.
+// The images are never deleted: they are small, stay in the terminal until it closes, and the next
+// start overwrites them under the same IDs (a second board's exit must not blank the first's).
 func Upload(w io.Writer, sets []*Set, tmux bool) error {
 	for _, s := range sets {
 		for _, st := range states {
@@ -195,17 +197,6 @@ func Upload(w io.Writer, sets []*Set, tmux bool) error {
 		}
 	}
 	return nil
-}
-
-// Delete frees every uploaded image (and its placements) in the terminal.
-func Delete(w io.Writer, sets []*Set, tmux bool) {
-	for _, s := range sets {
-		for _, st := range states {
-			for _, id := range s.ids[st.Mood] {
-				io.WriteString(w, passthrough(fmt.Sprintf("\x1b_Ga=d,d=I,i=%d,q=2\x1b\\", id), tmux))
-			}
-		}
-	}
 }
 
 // passthrough wraps seq for tmux's DCS passthrough: every ESC inside is doubled.

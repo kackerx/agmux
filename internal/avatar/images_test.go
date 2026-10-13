@@ -196,6 +196,9 @@ func TestUpload(t *testing.T) {
 	if got, err := base64.StdEncoding.DecodeString(b64.String()); err != nil || !bytes.Equal(got, png) {
 		t.Errorf("payload does not decode to the file: %v", err)
 	}
+	if strings.Contains(strings.Join(seqs, ""), "a=d") { // nothing is deleted on exit: see Upload
+		t.Error("Upload deletes images")
+	}
 }
 
 // In tmux every sequence is its own DCS passthrough with its ESCs doubled.
@@ -211,25 +214,6 @@ func TestUploadTmux(t *testing.T) {
 		if !ok || !ok2 || strings.ReplaceAll(inner, "\x1b\x1b", "\x1b") != plain[i] || strings.Count(inner, "\x1b") != 2*strings.Count(plain[i], "\x1b") {
 			t.Errorf("chunk %d is not the doubled passthrough of the plain one: %.60q", i, w)
 		}
-	}
-}
-
-// Every frame's image is deleted, with its data (d=I), silently.
-func TestDelete(t *testing.T) {
-	useSets(t, fstest.MapFS{"s/idle/1.png": file("a"), "s/idle/2.png": file("b"), "s/done/1.png": file("c")})
-	var b bytes.Buffer
-	Delete(&b, Sets, false)
-	want := ""
-	for i := range 3 {
-		want += fmt.Sprintf("\x1b_Ga=d,d=I,i=%d,q=2\x1b\\", baseID+i)
-	}
-	if b.String() != want {
-		t.Errorf("%q, want %q", b.String(), want)
-	}
-	b.Reset()
-	Delete(&b, Sets, true)
-	if !strings.HasPrefix(b.String(), "\x1bPtmux;\x1b\x1b_Ga=d,d=I,i=") || strings.Count(b.String(), "\x1bPtmux;") != 3 {
-		t.Errorf("tmux: %q", b.String())
 	}
 }
 

@@ -131,7 +131,6 @@ func Run(p *store.Poller, cfg *config.Config) error {
 		if err := avatar.Upload(os.Stdout, avatar.Sets, inTmux); err != nil {
 			return err
 		}
-		defer avatar.Delete(os.Stdout, avatar.Sets, inTmux)
 		useImages = true
 	}
 	lines := slices.Clone(avatar.Problems())
