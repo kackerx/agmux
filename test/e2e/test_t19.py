@@ -11,7 +11,7 @@ from test_t11 import PreviewBase, CAT_CMD, MARK_CMD, PV_X
 
 F = C_FOCUS
 MATCH, MATCH_INK = ("rgb", 242, 208, 107), ("rgb", 44, 42, 46)  # T22: yellow background (#f2d06b), dark text (#2d2a2e rounded by lipgloss)
-ALL = ["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽", "bravo-29", "bravo-bg", "charlie-30", "charlie-59", "delta-60", "echo-long"]  # NOT layout order; use sorted()
+ALL = ["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字", "bravo-29", "bravo-bg", "charlie-30", "charlie-59", "delta-60", "echo-long"]  # NOT layout order; use sorted()
 
 
 def card_name(c):
@@ -66,7 +66,7 @@ class Input(Base):
     def test_typing_filters_live_and_ctrl_h_is_backspace(self):
         self.t.keys("/"); self.t.lit("alpx"); time.sleep(0.4); self.assertEqual(self.names(), [], "alpx matches nothing")
         self.t.keys("C-h"); time.sleep(0.4)
-        self.assertIn("/ alp▏", self.top()); self.assertEqual(sorted(self.names()), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽"]))
+        self.assertIn("/ alp▏", self.top()); self.assertEqual(sorted(self.names()), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字"]))
         self.t.keys("BSpace"); time.sleep(0.3); self.assertIn("/ al▏", self.top())
         self.assertTrue(self.t.alive(), "ctrl+h is backspace, not a command")
 
@@ -99,7 +99,7 @@ class Syntax(Base):
     def test_prefix_and_suffix(self):
         self.assertEqual(self.got("^alpha"), ["alpha-main"], "^ anchors at the start of name + branch + cwd")
         self.assertEqual(self.got("^lpha"), [])
-        self.assertEqual(self.got("alpha$"), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽"]), "$ anchors at the end (the cwd)")
+        self.assertEqual(self.got("alpha$"), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字"]), "$ anchors at the end (the cwd)")
 
     def test_exclude(self):
         self.assertEqual(self.got("!bravo"), sorted(set(ALL) - {"bravo-29", "bravo-bg"}))
@@ -134,7 +134,7 @@ class Highlight(Base):
 
     def test_directory_match_highlights_the_group_title(self):
         self.search("work/alpha")
-        self.assertEqual(sorted(self.names()), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽"]))
+        self.assertEqual(sorted(self.names()), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字"]))
         title = next(r for r in self.t.snap() if "▾ ~/work/alpha" in r.text)
         self.assertEqual(self.lit_chars(title), "work/alpha", "the path in the group title is highlighted")
         cs = {card_name(c): c for c in find_cards(self.t.snap())}
@@ -276,7 +276,7 @@ class Review(Base):
     def test_a_matching_card_inside_a_folded_group_unfolds_it_while_filtering(self):
         self.t.keys("f"); time.sleep(0.4); self.assertEqual(len(self.names()), 6, "alpha is folded")
         self.search("alpha")
-        self.assertEqual(sorted(self.names()), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽"]), "the folded group opened for its matches")
+        self.assertEqual(sorted(self.names()), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字"]), "the folded group opened for its matches")
         self.assertEqual(self.count()[0], 3)
         self.t.esc(); time.sleep(0.5)
         self.assertEqual(len(self.names()), 6, "after clearing, the group is folded again"); self.assertIn("▸ ~/work/alpha (3)", self.t.text())

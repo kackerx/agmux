@@ -282,14 +282,9 @@ class ImageMode(Base):
         self.assertTrue(wait(lambda: len(card_avatar(t.raw(), [c for c in cards_of(t.raw()) if "pj-fallback" in c.line(1) and find_grid(parse_screen(t.raw())) is None][0])) == 12 if find_grid(t.snap()) is None else False, 3),
                         "the card shows placeholders within a tick or two")
 
-    def test_default_hash_in_image_mode_may_pick_sets_in_pixel_mode_only_sprites(self):
-        def fnv(s):
-            h = 2166136261
-            for b in s.encode(): h = ((h ^ b) * 16777619) & 0xFFFFFFFF
-            return h
-        self.config('[avatars]\ndefault = "hash"\n'); t = self.board_img(); raw = t.raw(); cs = cards_of(raw); pool = 5 + N_SETS
-        for name, key in (("alpha-main", "alpha-main"), ("bravo-29", "bravo-29"), ("charlie-30", "charlie-30"), ("delta-60", "delta-60"), ("echo-long", "echo-long"), ("pj-fallback", "pj-fallback")):
-            self.assertEqual(bool(card_avatar(raw, named(cs, name))), fnv(key) % pool >= 5, f"{name}: image iff fnv32a(name) % ({pool}) >= 5 (5 sprites first, then the sets)")
+    def test_default_hash_in_image_mode_picks_image_sets_only(self):  # T36
+        self.config('[avatars]\ndefault = "hash"\n'); t = self.board_img(); raw = t.raw(); cs = cards_of(raw); self.assertEqual(len(cs), 9)
+        self.assertTrue(all(len(card_avatar(raw, c)) == 12 for c in cs), "no unbound session wears a pixel sprite")
 
 
 if __name__ == "__main__":

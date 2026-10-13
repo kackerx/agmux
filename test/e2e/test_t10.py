@@ -12,7 +12,7 @@ import fcntl, os, pty, struct, subprocess, termios, threading, unittest
 from lib import *
 from test_t3 import ready, by_name, NAMES, last_text_row
 
-CLIENTS_FMT = "#{client_activity}\t#{client_name}\t#{client_session}"
+CLIENTS_FMT = "#{client_activity}\t#{client_name}\t#{client_session}\t#{client_termname}\t#{client_tty}"
 A1_PANE = "%101"  # fixture: a1 (alpha-main) lives in %101; b2 is a background session without a pane
 
 
@@ -37,12 +37,12 @@ class FakeTmux(unittest.TestCase):
     def test_nested_float_without_agmux_client_only_switches(self):
         self.start(session="fl-own", clients=[(100, "outer-1", "main"), (300, "outer-2", "work"), (500, "float", "fl-own")])
         self.t.keys("Enter")
-        c = self.tcalls(4)
+        c = self.tcalls(5)
         self.assertEqual(c, [["display-message", "-p", "-t", "%9", "#{session_name}"], ["list-clients", "-F", CLIENTS_FMT],
-                             ["show-environment", "-h", "-t", "fl-own", "AGMUX_CLIENT"], ["switch-client", "-c", "outer-2", "-t", A1_PANE]],
-                         "own session via TMUX_PANE; no $AGMUX_CLIENT -> ask the HIDDEN session environment (-h; unset here); most recent client NOT attached to the own session; switch")
+                             ["show-environment", "-h", "-t", "fl-own", "AGMUX_CLIENT"], ["show-environment", "-t", "fl-own", "AGMUX_CLIENT"], ["switch-client", "-c", "outer-2", "-t", A1_PANE]],
+                         "own session via TMUX_PANE; no $AGMUX_CLIENT -> ask the HIDDEN session environment (-h; unset here), then the plain one (T38; unset too); most recent client NOT attached to the own session; switch")
         self.assertEqual(self.t.exit_status(), 0); time.sleep(0.3)
-        self.assertEqual(len(self.env.tmux_calls()), 4, "without $AGMUX_CLIENT nothing is detached (the heuristic cannot tell a float from a real terminal)")
+        self.assertEqual(len(self.env.tmux_calls()), 5, "without $AGMUX_CLIENT nothing is detached (the heuristic cannot tell a float from a real terminal)")
         self.assertEqual(self.env.calls(), [], "no ccmux switch any more")
 
     def test_agmux_client_switches_then_detaches_the_other_clients_of_its_own_session(self):
@@ -88,14 +88,34 @@ class FakeTmux(unittest.TestCase):
         self.assertEqual(self.t.exit_status(), 0)
 
     def test_unset_or_failing_session_environment_falls_back_to_the_heuristic(self):
-        for label, env_val, fail in (("-AGMUX_CLIENT", "-AGMUX_CLIENT", None), ("empty", "", None), ("error", None, "show-environment"), ("garbage", "SOMETHING_ELSE=1", None)):
+        # T38: a hidden "-AGMUX_CLIENT" (unset on purpose) is final; anything else unusable goes on to ask the plain session variable too
+        for label, env_val, fail, asks in (("-AGMUX_CLIENT", "-AGMUX_CLIENT", None, 1), ("empty", "", None, 2), ("error", None, "show-environment", 2), ("garbage", "SOMETHING_ELSE=1", None, 2)):
             with self.subTest(show_environment=label):
                 self.start(session="fl-own", session_env=env_val, fail=fail,
                            clients=[(100, "outer-1", "main"), (300, "outer-2", "work"), (500, "float", "fl-own")])
-                self.t.keys("Enter"); c = self.tcalls(4); time.sleep(0.4)
-                self.assertEqual([x[0] for x in self.env.tmux_calls()], ["display-message", "list-clients", "show-environment", "switch-client"],
+                self.t.keys("Enter"); c = self.tcalls(3 + asks); time.sleep(0.4)
+                self.assertEqual([x[0] for x in self.env.tmux_calls()], ["display-message", "list-clients"] + ["show-environment"] * asks + ["switch-client"],
                                  "heuristic (most recent client outside the own session), and no detach")
-                self.assertEqual(self.env.tmux_calls()[3], ["switch-client", "-c", "outer-2", "-t", A1_PANE]); self.t.close()
+                self.assertEqual(self.env.tmux_calls()[2 + asks], ["switch-client", "-c", "outer-2", "-t", A1_PANE]); self.t.close()
+
+    def test_a_plain_session_variable_is_read_when_no_hidden_one_is_there(self):  # T38
+        self.start(session="fl-own", session_env_plain="AGMUX_CLIENT=/dev/outer", clients=[(100, "/dev/other", "work"), (200, "/dev/outer", "main"), (500, "float", "fl-own")])
+        self.t.keys("Enter"); c = self.tcalls(6)
+        self.assertEqual(c[2:], [["show-environment", "-h", "-t", "fl-own", "AGMUX_CLIENT"], ["show-environment", "-t", "fl-own", "AGMUX_CLIENT"], ["switch-client", "-c", "/dev/outer", "-t", A1_PANE],
+                                 ["detach-client", "-t", "float"]], "-h first, then the plain one; its value is an exact choice like the hidden one")
+
+    def test_the_hidden_variable_wins_over_the_plain_one_and_stops_the_asking(self):  # T38
+        self.start(session="fl-own", session_env="AGMUX_CLIENT=/dev/hidden", session_env_plain="AGMUX_CLIENT=/dev/plain",
+                   clients=[(100, "/dev/hidden", "main"), (200, "/dev/plain", "work"), (500, "float", "fl-own")])
+        self.t.keys("Enter"); c = self.tcalls(5); time.sleep(0.3)
+        self.assertEqual([x[0] for x in self.env.tmux_calls()], ["display-message", "list-clients", "show-environment", "switch-client", "detach-client"], "one show-environment")
+        self.assertEqual(self.env.tmux_calls()[3], ["switch-client", "-c", "/dev/hidden", "-t", A1_PANE])
+
+    def test_an_explicit_hidden_unset_does_not_ask_the_plain_variable(self):  # T38
+        self.start(session="fl-own", session_env="-AGMUX_CLIENT", session_env_plain="AGMUX_CLIENT=/dev/plain", clients=[(100, "/dev/plain", "main"), (300, "outer-2", "work"), (500, "float", "fl-own")])
+        self.t.keys("Enter"); c = self.tcalls(4); time.sleep(0.3)
+        self.assertEqual([x[0] for x in self.env.tmux_calls()], ["display-message", "list-clients", "show-environment", "switch-client"])
+        self.assertEqual(self.env.tmux_calls()[3], ["switch-client", "-c", "outer-2", "-t", A1_PANE], "the heuristic: the plain value is ignored")
 
     def test_process_environment_wins_and_skips_show_environment(self):
         self.start(session="fl-own", session_env="AGMUX_CLIENT=/dev/session-one", extra="AGMUX_CLIENT=/dev/process-one",
@@ -139,9 +159,9 @@ class FakeTmux(unittest.TestCase):
 
     def test_ordinary_pane_fallback_without_agmux_client(self):
         self.start(session="main", clients=[(100, "only", "main"), (200, "second", "main")])
-        self.t.keys("Enter"); c = self.tcalls(4)
-        self.assertEqual(c[3], ["switch-client", "-c", "second", "-t", A1_PANE], "every client is in agmux's own session: the most recent of them")
-        self.assertEqual(self.t.exit_status(), 0); time.sleep(0.3); self.assertEqual(len(self.env.tmux_calls()), 4, "no detach on the fallback")
+        self.t.keys("Enter"); c = self.tcalls(5)
+        self.assertEqual(c[2:4], [["show-environment", "-h", "-t", "main", "AGMUX_CLIENT"], ["show-environment", "-t", "main", "AGMUX_CLIENT"]]); self.assertEqual(c[4], ["switch-client", "-c", "second", "-t", A1_PANE], "every client is in agmux's own session: the most recent of them")
+        self.assertEqual(self.t.exit_status(), 0); time.sleep(0.3); self.assertEqual(len(self.env.tmux_calls()), 5, "no detach on the fallback")
 
     def test_session_names_with_spaces_compare_exactly(self):
         for own in ("my float", "fl ", " fl", "a  b"):
@@ -184,7 +204,7 @@ class FakeTmux(unittest.TestCase):
         self.t.keys("Enter")
         self.assertTrue(wait(lambda: "no tmux client to switch" in foot(self.t), 3), self.t.text())
         self.assertIn("AGMUX_CLIENT", foot(self.t)); self.assertTrue(self.t.alive(), "the board must not exit")
-        self.assertEqual([c[0] for c in self.env.tmux_calls()], ["display-message", "list-clients", "show-environment"], "no switch attempted")
+        self.assertEqual([c[0] for c in self.env.tmux_calls()], ["display-message", "list-clients", "show-environment", "show-environment"], "no switch attempted")
         self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 9)
 
     # ---- send ----------------------------------------------------------------------------------------------------------------------------

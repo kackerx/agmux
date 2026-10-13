@@ -72,9 +72,12 @@ case "$1" in
     case " $* " in *client_termname*) if [ -e "$d/tmux.termname" ]; then cat "$d/tmux.termname"; else echo xterm-256color; fi; exit 0;; esac  # T28: renderer auto-detect  # T24: the preview's `display-message <cursor format> ; capture-pane`: cursor hidden, then an empty screen
     if [ -e "$d/tmux.session" ]; then cat "$d/tmux.session"; else echo fl-own; fi; exit 0;;
   show|show-options) case " $* " in *allow-passthrough*) if [ -e "$d/tmux.passthrough" ]; then cat "$d/tmux.passthrough"; else echo on; fi; exit 0;; esac; exit 0;;  # T28
-  list-clients) [ -e "$d/tmux.clients" ] && cat "$d/tmux.clients"; exit 0;;
+  list-clients) [ -e "$d/tmux.clients" ] || exit 0  # T38: five fields; a row with three gets the default termname (tmux.termname, xterm-256color) and a tty file of its own in $d/tty-<name>
+    term=xterm-256color; [ -e "$d/tmux.termname" ] && term=$(cat "$d/tmux.termname")
+    tab=$(printf '\\t'); while IFS="$tab" read -r a n s t y; do [ -z "$a$n$s" ] && continue; [ -z "$t" ] && t=$term; [ -z "$y" ] && {{ if [ -e "$d/tmux.tty" ]; then y=$(cat "$d/tmux.tty"); else y="$d/tty-$(printf %s "$n" | tr '/ ' '__')"; : >> "$y"; fi; }}; printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$a" "$n" "$s" "$t" "$y"; done < "$d/tmux.clients"; exit 0;;
   load-buffer) cat >> "$d/tmux.stdin"; exit 0;;
-  show-environment) if [ -e "$d/tmux.env" ]; then cat "$d/tmux.env"; exit 0; else echo "unknown variable: $4" >&2; exit 1; fi;;
+  show-environment) f="$d/tmux.env.plain"; case " $* " in *" -h "*) f="$d/tmux.env";; esac  # -h: the hidden variable a launcher sets; without it: the plain session one
+    if [ -e "$f" ]; then cat "$f"; exit 0; else echo "unknown variable: AGMUX_CLIENT" >&2; exit 1; fi;;
 esac
 exit 0
 """
@@ -85,6 +88,7 @@ exit 0
         os.symlink(self.bin / "ccmux", self.bin_real / "ccmux")
 
     def cleanup(self):
+        if getattr(self, "pty_tty", None) is not None: self.pty_tty.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     @property
@@ -146,14 +150,29 @@ exit 0
             p = self.fake / name
             p.unlink(missing_ok=True) if v is None else p.write_text(v + "\n")
 
-    def set_tmux(self, session="fl-own", clients=(), fail=None, session_env=None):
-        """clients: (activity, client_name, client_session) rows served by `tmux list-clients -F ...`; fail: subcommand that exits 1."""
+    def set_tmux(self, session="fl-own", clients=(), fail=None, session_env=None, session_env_plain=None):
+        """clients: (activity, client_name, client_session[, termname[, tty]]) rows served by `tmux list-clients -F ...` (T38: termname defaults to set_term's, tty to a file
+        $fake/tty-<name> that tty_bytes() reads); fail: subcommand that exits 1; session_env / session_env_plain: what `show-environment -h` / without -h print for AGMUX_CLIENT."""
         (self.fake / "tmux.session").write_text(session + "\n")  # NB: tmux keeps trailing spaces in names, so the file keeps them too
-        (self.fake / "tmux.clients").write_text("".join(f"{a}\t{n}\t{s}\n" for a, n, s in clients))
+        (self.fake / "tmux.clients").write_text("".join("\t".join(str(x) for x in c) + "\n" for c in clients))
+        if session_env_plain is not None: (self.fake / "tmux.env.plain").write_text(session_env_plain + "\n")
         if fail:
             (self.fake / "tmux.fail").write_text(fail)
         if session_env is not None:  # what `tmux show-environment -t <session> AGMUX_CLIENT` prints, e.g. "AGMUX_CLIENT=/dev/outer" or "-AGMUX_CLIENT"
             (self.fake / "tmux.env").write_text(session_env + "\n")
+
+    def use_pty_tty(self):
+        """T38: make the fake tmux's clients (those that give no tty of their own) have a real pty as their tty, /dev/ttysNNN: agmux writes pictures there; tty_bytes() returns what it wrote."""
+        if getattr(self, "pty_tty", None) is None:
+            self.pty_tty = PtyTty(); (self.fake / "tmux.tty").write_text(self.pty_tty.path + "\n")
+        return self.pty_tty
+
+    def tty_bytes(self, name="c-test"):
+        """what agmux wrote to the tty of fake tmux client `name` (T38: pictures go straight to the client's tty); with use_pty_tty: what the pty received"""
+        if getattr(self, "pty_tty", None) is not None:
+            return self.pty_tty.bytes()
+        p = self.fake / ("tty-" + name.replace("/", "_").replace(" ", "_"))
+        return p.read_bytes() if p.exists() else b""
 
     def show_calls(self):
         p = self.fake / "show.calls"
@@ -460,7 +479,7 @@ def build_fixture(env, with_hud=True):
 
     S = [
         mk("a1", "alpha-main", f"{h}/work/alpha", "alpha", "working", pendingTool="Bash", pane="%101",
-           gitBranch="feature/qa-acceptance-very-long-branch-name-for-truncation", logPath=str(jsonl),
+           gitBranch="feature/qa-acceptance-very-long-twig-name-for-truncation", logPath=str(jsonl),
            subagents=[{"agentId": "x1", "status": "working", "pendingTool": None}, {"agentId": "x2", "status": "idle", "pendingTool": None}],
            lastPrompt='<cross-session-message from="uds:/tmp/cc-socks/1.sock" from-name="orch" from-mode="bypass">\n先修折行\n第二行不该出现\n</cross-session-message>'),
         mk("a2", None, f"{h}/work/alpha", "pj-fallback", pane="%102",
@@ -490,12 +509,13 @@ def build_fixture(env, with_hud=True):
     )
 
 
-MIN_COL, GAP, MAX_COLS = 40, 2, 4  # S1.1: column minimum 40; T8: at most 4 columns
+MIN_COL, GAP, MAX_COLS = 40, 1, 4  # S1.1: column minimum 40; T8: at most 4 columns; T39: one cell between columns (was 2)
+AV_X, PAD = 1, 0  # T39: the avatar starts right after the border (card cell 1); no padding between the border and the text (was 2 and 1)
 
 
 def layout(W):
     n = max(1, min(MAX_COLS, (W + GAP) // (MIN_COL + GAP)))
-    return n, (W - 2 * (n - 1)) // n
+    return n, (W - GAP * (n - 1)) // n
 
 
 def parse_attr(raw):
@@ -869,11 +889,13 @@ def set_lines(cfg=None):
 
 
 # ---------------------------------------------------------------- T34 / T35 fixtures
-def build_many_fixture(env, n=22, per_group=6):
-    """n sessions named m00.. in groups of per_group (project p0, p1, ...): more cards than a 120x30 screen shows, to scroll. Panes %301.. . Returns [names] in order."""
+def build_many_fixture(env, n=22, per_group=6, sizes=None):
+    """n sessions named m00.. in groups of per_group (project p0, p1, ...): more cards than a 120x30 screen shows, to scroll. Panes %301.. . Returns [names] in order.
+    sizes=[6, 2, 3, 5]: group sizes of their own (n is then their sum)."""
     now = datetime.datetime.now(datetime.timezone.utc); h = env.home; S = []
+    if sizes: n = sum(sizes); grp = [k for k, s in enumerate(sizes) for _ in range(s)]
     for i in range(n):
-        g = f"p{i // per_group}"
+        g = f"p{grp[i] if sizes else i // per_group}"
         S.append(dict(id=f"m{i:02d}", summary=f"m{i:02d}", agentType="claude", cwd=f"{h}/work/{g}", project=g, mainRepoRoot=f"{h}/work/{g}", gitBranch="main", status="idle",
                       attentionType=None, pendingTool=None, tmuxPane=f"%{301 + i}", trackingMode="native", subagents=[], nativeSessionId=f"n-m{i:02d}", logPath=None,
                       lastActivityAt=iso(now - datetime.timedelta(seconds=90)), updatedAt=iso(now), backgroundDetail=None, lastPrompt=None, attentionState=None))
@@ -908,3 +930,37 @@ PI_FRAMES = ["idle/idle.png", "idle/idle_blink.png", "hi/hi1.png", "hi/hi2.png",
              "think/think.png", "think/think_hard.png", "read/read1.png", "read/read2.png", "write/write1.png", "write/write2.png", "tool/tool1.png", "tool/tool2.png",
              "failure/failure1.png", "failure/failure2.png", "compact/compact1.png", "success/success1.png", "success/success2.png", "sleep/sleep1.png", "sleep/sleep2.png",
              "wait/wait1.png", "wait/wait2.png", "interrupted/interrupted1.png", "search/search1.png", "bash/bash1.png", "error/error1.png", "heard/heard1.png"]
+
+
+class PtyTty:
+    """A pty standing in for a terminal's tty: `path` (/dev/ttysNNN, what a tmux client's #{client_tty} says) can be opened and written by agmux; everything written is read here."""
+
+    def __init__(self, read=True, chunk=65536, delay=0.0):
+        """read=False: nobody reads (a terminal that stopped); chunk / delay: read `chunk` bytes then wait `delay` seconds (a slow terminal)."""
+        import pty, threading, tty as _tty
+        self.read, self.chunk, self.delay = read, chunk, delay
+        self.master, slave = pty.openpty(); _tty.setraw(slave)  # raw: no echo / newline translation: the bytes come out as written
+        self.path = os.ttyname(slave); self._slave = slave; self._data = bytearray(); self._lock = threading.Lock(); self._stop = False
+        self._th = threading.Thread(target=self._pump, daemon=True); self._th.start()
+
+    def _pump(self):
+        import select
+        while not self._stop:
+            if not self.read: time.sleep(0.1); continue
+            try:
+                if not select.select([self.master], [], [], 0.2)[0]: continue
+                d = os.read(self.master, self.chunk)
+            except OSError: break
+            if not d: break
+            with self._lock: self._data += d
+            if self.delay: time.sleep(self.delay)
+
+    def bytes(self):
+        time.sleep(0.05)
+        with self._lock: return bytes(self._data)
+
+    def close(self):
+        self._stop = True; self._th.join(2)
+        for fd in (self.master, self._slave):
+            try: os.close(fd)
+            except OSError: pass

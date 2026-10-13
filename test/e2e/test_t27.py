@@ -32,7 +32,7 @@ class Show(Base):
     def test_effort_level_shows_after_the_model_in_the_effort_colour(self):
         self.feed("n-b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "high"}, "context_window": {"used_percentage": 40}})
         t, cs = self.board(); c = self.b1(cs); row = c.rows[3]
-        self.assertRegex(c.line(3), r"Fancy Model 9·high [│┃]$", c.line(3))
+        self.assertRegex(c.line(3), r"Fancy Model 9·high[│┃]$", c.line(3))
         i = row.find("high"); self.assertGreaterEqual(i, 0)
         eff = {row.cells[i + k][1] for k in range(4)}; self.assertEqual(len(eff), 1, "one colour for the whole level")
         mod = {row.cells[row.find("Fancy") + k][1] for k in range(5)}

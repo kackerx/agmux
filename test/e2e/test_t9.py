@@ -64,7 +64,7 @@ class TwoColumns(Base):
         self.assertEqual((n, colW), (2, 59))
         titles, cards = structure(self.t)
         self.assertEqual([g[2] for g in titles], [["a1", "a2", "a3"], ["b1", "b2"], ["c1", "c2"], ["d1"], ["e1"]])
-        self.assertEqual(sorted({c[1] for c in cards}), [0, 61])
+        self.assertEqual(sorted({c[1] for c in cards}), [0, 60])
 
     def test_j_walks_the_whole_left_column_across_bands_and_k_walks_back(self):
         self.walk([("j", "a2"), ("j", "a3"), ("j", "c1"), ("j", "c2"), ("j", "e1"), ("j", "e1"),

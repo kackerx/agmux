@@ -8,7 +8,7 @@ from lib import *
 from test_t3 import ready, last_text_row, border_colours, C_FOCUS, NAMES, by_name
 
 MATCH, INK = ("rgb", 242, 208, 107), ("rgb", 44, 42, 46)
-LAYOUT = ["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽", "bravo-29", "bravo-bg", "charlie-30", "charlie-59", "delta-60", "echo-long"]  # groups left to right, cards top to bottom
+LAYOUT = ["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字", "bravo-29", "bravo-bg", "charlie-30", "charlie-59", "delta-60", "echo-long"]  # groups left to right, cards top to bottom
 
 
 def name_of(c):

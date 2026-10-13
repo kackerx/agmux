@@ -34,7 +34,7 @@ class Columns(Base):
     def test_five_columns_when_the_terminal_is_wide_enough(self):
         self.config("[layout]\nmax_columns = 5\n"); t = self.board(232)
         n, w, titles = self.columns(t); self.assertEqual((n, titles), (5, 5), t.text())
-        self.assertEqual(w, (232 - 2 * 4) // 5, "colW = floor((W - 2(n-1)) / n)")
+        self.assertEqual(w, (232 - 4) // 5, "colW = floor((W - (n-1)) / n)")
         first = sorted((c for c in find_cards(t.snap()) if c.r == min(x.r for x in find_cards(t.snap()))), key=lambda c: c.c)
         self.assertEqual([c.line(1)[8:-6].strip() for c in first], FIVE, "one group per column, all five on one row")
 
@@ -42,7 +42,7 @@ class Columns(Base):
         for text in ("", "[layout]\nmax_columns = 4\n"):
             with self.subTest(config=text):
                 self.config(text); t = self.board(232); n, w, titles = self.columns(t)
-                self.assertEqual((n, titles), (4, 4), t.text()); self.assertEqual(w, (232 - 2 * 3) // 4); t.close()
+                self.assertEqual((n, titles), (4, 4), t.text()); self.assertEqual(w, (232 - 3) // 4); t.close()
 
     def test_the_minimum_column_width_still_limits_a_narrow_terminal(self):
         self.config("[layout]\nmax_columns = 5\n"); t = self.board(180)

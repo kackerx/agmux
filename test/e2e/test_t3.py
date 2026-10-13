@@ -37,7 +37,7 @@ def last_text_row(snap):
 
 
 class Layout(unittest.TestCase):
-    """Column count / width algorithm: n=min(4, floor((W+2)/42)), colW=floor((W-2(n-1))/n), remainder left empty on the right."""
+    """Column count / width algorithm: n=min(4, floor((W+1)/41)), colW=floor((W-(n-1))/n) (T39: one cell between columns), remainder left empty on the right."""
 
     def test_widths(self):
         for W in (40, 81, 82, 123, 124, 165, 166, 200, 207, 208, 232, 249, 250, 300):
@@ -57,7 +57,7 @@ class Layout(unittest.TestCase):
                 gs = group_cards(snap, cards)
                 self.assertEqual([len(g[2]) for g in gs], fx["sizes"], "cards per group, in group order")
                 for g, (tr, tx, gc) in enumerate(gs):
-                    want_x = (g % n) * (colW + 2)
+                    want_x = (g % n) * (colW + GAP)
                     self.assertEqual(tx, want_x, f"group {g} title column")
                     self.assertEqual({c.c for c in gc}, {want_x}, f"group {g} cards x")
                     for a, b in zip(gc, gc[1:]):
@@ -146,25 +146,25 @@ class Content(unittest.TestCase):
             c = self.card(sid); row = c.rows[1]; l1 = c.line(1)
             j = row.find(name[:4]); self.assertGreaterEqual(j, 0, l1)
             self.assertTrue(is_magenta(row.cells[j][1]), f"{sid}: name magenta")
-            self.assertRegex(l1, r"\b1m [│┃]$", f"{sid}: the relative time is the last thing before the border: {l1!r}")
+            self.assertRegex(l1, r"\b1m[│┃]$", f"{sid}: the relative time is the last thing before the border: {l1!r}")
             for word in ("working", "idle", "done", "waiting", "⚇", "⑂"):
                 self.assertNotIn(word, l1, f"{sid}: line 1 is name + time only")
-        self.assertEqual(self.card("a1").rows[1].width_text(8, 10), "  ")
+        self.assertEqual(self.card("a1").rows[1].width_text(7, 9), "  ")
 
     def test_line2_is_the_branch_alone(self):
         a1, a2 = self.card("a1"), self.card("a2")
         self.assertIn("\ue725 feature/qa", a1.line(2)); self.assertIn("…", a1.line(2), "a long branch is cut with …")
         self.assertIn("\ue725 main", a2.line(2))
-        self.assertGreaterEqual(a2.rows[2].find("\ue725"), 10, "the branch icon U+E725 sits right after the avatar columns")
+        self.assertGreaterEqual(a2.rows[2].find("\ue725"), 9, "the branch icon U+E725 sits right after the avatar columns")
         self.assertNotIn("⑂", self.t.text(), "the old branch glyph is gone")
         for card in self.cards:
             self.assertNotRegex(card.line(2), r"Opus|Sonnet|Fable|⚇|⏵|⏸|●|⏳", "line 2 holds the branch only")
 
     def test_line3_bar_status_counts_model(self):
         a1, b1, c2, d1, a2 = self.card("a1"), self.card("b1"), self.card("c2"), self.card("d1"), self.card("a2")
-        self.assertEqual(a1.rows[3].find("■"), 2, "the bar starts under the avatar, at the left edge of the body")
-        self.assertEqual(a1.rows[3].width_text(2, 8), "■" * 6); self.assertEqual(a1.rows[3].width_text(8, 10), "  ")
-        self.assertRegex(a1.line(3), r"■{6}  ⏵ working · Bash  ⚇ 2 +Opus 5\.5 [│┃]$", "bar · status · detail · count · model flush right")
+        self.assertEqual(a1.rows[3].find("■"), 1, "the bar starts under the avatar, at the left edge of the body")
+        self.assertEqual(a1.rows[3].width_text(1, 7), "■" * 6); self.assertEqual(a1.rows[3].width_text(7, 9), "  ")
+        self.assertRegex(a1.line(3), r"■{6}  ⏵ working · Bash  ⚇ 2 +Opus 5\.5[│┃]$", "bar · status · detail · count · model flush right")
         self.assertIn("⏵ working · agents  ⚇ 1", b1.line(3)); self.assertNotIn("Opus", b1.line(3))
         self.assertRegex(c2.line(3), r"■{6}  ● done +[│┃]$"); self.assertRegex(d1.line(3), r"■{6}  ⏳ waiting +[│┃]$")
         self.assertRegex(a2.line(3), r"■{6}  ⏸ idle +[│┃]$", "idle: no detail, no counts, no model")
@@ -214,14 +214,14 @@ class Content(unittest.TestCase):
         for sid in NAMES:
             c = self.card(sid)
             for i in (1, 2):
-                chars = c.rows[i].width_text(2, 8)
+                chars = c.rows[i].width_text(1, 7)
                 self.assertEqual(len(chars), 6, f"{sid} row {i}")
                 self.assertTrue(set(chars) <= set(" ▀▄█"), f"{sid} row {i}: {chars!r}")
-                self.assertEqual(c.rows[i].width_text(8, 10), "  ", "two blank cells between avatar and text")
-            self.assertEqual(self.card(sid).rows[3].cells[2][0], "■", "row 3 is not part of the avatar")
+                self.assertEqual(c.rows[i].width_text(7, 9), "  ", "two blank cells between avatar and text")
+            self.assertEqual(self.card(sid).rows[3].cells[1][0], "■", "row 3 is not part of the avatar")
 
         def band(sid):  # bottom half-pixel of the last avatar row: fg of '▄', bg of '▀'
-            return [x[1] if x[0] == "▄" else x[2] for x in self.card(sid).rows[2].cells[2:8] if x[0] in ("▄", "▀")]
+            return [x[1] if x[0] == "▄" else x[2] for x in self.card(sid).rows[2].cells[1:7] if x[0] in ("▄", "▀")]
         self.assertTrue(any(is_orange(x) for x in band("a1")), f"claude band orange: {band('a1')}")
         self.assertTrue(band("b1") and all(is_green(x) for x in band("b1")), f"codex band green: {band('b1')}")
         g = band("c1")
@@ -248,14 +248,14 @@ class Wide232(unittest.TestCase):
 
     def test_four_columns_max(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
-        for W, colW in ((232, 56), (300, 73), (250, 61)):
+        for W, colW in ((232, 57), (300, 74), (250, 61)):
             with self.subTest(W=W):
                 t = Term(env, w=W, h=50); self.addCleanup(t.close)
                 cs = ready(t); self.assertTrue(cs, t.text())
                 self.assertEqual(layout(W), (4, colW))
                 self.assertEqual({c.w for c in cs}, {colW})
                 top = min(x.r for x in cs)
-                self.assertEqual(sorted(c.c for c in cs if c.r == top), [i * (colW + 2) for i in range(4)], "4 columns")
+                self.assertEqual(sorted(c.c for c in cs if c.r == top), [i * (colW + GAP) for i in range(4)], "4 columns")
                 snap = t.snap(); self.assertEqual(snap[top - 1].text.count("▾"), 4, snap[top - 1].text)
                 echo = [c for c in cs if "echo-long" in c.line(1)]
                 self.assertEqual(len(echo), 1); self.assertGreater(echo[0].r, top + 15, "the fifth group is on a second band")
@@ -272,7 +272,7 @@ class Narrow(unittest.TestCase):
         cs = ready(t); self.assertTrue(cs, t.text())
         self.assertEqual({c.w for c in cs}, {40})
         for c in cs:
-            self.assertRegex(c.line(1), r"\b\d+[smhd] [│┃]$", f"time is always the right end of line 1: {c.line(1)!r}")
+            self.assertRegex(c.line(1), r"\b\d+[smhd][│┃]$", f"time is always the right end of line 1: {c.line(1)!r}")
             self.assertRegex(c.line(3), r"(⏵ working|⏸ idle|● done|⏳ waiting)", f"the status word is always on line 3: {c.line(3)!r}")
         a1 = sorted(cs, key=lambda c: (c.r, c.c))[0]  # alpha-main
         self.assertIn("alpha-main", a1.line(1), "the name fits: whole")
@@ -345,11 +345,11 @@ class LongPendingTool(unittest.TestCase):
         self.env.write_show(S)
 
     def test_names_and_branches_whole_on_48_columns(self):
-        t = Term(self.env, w=200, h=50); self.addCleanup(t.close)
+        t = Term(self.env, w=197, h=50)  # (197 - 3 gaps) / 4 = 48; self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs, t.text())
         c = [x for x in cs if "agmux-orc" in x.line(1)][0]
         self.assertEqual(c.w, 48)
-        self.assertIn(self.NAME, c.line(1), "a 26-character name fits a 48-column card"); self.assertRegex(c.line(1), r"\b1m [│┃]$")
+        self.assertIn(self.NAME, c.line(1), "a 26-character name fits a 48-column card"); self.assertRegex(c.line(1), r"\b1m[│┃]$")
         self.assertIn(self.BRANCH, c.line(2), "and so does `feature/qa-acceptance-pap-be-dev`")
 
     def test_line3_gives_way_detail_then_counts_then_model(self):
@@ -369,7 +369,7 @@ class LongPendingTool(unittest.TestCase):
                     self.assertTrue(model and counts, f"W={W}: wide enough for counts and model: {l3!r}")
                 if W >= 400:
                     self.assertIn(self.TOOL, l3); self.assertIn("Opus 5.5", l3)
-                self.assertRegex(c.line(1), r"\b\d+[smhd] [│┃]$", f"W={W}: time at the right edge of line 1")
+                self.assertRegex(c.line(1), r"\b\d+[smhd][│┃]$", f"W={W}: time at the right edge of line 1")
                 t.close()
 
 
@@ -392,7 +392,7 @@ class BarEdges(unittest.TestCase):
         n, f = fills("charlie-30"); self.assertEqual((n, f), (6, [C_GREEN]), "4% -> still one cell")
         n, f = fills("charlie-59"); self.assertEqual((n, f), (6, [C_RED] * 6), "100% -> six red cells")
         for c in cs:
-            self.assertNotRegex(c.rows[3].width_text(2, 14), r"%|--|\d", "nothing but the bar on the left of line 3")
+            self.assertNotRegex(c.rows[3].width_text(1, 13), r"%|--|\d", "nothing but the bar on the left of line 3")
 
 
 class HudModel(unittest.TestCase):
@@ -409,7 +409,7 @@ class HudModel(unittest.TestCase):
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs)
         b1 = by_name(cs, "bravo-29")
-        self.assertRegex(b1.line(3), r"Fancy Model 9 [│┃]$", b1.line(3)); self.assertNotIn("%", b1.line(3))
+        self.assertRegex(b1.line(3), r"Fancy Model 9[│┃]$", b1.line(3)); self.assertNotIn("%", b1.line(3))
         sq = [x for x in b1.rows[3].cells if x[0] == "■"]
         self.assertEqual(len([x for x in sq if x[1] == C_RED]), (77 * 6 + 50) // 100, "77% -> red, 5 of 6 cells")
 
@@ -419,8 +419,8 @@ class HudModel(unittest.TestCase):
         self.feed(env, "n-c1", "Other Model", effort={"level": "high"})
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs)
-        self.assertRegex(by_name(cs, "bravo-29").line(3), r"Fancy Model 9 [│┃]$"); self.assertNotIn("xhigh", t.text())
-        self.assertRegex(by_name(cs, "charlie-30").line(3), r"Other Model·high [│┃]$")
+        self.assertRegex(by_name(cs, "bravo-29").line(3), r"Fancy Model 9[│┃]$"); self.assertNotIn("xhigh", t.text())
+        self.assertRegex(by_name(cs, "charlie-30").line(3), r"Other Model·high[│┃]$")
 
     def test_live_update_when_statusline_runs_again(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)

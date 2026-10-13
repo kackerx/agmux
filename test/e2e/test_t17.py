@@ -10,7 +10,7 @@ from test_t3 import ready, last_text_row, border_colours, STATUS_COLOUR, C_FOCUS
 
 DEFAULT_KEYS = ["up", "down", "left", "right", "page_down", "page_up", "jump", "fold", "preview", "focus_preview", "leave_preview",
                 "reply", "handoff", "search", "next_match", "prev_match", "flash", "restart", "kill", "review", "avatar", "quit", "confirm"]
-DEFAULT_COLOURS = ["working", "idle", "done", "attention", "focus", "match", "border", "name", "branch", "model", "effort", "dir",
+DEFAULT_COLOURS = ["working", "idle", "done", "attention", "focus", "match", "border", "name", "branch", "model", "effort", "agent", "dir",
                    "bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled"]
 
 

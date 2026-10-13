@@ -2,7 +2,7 @@
 
 The previewed panes are REAL panes of the private tmux server (`-L agmux-test`): a1 shows 200 coloured lines (`seq`-like), a2 a marker pane, a3 a raw-mode `cat -v` look-alike
 (used by test_t12). agmux reaches that server through $TMUX, exactly like a pane inside it would; the fake ccmux still feeds the session list.
-Geometry at 232x50: P opens a preview of max(60, 40%) = 92 columns, the cards get 140 -> 3 columns of 45; the preview box starts at column 141.
+Geometry at 232x50: P opens a preview of max(60, 40%) = 92 columns, the cards get 140 -> 3 columns of 46; the preview box starts at column 141.
 """
 import re, unittest
 from lib import *
@@ -83,12 +83,12 @@ class Preview(PreviewBase):
     def test_p_opens_a_third_less_wide_layout_with_the_pane_tail(self):
         self.assertIsNone(self.pv(), "no preview before P")
         before = [c for c in find_cards(self.t.snap()) if c.ok]
-        self.assertEqual({c.w for c in before}, {56}, "4 columns of 56 before")
+        self.assertEqual({c.w for c in before}, {57}, "4 columns of 56 before")
         self.open_preview()
         title, rows, top, x, snap = self.pv()
         cs = [c for c in find_cards(snap) if c.ok]
-        self.assertEqual(layout(140), (3, 45))
-        self.assertEqual((len(cs), {c.w for c in cs}), (9, {45}), "the cards re-flow to 3 columns of 45")
+        self.assertEqual(layout(140), (3, 46))
+        self.assertEqual((len(cs), {c.w for c in cs}), (9, {46}), "the cards re-flow to 3 columns of 46")
         self.assertEqual(sorted({c.c for c in cs if c.r == min(y.r for y in cs)}), [0, 47, 94])
         self.assertEqual(x, PV_X + 1, "box starts one column after the cards' area")
         self.assertRegex(title, rf"^alpha-main · {re.escape(self.panes['a1'])} · ⏵ working · Bash$", "title: name · pane id · status")
@@ -111,7 +111,7 @@ class Preview(PreviewBase):
         self.open_preview(); self.press("p")
         self.assertTrue(wait(lambda: self.pv() is None, 4), "preview must go away")
         cs = [c for c in find_cards(self.t.snap()) if c.ok]
-        self.assertEqual((len(cs), {c.w for c in cs}), (9, {56}))
+        self.assertEqual((len(cs), {c.w for c in cs}), (9, {57}))
 
     def test_below_100_columns_the_preview_is_refused_with_a_hint(self):
         t = self.board(99, 50)

@@ -20,7 +20,7 @@ def sprite_blocks(out):
 
 
 def region(card, i):
-    return (card.rows[i].sub(2, 8) + [(" ", None, None, False)] * 6)[:6]  # after "│ ": 6 cells
+    return (card.rows[i].sub(1, 7) + [(" ", None, None, False)] * 6)[:6]  # right after the border (T39: no padding): 6 cells
 
 
 def sig(card, colours=True):

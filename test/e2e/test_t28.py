@@ -123,12 +123,12 @@ def builtin_frames(env, cfg):
 
 def card_avatar(raw, card):
     """The placeholder cells inside the card's avatar box (2 rows x 6 columns right of the border + margin)."""
-    return [c for c in ph_cells(raw) if card.r < c[0] <= card.r + 2 and card.c + 2 <= c[1] < card.c + 8]
+    return [c for c in ph_cells(raw) if card.r < c[0] <= card.r + 2 and card.c + 1 <= c[1] < card.c + 7]
 
 
 def avatar_cells(rows, card):
     """Rendered avatar box (rows 1-2, columns c+2..c+7) as tuples, for pixel avatars."""
-    return [[(x[0], x[1], x[2], x[3]) for x in rows[card.r + k].cells[card.c + 2:card.c + 8]] for k in (1, 2)]
+    return [[(x[0], x[1], x[2], x[3]) for x in rows[card.r + k].cells[card.c + 1:card.c + 7]] for k in (1, 2)]
 
 
 def cards_of(raw):
@@ -154,7 +154,7 @@ class Base(unittest.TestCase):
 
     def board(self, tmux=True, term="xterm-kitty", passthrough=None, w=200, h=50, extra="", loose=False):
         """tmux=True: agmux believes it runs in tmux (fake tmux answers client_termname=term, allow-passthrough=passthrough or on)."""
-        if tmux: self.env.set_term(term, passthrough)
+        if tmux: self.env.set_term(term, passthrough); self.env.use_pty_tty()
         t = Term(self.env, w=w, h=h, extra_env=f"XDG_CONFIG_HOME={self.cfg} " + (KITTY_ENV if tmux else "") + extra); self.addCleanup(t.close)
         if loose:  # a terminal too small for all nine cards: just wait for the board
             self.assertTrue(wait(lambda: "agmux ·" in t.text(), 8), t.text()); time.sleep(0.5); return t
@@ -185,7 +185,7 @@ class Kitty(Base):
             self.assertEqual({c[2] for c in cells}, {cells[0][2]}, f"{name}: one id for the whole avatar")
             self.assertIn(cells[0][2], ids, f"{name}: id {cells[0][2]:#x} not in {[hex(i) for i in ids]}")
             self.assertEqual(sorted((c[0] - named(cs, name).r, c[1] - named(cs, name).c, c[3], c[4]) for c in cells),
-                             sorted((r, 2 + k, r - 1, k) for r in (1, 2) for k in range(6)), f"{name}: every cell carries its own row and column")
+                             sorted((r, 1 + k, r - 1, k) for r in (1, 2) for k in range(6)), f"{name}: every cell carries its own row and column")
 
     def test_no_pixel_avatar_left_and_the_text_stays_where_it_was(self):
         t = self.board(); raw, cs = self.images(t)
@@ -194,7 +194,7 @@ class Kitty(Base):
         for c in cs:
             p = [x for x in pix if x.r == c.r and x.c == c.c]; self.assertEqual(len(p), 1)
             self.assertEqual((c.w, len(c.rows)), (p[0].w, len(p[0].rows)))
-            for k in (1, 2, 3): self.assertEqual(c.rows[k].width_text(8, c.w), p[0].rows[k].width_text(8, c.w), f"row {k}: everything right of the avatar is identical in both modes")
+            for k in (1, 2, 3): self.assertEqual(c.rows[k].width_text(7, c.w), p[0].rows[k].width_text(7, c.w), f"row {k}: everything right of the avatar is identical in both modes")
         self.assertEqual(raw.count("█"), 0, "no pixel avatar blocks")
 
     def test_working_frames_cycle_in_order_one_step_per_500ms(self):
@@ -225,18 +225,18 @@ class Kitty(Base):
         self.assertTrue(wait(lambda: (lambda cs: len(cs) == 9 and all(c.ok for c in cs))(find_cards(t.snap())), 5), t.text())
         self.assertAllImages(t, "after resize")
 
-    def test_probe_asks_the_chosen_client_and_the_passthrough_option(self):
-        self.env.set_tmux(clients=[(100, "outer-1", "main"), (300, "outer-2", "work")])
-        self.board(extra="TMUX_PANE=%9 ")
-        q = [c for c in self.env.tmux_calls() if c[0] == "display-message" and "#{client_termname}" in c]
-        self.assertEqual(q, [["display-message", "-p", "-c", "outer-2", "#{client_termname}"]], "the client is the one `enter` would use (most recent)")
-        self.assertIn(["show-options", "-gv", "allow-passthrough"], self.env.tmux_calls())
+    def test_the_pictures_go_to_the_client_enter_would_use(self):  # T38: termname and tty come from list-clients; the chosen client is the most recent outside the own session
+        a, b = PtyTty(), PtyTty(); self.addCleanup(a.close); self.addCleanup(b.close)
+        self.env.set_term("xterm-kitty", "on"); self.env.set_tmux(clients=[(100, "outer-1", "main", "xterm-kitty", a.path), (300, "outer-2", "work", "xterm-kitty", b.path)])
+        t = Term(self.env, w=200, h=50, extra_env=f"XDG_CONFIG_HOME={self.cfg} " + KITTY_ENV + "TMUX_PANE=%9 "); self.addCleanup(t.close); self.assertTrue(ready(t)); time.sleep(0.5)
+        self.assertEqual((len(kitty_images(kitty_commands(a.bytes()))), len(kitty_images(kitty_commands(b.bytes())))), (0, N_BUILTIN))
+        self.assertEqual([c for c in self.env.tmux_calls() if "#{client_termname}" in c or "allow-passthrough" in c], [], "no display-message -c, no allow-passthrough query")
 
-    def test_AGMUX_CLIENT_names_the_probed_client(self):
-        self.env.set_tmux(clients=[(100, "outer-1", "main"), (300, "outer-2", "work")])
-        self.board(extra="AGMUX_CLIENT=outer-1 ")
-        q = [c for c in self.env.tmux_calls() if c[0] == "display-message" and "#{client_termname}" in c]
-        self.assertEqual(q, [["display-message", "-p", "-c", "outer-1", "#{client_termname}"]])
+    def test_AGMUX_CLIENT_names_the_client_that_gets_the_pictures(self):
+        a, b = PtyTty(), PtyTty(); self.addCleanup(a.close); self.addCleanup(b.close)
+        self.env.set_tmux(clients=[(100, "outer-1", "main", "xterm-kitty", a.path), (300, "outer-2", "work", "xterm-kitty", b.path)])
+        t = Term(self.env, w=200, h=50, extra_env=f"XDG_CONFIG_HOME={self.cfg} " + KITTY_ENV + "TMUX_PANE=%9 AGMUX_CLIENT=outer-1 "); self.addCleanup(t.close); self.assertTrue(ready(t)); time.sleep(0.5)
+        self.assertEqual((len(kitty_images(kitty_commands(a.bytes()))), len(kitty_images(kitty_commands(b.bytes())))), (N_BUILTIN, 0))
 
     def test_a_card_bound_to_a_sprite_stays_pixel_in_image_mode(self):
         self.config('[avatars.bind]\n"bravo-29" = "bot-03"\n')
@@ -244,19 +244,13 @@ class Kitty(Base):
         self.assertEqual(card_avatar(raw, named(cs, "bravo-29")), [])
         self.assertEqual(len(card_avatar(raw, named(cs, "alpha-main"))), 12)
         row = parse_screen(raw)[named(cs, "bravo-29").r + 1]
-        self.assertTrue(any(x[0] not in " " for x in row.cells[named(cs, "bravo-29").c + 2:named(cs, "bravo-29").c + 8]), "a pixel avatar is drawn instead")
+        self.assertTrue(any(x[0] not in " " for x in row.cells[named(cs, "bravo-29").c + 1:named(cs, "bravo-29").c + 7]), "a pixel avatar is drawn instead")
 
-    def test_default_hash_picks_among_sprites_and_sets_by_the_card_name(self):
-        self.config('[avatars]\ndefault = "hash"\n')  # image mode pool: the 5 sprites, then every image set (design: the hash picks sets only when pictures are drawn)
-        t = self.board(); raw, cs = self.images(t)
-        def fnv(s):
-            h = 2166136261
-            for b in s.encode(): h = ((h ^ b) * 16777619) & 0xFFFFFFFF
-            return h
-        for name in MOOD:
-            c = named(cs, name) if name != "告警会话" else [x for x in cs if "告警会话" in x.line(1)][0]
-            key = NAMES_FULL.get(name, name)
-            self.assertEqual(bool(card_avatar(raw, c)), fnv(key) % (5 + len(set_list())) >= 5, f"{name}: image iff fnv32a(name) % (5 sprites + {len(set_list())} sets) >= 5")
+    def test_default_hash_in_image_mode_picks_image_sets_only(self):  # T36: a session nobody bound never gets a pixel sprite when pictures are drawn
+        self.config('[avatars]\ndefault = "hash"\n'); t = self.board(); self.assertAllImages(t)
+
+    def test_default_hash_in_pixel_mode_picks_sprites_only(self):
+        self.config('[avatars]\ndefault = "hash"\n'); raw = self.assertNoImages(self.board(term="xterm-256color"))[1]; self.assertTrue(raw)
 
 
 NAMES_FULL = {"告警会话": "告警会话-超长中文名字-用来测试宽度 1"}
@@ -265,23 +259,22 @@ NAMES_FULL = {"告警会话": "告警会话-超长中文名字-用来测试宽�
 class NotKitty(Base):
     def test_other_terminals_get_pixels(self):
         cs, rows = self.assertNoImages(self.board(term="xterm-256color"))
-        self.assertTrue(any(x[0] not in " " for x in rows[cs[0].r + 1].cells[cs[0].c + 2:cs[0].c + 8]))
+        self.assertTrue(any(x[0] not in " " for x in rows[cs[0].r + 1].cells[cs[0].c + 1:cs[0].c + 7]))
 
-    def test_passthrough_off_falls_back_quietly(self):
-        t = self.board(passthrough="off"); self.assertNoImages(t)
-        self.assertNotIn("passthrough", "\n".join(r.text for r in t.snap()[-3:]), "renderer=auto: no message when it quietly falls back")
+    def test_passthrough_off_no_longer_matters_the_pictures_go_to_the_tty(self):  # T38
+        self.assertAllImages(self.board(passthrough="off"))
+
+    def test_auto_in_a_plain_terminal_in_tmux_says_why(self):
+        t = self.board(term="xterm-256color"); self.assertNoImages(t)
+        self.assertIn('not kitty or ghostty', "\n".join(r.text for r in t.snap()[-3:]))
 
     def test_pixel_forces_pixels_and_does_not_even_ask_tmux(self):
         self.config('[avatars]\nrenderer = "pixel"\n'); self.assertNoImages(self.board())
-        self.assertEqual([c for c in self.env.tmux_calls() if "#{client_termname}" in c or "allow-passthrough" in c], [])
+        self.assertEqual([c for c in self.env.tmux_calls() if c[0] == "list-clients"], [], "pixel never asks tmux")
 
     def test_image_forces_images_without_the_terminal_check(self):
         self.config('[avatars]\nrenderer = "image"\n'); self.assertAllImages(self.board(term="xterm-256color"))
-        self.assertEqual([c for c in self.env.tmux_calls() if "#{client_termname}" in c], [])
 
-    def test_image_with_passthrough_off_falls_back_and_says_so(self):
-        self.config('[avatars]\nrenderer = "image"\n'); t = self.board(passthrough="off"); self.assertNoImages(t)
-        foot = "\n".join(r.text for r in t.snap()[-3:]); self.assertIn("allow-passthrough on", foot, foot); self.assertTrue(t.alive())
 
     def test_outside_tmux_TERM_decides(self):
         self.assertNoImages(self.board(tmux=False))  # TERM=xterm-256color
@@ -330,7 +323,7 @@ class Upload(unittest.TestCase):
             self.assertTrue(all(n <= 4096 for n in d["chunks"]), d["chunks"]); self.assertTrue(all(n == 4096 for n in d["chunks"][:-1]), "full chunks until the last")
         return im
 
-    def test_in_tmux_every_frame_is_uploaded_once_each_chunk_wrapped_with_doubled_escapes(self):
+    def test_passthrough_fallback_in_tmux_every_frame_once_each_chunk_wrapped_with_doubled_escapes(self):
         env, r = self.run_board({"TMUX": "/fake/tmux,1,0", "TERM": "xterm-256color"})
         data = bytes(r.data); cmds = kitty_commands(data); self.check_builtin(cmds)
         self.assertTrue(all(c["wrapped"] for c in cmds), "inside tmux every APC rides in \\ePtmux;..")
@@ -341,7 +334,7 @@ class Upload(unittest.TestCase):
         env, r = self.run_board({"TERM": "xterm-kitty"}); data = bytes(r.data); first = data.find(b"\x1b_G")
         self.assertGreater(first, 0); self.assertEqual(data[:first].count(b"\x1b[?1049h"), 1, "exactly one \\e[?1049h before the first image sequence")
 
-    def test_inside_tmux_no_screen_switch_is_added_before_the_upload(self):  # tmux's client is on the alternate screen already
+    def test_passthrough_fallback_in_tmux_adds_no_screen_switch_before_the_upload(self):  # tmux's client is on the alternate screen already
         env, r = self.run_board({"TMUX": "/fake/tmux,1,0"}); data = bytes(r.data); first = data.find(b"\x1bPtmux;")
         self.assertGreaterEqual(first, 0); self.assertNotIn(b"\x1b[?1049h", data[:first])
 
