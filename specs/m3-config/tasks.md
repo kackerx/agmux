@@ -238,7 +238,7 @@
 
 ### T44 `agmux board --stay`：常驻看板，enter 跳转 / q 都只收起浮窗不退出（dev @dad5f31 送审 / 送测）
 - dev 偏离（照准）：popup client = own session 上 termname 以 tmux/screen 开头且不是跳转目标的 client（只按 own session 会把跑在普通 pane 里的用户终端 detach 掉）；无 popup client 时退化成现状且无提示（退化即退出）。
-- 审查退回（reviewer @dad5f31）3 必改：只 detach 自己 session 上的 popup 无测试（别的 fl-* 浮窗会被一起 detach）、detach 失败无测试、main.go 死代码 `case "board"`；采纳建议：list-clients 失败时报错留进程而不是退出。不做：退化时底栏仍写 q hide、不在 tmux 提示无单测。备忘：嵌套 ssh 两个 tmux-* client 同在 own session 时非目标的会被 detach（极少）。
+- 审查退回（reviewer @dad5f31）3 必改：只 detach 自己 session 上的 popup 无测试（别的 fl-* 浮窗会被一起 detach）、detach 失败无测试、main.go 死代码 `case "board"`；采纳建议：list-clients 失败时报错留进程而不是退出。不做：退化时底栏仍写 q hide、不在 tmux 提示无单测。备忘：嵌套 ssh 两个 tmux-* client 同在 own session 时非目标的会被 detach（极少）。修复 @fabdc73 送复审。
 - 用户 2026-10-13：浮窗里 enter 跳转后看板进程退出，下次 ctrl+1 要重起；想要回车跳到对应 pane 但看板不关，下次打开还是原来的进程。用户的 fl-toggle.sh 已经是「程序跑在常驻 session fl-agmux，浮窗 = display-popup -E 里 attach 它」，进程退出 session 才没。
 - 做法：`agmux board --stay`（只加旗标，不加配置项；脚本里传）。stay 模式下：`jump`（enter / 再点卡片）= 照旧 `switch-client` 把外层 client 切到目标 pane，然后 **detach 掉 attach 在自己 session 上的那个 popup client**（chooseClient 里已算出 own session；popup client = list-clients 里 session 为 own 的 client），进程不退出；`quit`（q / esc）同样只 detach；新增动作 `exit`（默认 `Q`，`agmux config` 打印）真正退出进程。不在 tmux 里、或自己 session 上没有 client（不是常驻布局）时 --stay 退化成现状（底栏一行提示 "--stay needs the board in its own tmux session"），不报错。
 - 收起期间轮询照旧（500 ms tick 不停）；再 attach 时 bubbletea 收到 resize 重画，焦点留在跳走前那张卡；图片已在 kitty 里，不重传。`a` 换头像 / 搜索保留态等状态都留着。
