@@ -475,21 +475,28 @@ func footerFor(c *config.Config) []footerKey {
 	return out
 }
 
-// avatarList is the avatar picker for s: two rows per sprite with its ID and name beside;
-// ▸ marks the cursor, the focus color the sprite s wears now.
+// avatarList is the avatar picker for s: two rows per image set and sprite with its ID (and a sprite's name) beside;
+// ▸ marks the cursor, the focus color the avatar s wears now.
 func avatarList(s store.Session, pick int) []string {
 	name := s.Name
 	if name == "" {
 		name = s.ID
 	}
 	rows := []string{fg(cMuted, "avatar for ") + fg(cName, name), ""}
-	for i, sp := range avatar.Sprites {
-		face := strings.Split(avatar.Render(sp, s.AgentType, avatar.Normal, 0), "\n")
-		mark, label := "  ", sp.ID+"  "+sp.Name
+	for i, id := range avatar.Listing() {
+		mood := avatar.Normal
+		if isSet(id) && useImages { // a picture: its first idle frame
+			mood = avatar.Dim
+		}
+		face := avatarFace(store.Session{AvatarID: id, AgentType: s.AgentType}, mood, 0)
+		mark, label := "  ", id
+		if sp, ok := avatar.ByID(id); ok && !isSet(id) {
+			label += "  " + sp.Name
+		}
 		if i == pick {
 			mark = "▸ "
 		}
-		if sp.ID == s.AvatarID {
+		if id == s.AvatarID {
 			label = fg(cFocus, label)
 		}
 		rows = append(rows, mark+face[0]+"  "+label, "  "+face[1])

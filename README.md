@@ -20,7 +20,7 @@ go install github.com/kackerx/agmux@latest
 ```sh
 agmux board     # 全屏看板，建议开在 tmux 浮窗里
 agmux show      # 每个会话一行：id、名字、分组、状态、模型、上下文%
-agmux avatars   # 打印全部头像
+agmux avatars   # 打印全部头像：先是图片集（id、来源、各状态帧数），再是像素头像
 ```
 
 ### 看板键位
@@ -40,7 +40,7 @@ agmux avatars   # 打印全部头像
 | `r` | 重启会话 |
 | `x` | 杀掉会话（按 `y` 确认） |
 | `d` | 用 ccmux review 看改动 |
-| `a` | 给这个会话换头像：`j`/`k` 选，`enter` 绑定，`esc` 取消 |
+| `a` | 给这个会话换头像：列表先是图片集再是像素头像，`j`/`k` 选，`enter` 绑定（集和像素头像都行），`esc` 取消 |
 | `q` / `esc` | 退出（预览获焦时先按 `tab` 回到卡片；保留着 `/` 过滤时 `esc` 先清空过滤） |
 
 没有 tmux pane 的后台会话不能跳转和发送，底栏对应键会变暗。
@@ -100,11 +100,28 @@ border = "#585b70"  # 所有非焦点卡的边框统一用这个色（默认空 
 max_columns = 4                     # 终端够宽时最多几列卡片（1–8）；每列至少 40 列宽，所以窄终端到不了这个数（5 列约需 ≥ 200 列）
 
 [avatars]
-default = "hash"                    # 没绑定的会话：hash = 按名字固定挑一个；或写某个头像 id（agmux avatars 看全部）
+renderer = "auto"                   # auto：kitty / ghostty 里用图片，其它终端用像素；image：强制图片；pixel：强制像素
+default = "hash"                    # 没绑定的会话：hash = 按名字固定挑一个；或写某个头像 id（图片集 id 或像素头像 id，agmux avatars 看全部）
 [avatars.bind]
-"sqlmux-orchestrator" = "bot-03"    # 键是会话名
+"sqlmux-orchestrator" = "bot-03"    # 键是会话名；值同样可以是图片集 id
 ```
 
 头像按**会话名**绑定（没有名字的会话才按 session ID），重启、交接后名字不变就还是那个头像。看板里按 `a` 选的写在 `$XDG_STATE_HOME/agmux/avatars.json`，优先于配置文件。
+
+### 头像图片
+
+头像可以是真图（PNG），不只是像素头像：每个会话在卡片左上角占 6 列 × 2 行，图保持长宽比、居中。
+
+- **要求**：终端是 kitty 或 ghostty（用 kitty 图形协议的 Unicode 占位符）；在 tmux 里还要 `set -g allow-passthrough on`（tmux ≥ 3.3）。不满足时自动回落到像素头像（`[avatars] renderer = "pixel"` 可以强制，`"image"` 跳过终端检测，但 tmux 里没开 `allow-passthrough` 仍会回落并在底栏提示）。
+- **图片集**：一个目录 = 一个头像，目录名就是它的 id（和像素头像同一个命名空间，同名时图片集优先）：
+
+  ```
+  ~/.config/agmux/avatars/<id>/{idle,working,attention,done}/*.png
+  ```
+
+  四个状态对应卡片的四种神态：`idle` 空闲、`working` 在跑、`attention` 等你处理、`done` 做完。同一个状态下放多张 PNG，按文件名排序就是动画帧，每 500ms 换一帧；某个状态没有目录就用 `idle` 的帧；**没有 `idle` 的集不算**，启动时底栏报一行。只认 `.png`，图不会被变暗或闪红，神态靠画。
+- **什么时候生效**：启动时一次性上传所有图（内置的 + 你的），所以看板开着时新建的目录要重开才认；之后在 `a` 里换头像不需要重传。图很小，退出时不删，留在终端里到关闭，下次启动同 id 覆盖。
+- **回落**：非 kitty 系终端、没开直通、或 `renderer = "pixel"` 时，绑了图片集的会话显示一个按集 id 固定挑出的像素头像。图片模式下卡片没有像素头像底边的 agentType 色带。
+- **内置**：`aza_choi`，来自 [pi-emote](https://github.com/shennguyenrs/pi-emote)（MIT，© Eiji Onchi）。许可文本见 `internal/avatar/sets/aza_choi/LICENSE-pi-emote`。
 
 未知的键、动作、颜色，键名写错，或你写的两个动作用了同一个键：启动时报一行错误（文件、哪一项、原因）并退出。你绑的键如果原本是另一个动作的默认键，那个动作就让出这个键（一个键都不剩才报错）；`confirm` 和 `leave_preview` 只在各自的模式里生效，可以和看板键重复。`ctrl+c` 不能绑；`ctrl+i` / `ctrl+m` 终端发出来就是 `tab` / `enter`，要写成后者。

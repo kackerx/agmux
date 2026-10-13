@@ -19,6 +19,16 @@ func avatarFace(s store.Session, mood avatar.Mood, frame int) []string {
 	return strings.Split(avatar.Render(avatar.SpriteFor(s.AvatarID), s.AgentType, mood, frame), "\n")
 }
 
+func isSet(id string) bool { _, ok := avatar.SetByID(id); return ok }
+
+// avatarName is what the board calls an avatar: a sprite's name, an image set's ID.
+func avatarName(id string) string {
+	if sp, ok := avatar.ByID(id); ok && !isSet(id) {
+		return sp.Name
+	}
+	return id
+}
+
 // kittyTerm: the TERM values whose terminals draw kitty graphics with Unicode placeholders.
 func kittyTerm(t string) bool { return t == "xterm-kitty" || t == "xterm-ghostty" }
 

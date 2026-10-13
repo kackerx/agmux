@@ -84,7 +84,7 @@ type Model struct {
 	msg    string // one line above the footer: ccmux stderr, hints
 	mode   mode
 	target store.Session   // what the open x prompt / avatar list acts on, fixed when it opened
-	pick   int             // the avatar list's cursor, an index into avatar.Sprites
+	pick   int             // the avatar list's cursor, an index into avatar.Listing()
 	folded map[string]bool // group keys folded with f; this run only
 
 	query      string // the / filter; "" = every card
@@ -416,18 +416,18 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "up":
 			m.pick = max(m.pick-1, 0)
 		case "down":
-			m.pick = min(m.pick+1, len(avatar.Sprites)-1)
+			m.pick = min(m.pick+1, len(avatar.Listing())-1)
 		case "quit":
 			m.mode = browsing
 		case "jump": // off the UI goroutine: it writes a file and may wait for a poll
 			m.mode = browsing
-			src, s, sp := m.src, m.target, avatar.Sprites[m.pick]
+			src, s, id := m.src, m.target, avatar.Listing()[m.pick]
 			return m, func() tea.Msg {
-				ok := s.Name + " wears " + sp.Name
+				ok := s.Name + " wears " + avatarName(id)
 				if s.Name == "" {
 					ok = "bound to session id (name missing)"
 				}
-				return doneMsg{ok: ok, err: src.SetAvatar(s, sp.ID)}
+				return doneMsg{ok: ok, err: src.SetAvatar(s, id)}
 			}
 		}
 		return m, nil
@@ -621,8 +621,8 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "avatar":
 		m.mode, m.target, m.msg, m.pick = pickAvatar, s, "", 0
-		for i, sp := range avatar.Sprites { // on the one it wears: enter right away changes nothing
-			if sp.ID == s.AvatarID {
+		for i, id := range avatar.Listing() { // on the one it wears: enter right away changes nothing
+			if id == s.AvatarID {
 				m.pick = i
 			}
 		}

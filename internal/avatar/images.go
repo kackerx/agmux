@@ -137,6 +137,30 @@ func loadSets(fsys fs.FS, source string) (sets []*Set, problems []string) {
 	return
 }
 
+// Listing is every avatar a person can pick, in the order the picker shows them: the image sets,
+// then the sprites (a set shadows a sprite of the same ID).
+func Listing() []string {
+	var ids []string
+	for _, s := range Sets {
+		ids = append(ids, s.ID)
+	}
+	for _, s := range Sprites {
+		if _, shadowed := SetByID(s.ID); !shadowed {
+			ids = append(ids, s.ID)
+		}
+	}
+	return ids
+}
+
+// FrameCounts is how many frames the set has per state, as "idle 1 · working 4 · attention 4 · done 4".
+func (s *Set) FrameCounts() string {
+	var parts []string
+	for _, st := range states {
+		parts = append(parts, fmt.Sprintf("%s %d", st.Dir, len(s.Frames[st.Mood])))
+	}
+	return strings.Join(parts, " · ")
+}
+
 // FrameID is the image ID to show for mood at frame; a state with no frames shows idle.
 func (s *Set) FrameID(m Mood, frame int) uint32 {
 	ids := s.ids[m]

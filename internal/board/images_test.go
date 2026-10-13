@@ -3,13 +3,17 @@ package board
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kackerx/agmux/internal/avatar"
+	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -136,5 +140,73 @@ func TestImageCardFallsBackToSprite(t *testing.T) {
 	face := strings.Split(avatar.Render(want, "", avatar.Dim, 0), "\n")
 	if !strings.Contains(out, face[0]) || !strings.Contains(out, face[1]) {
 		t.Errorf("not the hashed sprite %s: %q", want.ID, out)
+	}
+}
+
+// The avatar list shows the image sets first, then the sprites; the cursor starts on what the
+// session wears, and enter binds a set's ID like a sprite's.
+func TestAvatarPickerSets(t *testing.T) {
+	avatar.UseSets(fstest.MapFS{ // kit has done frames, so the list must pick idle's; bot-03 shadows the sprite
+		"kit/idle/1.png": png("i1"), "kit/done/1.png": png("d1"), "bot-03/idle/1.png": png("b"),
+	})
+	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
+	dir := t.TempDir()
+	path := filepath.Join(dir, "avatars.json")
+	b, _ := avatar.LoadBindings(path)
+	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: "kit", Show: func() ([]ccmux.Session, error) {
+		return []ccmux.Session{{ID: "a1", Summary: "one", CWD: "/a", TmuxPane: "%1", Status: "idle"}}, nil
+	}}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	for _, images := range []bool{true, false} {
+		useImages = images
+		m := New(p, &fakeRunner{})
+		m.getenv = func(string) string { return "" }
+		tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+		m, _ = press(t, tm.(Model), "a")
+		view := m.View()
+		lines := strings.Split(ansi.Strip(view), "\n")
+		kit, bot01 := -1, -1
+		for i, l := range lines {
+			if kit < 0 && strings.Contains(l, "▸") { // the cursor
+				kit = i
+			}
+			if strings.Contains(l, "bot-01  Clawd") {
+				bot01 = i
+			}
+		}
+		if kit < 0 || bot01 < 0 || kit > bot01 || !strings.Contains(lines[kit], "▸") {
+			t.Fatalf("images=%v: the set comes first and the cursor starts on it (kit row %d, bot-01 row %d):\n%s", images, kit, bot01, ansi.Strip(view))
+		}
+		if f := strings.Fields(strings.TrimSuffix(strings.TrimSpace(lines[kit]), "│")); f[len(f)-1] != "kit" { // a set's name is its ID: no second name
+			t.Errorf("images=%v: set row %q", images, lines[kit])
+		}
+		if got := strings.Contains(view, "\U0010EEEE"); got != images {
+			t.Errorf("images=%v: placeholders in the list: %v", images, got)
+		}
+		if images && !strings.Contains(view, "38;2;192;222;1m") { // kit's idle frame: bot-03 has 0xc0de00, kit 0xc0de01
+			t.Errorf("the set's row is not its first idle frame:\n%q", view)
+		}
+		if images && strings.Contains(view, "38;2;192;222;2m") { // its done frame, 0xc0de02
+			t.Errorf("the list shows the done frame:\n%q", view)
+		}
+		if strings.Contains(ansi.Strip(view), "bot-03  Sprout") || !strings.Contains(ansi.Strip(view), "bot-03  ") {
+			t.Errorf("images=%v: a set named like a sprite replaces it, under its ID alone:\n%s", images, ansi.Strip(view))
+		}
+		m, _ = press(t, m, "j", "enter") // down one: the first sprite
+		if !strings.Contains(ansi.Strip(m.View()), "one wears Clawd") {
+			t.Errorf("images=%v: %q", images, ansi.Strip(m.View()))
+		}
+		if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "bot-01"`) {
+			t.Errorf("avatars.json: %s", data)
+		}
+		m, _ = press(t, m, "a", "k", "enter") // back up to the set
+		if !strings.Contains(ansi.Strip(m.View()), "one wears kit") {
+			t.Errorf("images=%v: %q", images, ansi.Strip(m.View()))
+		}
+		if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"one": "kit"`) || p.Sessions()[0].AvatarID != "kit" {
+			t.Errorf("a set's ID is bound: %s %v", data, p.Sessions())
+		}
 	}
 }

@@ -19,7 +19,7 @@ const usage = `usage: agmux <command>
 commands:
   board   full-screen session board (open it in a tmux popup; AGMUX_CLIENT: see README)
   show    print sessions one per line: id, name, group, status, model, context%
-  avatars print every avatar sprite
+  avatars print every avatar: image sets, then pixel sprites
   statusline [-- <command>]
           Claude Code status line wrapper: saves the payload for the board, runs <command>
   config [--path]
@@ -53,9 +53,7 @@ func main() {
 			err = show(os.Stdout, p)
 		}
 	case "avatars":
-		for _, s := range avatar.Sprites {
-			fmt.Printf("%s  %s\n%s\n\n", s.ID, s.Name, avatar.Render(s, "claude", avatar.Normal, 0))
-		}
+		avatars(os.Stdout, os.Stderr)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
@@ -66,6 +64,26 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "agmux:", err)
 		os.Exit(1)
+	}
+}
+
+// avatars prints the image sets (id, where from, frames per state) and then every sprite with its
+// picture; sets that were skipped are said on errw.
+func avatars(w, errw io.Writer) {
+	avatar.LoadSets()
+	for _, p := range avatar.Problems() {
+		fmt.Fprintln(errw, "agmux:", p)
+	}
+	for _, s := range avatar.Sets {
+		fmt.Fprintf(w, "%s  %s  %s\n", s.ID, s.Source, s.FrameCounts())
+	}
+	if len(avatar.Sets) > 0 {
+		fmt.Fprintln(w)
+	}
+	for _, s := range avatar.Sprites {
+		if _, shadowed := avatar.SetByID(s.ID); !shadowed {
+			fmt.Fprintf(w, "%s  %s\n%s\n\n", s.ID, s.Name, avatar.Render(s, "claude", avatar.Normal, 0))
+		}
 	}
 }
 
