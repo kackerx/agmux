@@ -110,5 +110,6 @@
 ## 分组方式（T43，用户 2026-10-13）
 - `[layout] group_by = "cwd" | "project" | "session" | "state"`，默认 cwd；`g`（动作 `group`）按此顺序循环，底栏 `g group:<当前>`。
 - 键与标题：cwd = 现状（缩写路径）；project = ccmux `project`（worktree 归主仓库，标题项目名）；session = `tmuxTarget` 的 session 名（无 pane 归 `(no pane)`）；state = working / waiting / done / idle 固定顺序。
+- tmuxTarget 格式 `<session> # <window>:<idx>.<pane>`（window 名可含 / 和 :，session 名可含空格，后台为 null），session 名取第一个 ` # ` 之前全部；project / session 组按标题字母序，`(no pane)` 固定排最后；project 键 = ccmux `project` 字段本身。
 - 折叠按「方式 + 标题」记；切换后各组展开。组内卡片仍按名字序；`flow` 两种模式都适用。
 - 分支名省略（T41）：放不下先去 `/` 前缀段、余下前加 `…`；只剩末段仍放不下则末段尾截（不再加前导 …）。组标题横线用 `dir` 色（T42）。
