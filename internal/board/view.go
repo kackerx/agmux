@@ -373,18 +373,18 @@ func card(s store.Session, w, h int, focused bool, frame int, now time.Time, hl 
 
 // spread puts right flush against the right edge and gives left whatever is left (keeping one
 // cell between them when there is a right side at all).
-func spread(left, right string, w int) string {
+func spread(left, right string, w int, cut string) string {
 	rw := ansi.StringWidth(right)
 	if rw > 0 {
 		rw++
 	}
-	left = ansi.Truncate(left, max(w-rw, 0), "\x1b[0m…")
+	left = ansi.Truncate(left, max(w-rw, 0), cut)
 	return pad(left, w-ansi.StringWidth(right)) + right
 }
 
 // line1: the name, the time at the right edge; the name is cut only when it doesn't fit.
 func line1(s store.Session, w int, now time.Time, hl []int) string {
-	return spread(hilite(s.Name, hl, cName), fg(cMuted, relTime(s.LastActivity, now)), w)
+	return spread(hilite(s.Name, hl, cName), fg(cMuted, relTime(s.LastActivity, now)), w, cutMark(cName))
 }
 
 // status is the colored status word and its plain detail (" · Bash", " · agents" or "").
@@ -516,7 +516,7 @@ func line3(s store.Session, w int) string {
 	if s.PendingTool == "" {
 		dc = cWorking
 	}
-	return spread(left+fg(dc, detail)+fg(cWorking, c), model, w)
+	return spread(left+fg(dc, detail)+fg(cWorking, c), model, w, cutMark(dc))
 }
 
 // contextBar draws claude-hud's ■ bar, no number; pct<0 = unknown (all dark).

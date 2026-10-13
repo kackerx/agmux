@@ -737,6 +737,9 @@ func TestNameCutHitDoesNotBleed(t *testing.T) {
 			if lit := litRunes(out); len(lit) > 1 || len(lit) == 1 && lit[0] == "…" {
 				t.Errorf("w=%d p=%d: highlighted %q in %q", w, p, lit, out)
 			}
+			if strings.Contains(out, "…") && !strings.Contains(out, cutMark(cName)) { // cut: the … has the name's color
+				t.Errorf("w=%d p=%d: the … is not in the name color: %q", w, p, out)
+			}
 		}
 	}
 }

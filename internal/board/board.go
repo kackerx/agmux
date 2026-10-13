@@ -1090,7 +1090,7 @@ func (m Model) View() string {
 			cursor = "▏"
 		}
 		lines := strings.SplitN(out, "\n", 3)
-		lines[0] = spread(fg(cFocus, " / ")+m.query+cursor, fg(cMuted, fmt.Sprintf("%d/%d ", len(ss), len(m.src.Sessions()))), m.w)
+		lines[0] = spread(fg(cFocus, " / ")+m.query+cursor, fg(cMuted, fmt.Sprintf("%d/%d ", len(ss), len(m.src.Sessions()))), m.w, "…")
 		if len(ss) == 0 && len(lines) > 2 {
 			lines[1] = fg(cMuted, " no match")
 		}
