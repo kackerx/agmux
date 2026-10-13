@@ -719,3 +719,17 @@ func TestSeenNeedsStatusChangedAt(t *testing.T) {
 		t.Errorf("err %v done %v file %q", err, p.Sessions()[0].Done, seenFile(t, path))
 	}
 }
+
+// A MarkSeen of an older done that lands after a poll already shows a newer one leaves the newer one done.
+func TestMarkSeenOldDone(t *testing.T) {
+	seen, _ := avatar.LoadBindings(filepath.Join(t.TempDir(), "seen.json"))
+	t0 := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	p := &Poller{Seen: seen}
+	p.sessions = []Session{{ID: "a", Status: "idle", Done: true, StatusChangedAt: t0.Add(time.Minute)}}
+	if err := p.MarkSeen(Session{ID: "a", Status: "idle", Done: true, StatusChangedAt: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if !p.Sessions()[0].Done {
+		t.Error("the newer done was taken off by a MarkSeen of the older one")
+	}
+}

@@ -52,6 +52,9 @@ func (f *fakeRunner) Tmux(args ...string) (string, error) {
 	if err := f.tmuxFail[args[0]]; err != nil {
 		return "", err
 	}
+	if out, ok := f.tmuxOut[args[0]+" "+args[len(args)-1]]; ok { // by subcommand and its last argument (a format)
+		return out, f.err
+	}
 	if out, ok := f.tmuxOut[args[0]]; ok {
 		return out, f.err
 	}
@@ -157,7 +160,7 @@ func run(m *Model, cmd tea.Cmd) (quit bool) {
 	switch msg := msg.(type) {
 	case tea.QuitMsg:
 		return true
-	case doneMsg:
+	case doneMsg, attachedMsg:
 		tm, next := m.Update(msg)
 		*m = tm.(Model)
 		return run(m, next)

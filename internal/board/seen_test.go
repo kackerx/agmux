@@ -173,13 +173,17 @@ func TestSeenCountsFromDone(t *testing.T) {
 	}
 }
 
-// A board --stay has hidden keeps running unseen: nothing counts as seen until a key or a resize
-// says someone is looking again.
+// A board --stay has hidden keeps running unseen: nothing counts as seen until a key, a resize or
+// tmux saying the popup is attached again shows someone is looking. (A popup attached at the same
+// size sends no resize, which is why tmux is asked.)
 func TestSeenNotWhileHidden(t *testing.T) {
-	for _, wake := range []tea.Msg{tea.WindowSizeMsg{Width: 120, Height: 40}, key("k")} {
-		m, _ := stayModel(stayClients)
+	attached := "display-message #{session_attached}"
+	for _, wake := range []string{"resize", "key", "attach"} {
+		m, r := stayModel(stayClients)
+		r.tmuxOut[attached] = "0\n"
 		src := &seenSrc{staticSrc: seenSessions()}
 		m.src = src
+		m = frame(t, m) // d1: one frame of its own
 		m, quit := press(t, m, "q")
 		if quit || !m.hidden {
 			t.Fatalf("quit %v hidden %v", quit, m.hidden)
@@ -187,13 +191,36 @@ func TestSeenNotWhileHidden(t *testing.T) {
 		for range 10 {
 			m = frame(t, m)
 		}
-		if len(src.marked) != 0 {
-			t.Fatalf("marked while hidden: %v", src.marked)
+		if len(src.marked) != 0 || !m.hidden {
+			t.Fatalf("%s: marked while hidden: %v (hidden %v)", wake, src.marked, m.hidden)
 		}
-		tm, _ := m.Update(wake)
-		m = frame(t, frame(t, tm.(Model)))
-		if m.hidden || !reflect.DeepEqual(src.marked, []string{"d1"}) {
-			t.Errorf("%T: hidden %v marked %v", wake, m.hidden, src.marked)
+		asked := len(tmuxCalls(r, "display-message")) // the question is asked, one at a time
+		switch wake {
+		case "resize":
+			tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+			m = tm.(Model)
+		case "key":
+			m, _ = press(t, m, "k")
+		case "attach":
+			r.tmuxOut[attached] = "1\n"
+			m = frame(t, m)
+		}
+		if m.hidden {
+			t.Fatalf("%s: still hidden", wake)
+		}
+		m = frame(t, m) // the frame before the hiding must not count: one frame is not enough
+		if len(src.marked) != 0 {
+			t.Fatalf("%s: marked after one frame: %v", wake, src.marked)
+		}
+		m = frame(t, m)
+		if !reflect.DeepEqual(src.marked, []string{"d1"}) {
+			t.Errorf("%s: marked %v after two frames", wake, src.marked)
+		}
+		if asked < 10 {
+			t.Errorf("%s: asked tmux %d times in 10 frames", wake, asked)
+		}
+		if n := len(tmuxCalls(r, "display-message")); wake != "attach" && n != asked {
+			t.Errorf("%s: asked tmux again after waking (%d → %d)", wake, asked, n)
 		}
 	}
 }
@@ -210,5 +237,50 @@ func TestSeenNotWhileHiddenByJump(t *testing.T) {
 	}
 	if !reflect.DeepEqual(src.marked, []string{"d1"}) {
 		t.Errorf("marked %v, want only the jump's", src.marked)
+	}
+}
+
+// The focused done card is polled away after one frame and the focus falls back to another done
+// card: that one has had no frames of its own, one is not enough.
+func TestSeenDwellFallbackStartsOver(t *testing.T) {
+	m, src, _ := seenModel()
+	m = frame(t, m)                   // d1: 1 frame
+	src.staticSrc = src.staticSrc[1:] // d1 gone: the focus falls back to d2
+	m = frame(t, m)
+	if len(src.marked) != 0 {
+		t.Errorf("d2 marked after one frame of its own: %v", src.marked)
+	}
+	frame(t, m)
+	if !reflect.DeepEqual(src.marked, []string{"d2"}) {
+		t.Errorf("d2 after two frames: %v", src.marked)
+	}
+}
+
+// A done card that goes back to work after one frame and is done again starts over.
+func TestSeenDwellNotDoneStartsOver(t *testing.T) {
+	m, src, _ := seenModel()
+	m = frame(t, m) // d1: 1 frame
+	src.staticSrc[0].Done, src.staticSrc[0].Status = false, "working"
+	m = frame(t, m)
+	src.staticSrc[0].Done, src.staticSrc[0].Status = true, "idle"
+	frame(t, m)
+	if len(src.marked) != 0 {
+		t.Errorf("marked after one frame of the new done: %v", src.marked)
+	}
+}
+
+// While hidden, tmux is asked one question at a time: frames do not stack them behind a slow tmux.
+func TestSeenAsksOneAtATime(t *testing.T) {
+	m, r := stayModel(stayClients)
+	m.src = &seenSrc{staticSrc: seenSessions()}
+	m, _ = press(t, m, "q")
+	tm, _ := m.Update(frameMsg{}) // asks; the answer has not come
+	tm, cmd := tm.(Model).Update(frameMsg{})
+	r.reset()
+	run(&m, cmd)
+	for _, c := range r.calls {
+		if c[len(c)-1] == "#{session_attached}" {
+			t.Errorf("asked again with a question out: %q", c)
+		}
 	}
 }

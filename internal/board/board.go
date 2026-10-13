@@ -114,6 +114,7 @@ type Model struct {
 	dwellID   string     // the done card the focus has rested on, and for how many frames: seenFrames of them make it seen
 	dwellN    int
 	hidden    bool // --stay hid the popup itself; the board runs on unseen, so nothing it shows counts as seen
+	asking    bool // while hidden: a "who is attached" question is out
 
 	cfg    *config.Config
 	keymap map[string]string // key (as KeyMsg.String() spells it) → action
@@ -166,6 +167,9 @@ func Run(p *store.Poller, cfg *config.Config, img ImageMode, stay bool) error {
 
 type frameMsg struct{}
 
+// attachedMsg answers whether anyone is attached to the board's session again (--stay, hidden).
+type attachedMsg struct{ n int }
+
 // doneMsg reports a finished ccmux or tmux command.
 type doneMsg struct {
 	ok      string // message on success
@@ -215,6 +219,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if _, _, s, ok := m.current(); ok && s.TmuxPane != "" && s.TmuxPane != msg.pane {
 			cmd := m.capture()
 			return m, cmd
+		}
+	case attachedMsg: // a popup attached again sends no resize when its size is the same
+		m.asking = false
+		if msg.n > 0 {
+			m.hidden = false
 		}
 	case doneMsg:
 		m.hidden = m.hidden || msg.hid
@@ -343,14 +352,27 @@ const seenFrames = 2
 // dwell counts the frames the focus has rested on a done card (the key / click that moved it zeroes
 // the count, so passing through does not count), and marks it seen at seenFrames.
 func (m *Model) dwell() tea.Cmd {
-	if m.hidden {
+	if m.hidden { // nothing counts; every frame asks tmux whether the popup is back (only here, only while hidden)
 		m.dwellN = 0
-		return nil
+		pane := m.getenv("TMUX_PANE")
+		if m.asking || pane == "" {
+			return nil
+		}
+		m.asking = true
+		r := m.run
+		return func() tea.Msg {
+			out, err := r.Tmux("display-message", "-p", "-t", pane, "#{session_attached}")
+			n, _ := strconv.Atoi(strings.TrimSpace(out))
+			if err != nil {
+				n = 0
+			}
+			return attachedMsg{n}
+		}
 	}
 	c := *m // what the screen shows: with no focus set yet that is the first card; m's focus stays unset
 	_, _, s, ok := c.current()
 	if !ok || !s.Done {
-		m.dwellID, m.dwellN = "", 0
+		m.dwellID = ""
 		return nil
 	}
 	if s.ID != m.dwellID {
