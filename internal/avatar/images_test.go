@@ -57,23 +57,26 @@ func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: pngOf(s)} }
 // think / hi / success.
 func TestLoadSets(t *testing.T) {
 	probs := useSets(t, fstest.MapFS{
-		"kit/idle/b.png":       file("idle-b"),
-		"kit/idle/a.png":       file("idle-a"),
-		"kit/idle/notes.txt":   file("not a frame"),
-		"kit/idle/c.PNG":       file("upper case is not .png"),
-		"kit/idle/._a.png":     file("macOS AppleDouble copy"),
-		".hidden/idle/1.png":   file("a hidden directory is not a set"),
-		"hash/idle/1.png":      file("hash is reserved"),
-		"kit/working/2.png":    file("work-2"),
-		"kit/working/1.png":    file("work-1"),
-		"kit/attention/x.gif":  file("not a frame"),
-		"kit/read/r.png":       file("read"),
-		"loose.png":            file("a file at the root"),
-		"noidle/working/1.png": file("w"),
-		"solo/idle/i.png":      file("solo"),
-		"both/idle/i.png":      file("i"),
-		"both/think/t.png":     file("new name"),
-		"both/working/w.png":   file("old name"),
+		"kit/idle/b.png":        file("idle-b"),
+		"kit/idle/a.png":        file("idle-a"),
+		"kit/idle/notes.txt":    file("not a frame"),
+		"kit/idle/c.PNG":        file("upper case is not .png"),
+		"kit/idle/._a.png":      file("macOS AppleDouble copy"),
+		"kit/idle/a_v2.png":     file("an alternate take"),
+		"kit/idle/idle_v10.png": file("another take"),
+		"kit/think/_v3.png":     file("a take"),
+		".hidden/idle/1.png":    file("a hidden directory is not a set"),
+		"hash/idle/1.png":       file("hash is reserved"),
+		"kit/working/2.png":     file("work-2"),
+		"kit/working/1.png":     file("work-1"),
+		"kit/attention/x.gif":   file("not a frame"),
+		"kit/read/r.png":        file("read"),
+		"loose.png":             file("a file at the root"),
+		"noidle/working/1.png":  file("w"),
+		"solo/idle/i.png":       file("solo"),
+		"both/idle/i.png":       file("i"),
+		"both/think/t.png":      file("new name"),
+		"both/working/w.png":    file("old name"),
 	})
 	if len(probs) != 2 || !strings.Contains(probs[0], `"hash"`) || !strings.Contains(probs[0], "reserved") || !strings.Contains(probs[1], `"noidle"`) || !strings.Contains(probs[1], "idle") {
 		t.Errorf("problems: %q", probs)
@@ -170,6 +173,28 @@ func TestIdleBlink(t *testing.T) {
 	}
 }
 
+// idle_v2.png is another take of the state, not a frame (pi-agent-portrait picks one take at random
+// each time a state starts); idle_2.png and idle_blink.png are frames. The same for the user's sets.
+func TestAlternateTakes(t *testing.T) {
+	useSets(t, fstest.MapFS{
+		"c/idle/idle.png": file("a"), "c/idle/idle_2.png": file("b"), "c/idle/idle_blink.png": file("c"),
+		"c/idle/idle_v2.png": file("t2"), "c/idle/idle_blink_v3.png": file("t3"), "c/idle/idle_v10.png": file("t10"),
+		"c/think/think_v2.png": file("only a take"), // no frame left: think falls back to idle
+		"c/hi/hi_v2.png":       file("take"), "c/hi/hi1.png": file("hi"),
+	})
+	c := Sets[0]
+	if len(c.Frames["idle"]) != 3 || len(c.Frames["think"]) != 0 || len(c.Frames["hi"]) != 1 {
+		t.Errorf("frames: idle %d, think %d, hi %d, want 3, 0, 1", len(c.Frames["idle"]), len(c.Frames["think"]), len(c.Frames["hi"]))
+	}
+	for _, f := range c.Frames["idle"] {
+		for _, take := range []string{"t2", "t3", "t10"} {
+			if bytes.Equal(f, pngOf(take)) {
+				t.Errorf("take %s was loaded as a frame", take)
+			}
+		}
+	}
+}
+
 // A set directory may be a symbolic link (the same pictures shared by several configs, say).
 func TestLoadSetsSymlink(t *testing.T) {
 	root, real := t.TempDir(), t.TempDir()
@@ -190,13 +215,23 @@ func TestBuiltinSet(t *testing.T) {
 	t.Cleanup(func() { Sets, problems = nil, nil })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no user sets
 	LoadSets()
-	if len(Sets) != 15 || len(Sprites) != 5 { // 20 built-in avatars: 15 pictures and 5 pixel sprites
-		t.Errorf("%d built-in sets and %d sprites, want 15 and 5", len(Sets), len(Sprites))
+	if len(Sets) != 10 || len(Sprites) != 5 { // 15 built-in avatars: 10 characters and 5 pixel sprites
+		t.Errorf("%d built-in sets and %d sprites, want 10 and 5", len(Sets), len(Sprites))
 	}
-	for i, s := range Sets[1:] { // aza_choi, then the party portraits: one still picture each
-		if want := fmt.Sprintf("party-%02d", i+1); s.ID != want || len(s.Frames["idle"]) != 1 || len(s.Frames["think"]) != 0 {
-			t.Errorf("set %d: %s, %d idle frames, want %s with one", i+1, s.ID, len(s.Frames["idle"]), want)
+	var ids []string
+	for _, s := range Sets {
+		ids = append(ids, s.ID)
+		for _, st := range []string{"idle", "think", "read", "write", "tool", "hi"} { // success: four of them have none, and show idle
+			if len(s.Frames[st]) == 0 {
+				t.Errorf("%s has no %s frames", s.ID, st)
+			}
 		}
+		if n := len(s.Frames["idle"]) + len(s.Frames["think"]) + len(s.Frames["read"]) + len(s.Frames["write"]) + len(s.Frames["tool"]) + len(s.Frames["hi"]) + len(s.Frames["success"]); n > 25 {
+			t.Errorf("%s has %d frames: alternate takes (_v2) are not frames", s.ID, n)
+		}
+	}
+	if got := strings.Join(ids, " "); got != "aza_choi cipher default forge moss nova oana quill red sprocket" {
+		t.Errorf("built-in sets: %s", got)
 	}
 	s, ok := SetByID("aza_choi")
 	if !ok || s.Source != "builtin" || len(problems) != 0 {
@@ -226,8 +261,8 @@ func TestUserSetReplacesBuiltin(t *testing.T) {
 		t.Fatal(err)
 	}
 	LoadSets()
-	if n := len(Sets); n != 16 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || !bytes.Equal(Sets[0].Frames["idle"][0], pngOf("mine")) || Sets[1].ID != "party-01" || Sets[1].Source != "builtin" || Sets[n-1].ID != "zed" {
-		t.Errorf("sets (want the 15 built-in ones, aza_choi replaced, then zed): %d %+v", n, Sets[0])
+	if n := len(Sets); n != 11 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || !bytes.Equal(Sets[0].Frames["idle"][0], pngOf("mine")) || Sets[1].ID != "cipher" || Sets[1].Source != "builtin" || Sets[n-1].ID != "zed" {
+		t.Errorf("sets (want the 10 built-in ones, aza_choi replaced, then zed): %d %+v", n, Sets[0])
 	}
 }
 

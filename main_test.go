@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"hash/fnv"
 	"image"
 	"image/color"
@@ -38,9 +37,18 @@ func TestAvatarsOutput(t *testing.T) {
 	var out, errs bytes.Buffer
 	avatars(&out, &errs)
 	lines := strings.Split(out.String(), "\n")
-	want := []string{"aza_choi  builtin  idle 2 · think 4 · read 4 · write 4 · tool 4 · hi 4 · success 0"}
-	for i := 1; i <= 14; i++ {
-		want = append(want, fmt.Sprintf("party-%02d  builtin  idle 1 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 0", i))
+	// the ten built-in sets, with the frames of each state that are not alternate takes (_v2…)
+	want := []string{
+		"aza_choi  builtin  idle 2 · think 2 · read 4 · write 4 · tool 4 · hi 4 · success 0",
+		"cipher  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 0",
+		"default  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 0",
+		"forge  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2",
+		"moss  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2",
+		"nova  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2",
+		"oana  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2",
+		"quill  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2",
+		"red  builtin  idle 2 · think 2 · read 3 · write 2 · tool 2 · hi 2 · success 0",
+		"sprocket  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2",
 	}
 	want = append(want,
 		"bot-01  user  idle 1 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 0",

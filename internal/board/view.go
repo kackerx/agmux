@@ -479,7 +479,7 @@ func footerFor(c *config.Config) []footerKey {
 // down (more rows scroll), each cell cellW × cellH: the avatar (6 × 2) with its name under it.
 const (
 	gridCols, gridRows = 5, 4
-	cellW, cellH       = 9, 3               // 6 for the avatar, the rest a gap: an 8 character name (aza_choi, party-01) still has one
+	cellW, cellH       = 10, 3              // 6 for the avatar, two spaces either side: an 8 character name (aza_choi, sprocket) keeps some air around it
 	gridW              = gridCols*cellW + 2 // with the border
 )
 
@@ -512,8 +512,8 @@ func avatarGrid(s store.Session, pick, rows int) []string {
 			case id == s.AvatarID:
 				label = fg(cFocus, label)
 			}
-			cells[0] = append(cells[0], " "+face[0]+"  ")
-			cells[1] = append(cells[1], " "+face[1]+"  ")
+			cells[0] = append(cells[0], "  "+face[0]+"  ")
+			cells[1] = append(cells[1], "  "+face[1]+"  ")
 			cells[2] = append(cells[2], label)
 		}
 		for l := range cellH {

@@ -475,3 +475,24 @@ func TestBlinksAreStaggered(t *testing.T) {
 		t.Error("offset is not stable")
 	}
 }
+
+// An 8 character name doesn't touch the next cell's: there are at least two spaces between them.
+func TestAvatarGridNamesKeepApart(t *testing.T) {
+	avatar.UseSets(fstest.MapFS{"aaaaaaaa/idle/1.png": pngFile("a"), "bbbbbbbb/idle/1.png": pngFile("b"), "cccccccc/idle/1.png": pngFile("c")})
+	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
+	p := &store.Poller{StateDir: t.TempDir(), Show: func() ([]ccmux.Session, error) {
+		return []ccmux.Session{{ID: "a1", Summary: "one", CWD: "/a", TmuxPane: "%1", Status: "idle"}}, nil
+	}}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := press(t, gridModel(p, 120, 40), "a")
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	top, _, _ := gridAt(lines)
+	if !strings.Contains(lines[top+3], "aaaaaaaa  ") || !strings.Contains(lines[top+3], "  bbbbbbbb  ") || !strings.Contains(lines[top+3], "  cccccccc  ") {
+		t.Errorf("names touch: %q", lines[top+3])
+	}
+	if gridW != 52 { // 5 cells of 10 and the border
+		t.Errorf("box is %d wide", gridW)
+	}
+}

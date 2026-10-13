@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -178,7 +179,12 @@ func frameID(set, state, file string, data []byte) uint32 {
 	return max(h.Sum32()&0xffffff, 1)
 }
 
-// loadSets reads every <id>/<state>/*.png under fsys. Only .png files count, not hidden ones (macOS
+// alternateTake matches idle_v2.png and the like: pi-agent-portrait draws a state again as another
+// "take" and picks one of them at random each time the state starts, so they are not animation
+// frames. idle_2.png is a frame.
+var alternateTake = regexp.MustCompile(`_v\d+\.png$`)
+
+// loadSets reads every <id>/<state>/*.png under fsys. Only .png files count, not hidden ones or alternate takes (macOS
 // leaves ._ copies next to files on some volumes); a directory may be a symbolic link; a missing
 // root is no sets.
 func loadSets(fsys fs.FS, source string) (sets []*Set, problems []string) {
@@ -201,7 +207,7 @@ func loadSets(fsys fs.FS, source string) (sets []*Set, problems []string) {
 			for _, dir := range dirs {
 				files, _ := fs.ReadDir(fsys, path.Join(d.Name(), dir))
 				for _, f := range files {
-					if f.IsDir() || !strings.HasSuffix(f.Name(), ".png") || strings.HasPrefix(f.Name(), ".") {
+					if f.IsDir() || !strings.HasSuffix(f.Name(), ".png") || strings.HasPrefix(f.Name(), ".") || alternateTake.MatchString(f.Name()) {
 						continue
 					}
 					data, err := fs.ReadFile(fsys, path.Join(d.Name(), dir, f.Name()))
