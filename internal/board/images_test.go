@@ -114,31 +114,45 @@ func TestImageMode(t *testing.T) {
 	}
 }
 
+// kitName is a session name whose blink offset is 0: its tick is the frame count.
+var kitName = func() string {
+	for _, n := range []string{"n", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"} {
+		if blinkOffset(n) == 0 {
+			return n
+		}
+	}
+	panic("no name with offset 0")
+}()
+
 func kitSession(state string) store.Session {
-	return store.Session{ID: "a", Name: "n", AvatarID: "kit", Status: "idle", AvatarState: state, ContextPct: -1, TmuxPane: "%1"}
+	return store.Session{ID: "a", Name: kitName, AvatarID: "kit", Status: "idle", AvatarState: state, ContextPct: -1, TmuxPane: "%1"}
 }
 
 // A set's card holds placeholders (U+10EEEE, foreground = the frame's image id) and is exactly as
 // wide as one with a sprite; the state picks the frames, which cycle with the frame tick.
+// cardImageID is the image ID (hex) the card's placeholders are drawn in; the card must be 48 wide.
+func cardImageID(t *testing.T, s store.Session, frame int) string {
+	t.Helper()
+	out := card(s, 48, 5, false, frame, now, hit{})
+	if !strings.Contains(out, "\U0010EEEE") {
+		t.Fatalf("no placeholders in %q", out)
+	}
+	for i, l := range strings.Split(out, "\n") {
+		if w := ansi.StringWidth(l); w != 48 {
+			t.Errorf("line %d is %d wide, want 48: %q", i, w, l)
+		}
+	}
+	at := strings.Index(out, "\U0010EEEE")
+	rgb, _, _ := strings.Cut(out[strings.LastIndex(out[:at], "38;2;")+len("38;2;"):], "m") // the color the placeholder is in
+	var r, g, b uint32
+	fmt.Sscanf(rgb, "%d;%d;%d", &r, &g, &b)
+	return fmt.Sprintf("%x", r<<16|g<<8|b)
+}
+
 func TestImageCard(t *testing.T) {
 	useKit(t)
 	useImages = true
-	id := func(s store.Session, frame int) string {
-		out := card(s, 48, 5, false, frame, now, hit{})
-		if !strings.Contains(out, "\U0010EEEE") {
-			t.Fatalf("no placeholders in %q", out)
-		}
-		for i, l := range strings.Split(out, "\n") {
-			if w := ansi.StringWidth(l); w != 48 {
-				t.Errorf("line %d is %d wide, want 48: %q", i, w, l)
-			}
-		}
-		at := strings.Index(out, "\U0010EEEE")
-		rgb, _, _ := strings.Cut(out[strings.LastIndex(out[:at], "38;2;")+len("38;2;"):], "m") // the color the placeholder is in
-		var r, g, b uint32
-		fmt.Sscanf(rgb, "%d;%d;%d", &r, &g, &b)
-		return fmt.Sprintf("%x", r<<16|g<<8|b)
-	}
+	id := func(s store.Session, frame int) string { return cardImageID(t, s, frame) }
 	kit, _ := avatar.SetByID("kit")
 	hex := func(state string, frame int) string { return fmt.Sprintf("%x", kit.FrameID(state, frame)) }
 	// the card shows the session's AvatarState, a frame per tick (idle: the resting face, a blink every 8th)
@@ -211,6 +225,8 @@ func gridFixture(t *testing.T, nSets int, def string, names ...string) (*store.P
 	files := fstest.MapFS{}
 	for i := range nSets {
 		files[fmt.Sprintf("s%02d/idle/1.png", i+1)] = pngFile(fmt.Sprintf("s%d", i))
+		files[fmt.Sprintf("s%02d/idle/2.png", i+1)] = pngFile(fmt.Sprintf("s%d-blink", i)) // the grid must still draw the resting face
+		files[fmt.Sprintf("s%02d/think/1.png", i+1)] = pngFile(fmt.Sprintf("s%d-think", i))
 	}
 	avatar.UseSets(files)
 	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
@@ -291,6 +307,13 @@ func TestAvatarGrid(t *testing.T) {
 		}
 		if n := strings.Count(v, "\U0010EEEE"); (n > 0) != images || (images && n != 15*12+12) { // the 15 sets in the box; the card wears one too
 			t.Errorf("images=%v: %d placeholder cells", images, n)
+		}
+		if images { // the grid draws each set's resting face: idle's first frame, not its blink or think
+			s01, _ := avatar.SetByID("s01")
+			sgr := func(id uint32) string { return fmt.Sprintf("38;2;%d;%d;%dm", id>>16&255, id>>8&255, id&255) }
+			if !strings.Contains(v, sgr(s01.FrameID("idle", 0))) || strings.Contains(v, sgr(s01.FrameID("idle", 8))) || strings.Contains(v, sgr(s01.FrameID("think", 0))) {
+				t.Errorf("the grid's s01 is not its first idle frame")
+			}
 		}
 		if !strings.Contains(v, "48;2;255;142;190m   s07   ") { // the cursor starts on the avatar it wears
 			t.Errorf("images=%v: cursor not on s07:\n%q", images, lines[top+1+3*1+2])
@@ -400,5 +423,55 @@ func TestAvatarGridScrolls(t *testing.T) {
 	m, _ := press(t, gridModel(p, 120, 40), "a", "j", "j", "j", "l", "l", "l", "l", "j") // index 19 → 24 doesn't exist → 22
 	if got := strings.TrimSpace(strings.Split(ansi.Strip(m.View()), "\n")[38]); got != "bot-05  Mochi" {
 		t.Errorf("the short last row: %q", got)
+	}
+}
+
+// Idle cards don't all blink in the same tick: each has its own offset, from its avatar key.
+func TestBlinksAreStaggered(t *testing.T) {
+	useKit(t)
+	useImages = true
+	kit, _ := avatar.SetByID("kit")
+	rest := fmt.Sprintf("%x", kit.FrameID("idle", 0))
+	blinkTicks := func(name string) (ticks []int) {
+		s := kitSession("idle")
+		s.Name = name
+		for frame := range 24 {
+			if cardImageID(t, s, frame) != rest {
+				ticks = append(ticks, frame)
+			}
+		}
+		return
+	}
+	// two names with different offsets
+	a, b := "", ""
+	for _, n := range []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"} {
+		switch {
+		case a == "":
+			a = n
+		case blinkOffset(n) != blinkOffset(a):
+			b = n
+		}
+		if b != "" {
+			break
+		}
+	}
+	ta, tb := blinkTicks(a), blinkTicks(b)
+	wantA, wantB := []int{}, []int{}
+	for _, t := range []int{8, 16, 24} { // the blink is at tick 8k on the card's own clock: frame + offset
+		for _, c := range []struct {
+			name string
+			into *[]int
+		}{{a, &wantA}, {b, &wantB}} {
+			if f := t - blinkOffset(c.name); f >= 0 {
+				*c.into = append(*c.into, f)
+			}
+		}
+	}
+	if fmt.Sprint(ta) != fmt.Sprint(wantA) || fmt.Sprint(tb) != fmt.Sprint(wantB) || fmt.Sprint(ta) == fmt.Sprint(tb) {
+		t.Errorf("%s (offset %d) blinks at frames %v, want %v; %s (offset %d) at %v, want %v", a, blinkOffset(a), ta, wantA, b, blinkOffset(b), tb, wantB)
+	}
+	// the offset belongs to the key: the same name always gets the same one
+	if blinkOffset("alpha") != blinkOffset("alpha") || blinkOffset("") != blinkOffset("") {
+		t.Error("offset is not stable")
 	}
 }

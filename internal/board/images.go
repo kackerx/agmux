@@ -1,6 +1,7 @@
 package board
 
 import (
+	"hash/fnv"
 	"os"
 	"strings"
 
@@ -17,7 +18,7 @@ var useImages bool
 // session's AvatarState, or a sprite in the mood.
 func avatarFace(s store.Session, mood avatar.Mood, frame int) []string {
 	if set, ok := avatar.SetByID(s.AvatarID); ok && useImages {
-		return avatar.Placeholder(set.FrameID(s.AvatarState, frame))
+		return avatar.Placeholder(set.FrameID(s.AvatarState, frame+blinkOffset(s.AvatarKey())))
 	}
 	return strings.Split(avatar.Render(avatar.SpriteFor(s.AvatarID), s.AgentType, mood, frame), "\n")
 }
@@ -30,6 +31,22 @@ func avatarName(id string) string {
 		return sp.Name
 	}
 	return id
+}
+
+// gridFace is an avatar as the picker shows it: a picture's resting face (idle's first frame), a sprite.
+func gridFace(id, agentType string) []string {
+	if set, ok := avatar.SetByID(id); ok && useImages {
+		return avatar.Placeholder(set.FrameID("idle", 0))
+	}
+	return strings.Split(avatar.Render(avatar.SpriteFor(id), agentType, avatar.Normal, 0), "\n")
+}
+
+// blinkOffset is a card's own 0..7 ticks added to the frame count, so that the idle cards don't all
+// blink in the same tick: it comes from the avatar key, which doesn't change while the board runs.
+func blinkOffset(key string) int {
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	return int(h.Sum32() % 8)
 }
 
 // kittyTerm: the TERM values whose terminals draw kitty graphics with Unicode placeholders.

@@ -149,7 +149,11 @@ func TestIdleBlink(t *testing.T) {
 	useSets(t, fstest.MapFS{"b/idle/1.png": file("rest"), "b/idle/2.png": file("blink"), "b/idle/3.png": file("wink"), "one/idle/1.png": file("only")})
 	b, one := Sets[0], Sets[1]
 	f := func(i int) uint32 { return b.ids["idle"][i] }
-	for tick, want := range map[int]uint32{0: f(0), 1: f(0), 7: f(0), 8: f(1), 9: f(0), 15: f(0), 16: f(2), 17: f(0), 24: f(1), 32: f(2), 800: f(2)} {
+	for tick := range 65 { // every tick: the resting face, but at tick 8, 16, 24… the blink frames in turn
+		want := f(0)
+		if tick > 0 && tick%8 == 0 {
+			want = f(1 + (tick/8-1)%2)
+		}
 		if got := b.FrameID("idle", tick); got != want {
 			t.Errorf("tick %d: frame %x, want %x", tick, got, want)
 		}

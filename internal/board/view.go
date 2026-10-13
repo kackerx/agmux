@@ -503,7 +503,7 @@ func avatarGrid(s store.Session, pick, rows int) []string {
 				continue
 			}
 			id := ids[i]
-			face := avatarFace(store.Session{AvatarID: id, AgentType: s.AgentType, AvatarState: "idle"}, avatar.Normal, 0) // a picture: the resting face
+			face := gridFace(id, s.AgentType)
 			label := ansi.Truncate(avatarName(id), cellW, "…")
 			label = pad(strings.Repeat(" ", (cellW-ansi.StringWidth(label))/2)+label, cellW)
 			switch {
