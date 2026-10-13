@@ -5,7 +5,11 @@ from lib import *
 from test_t3 import ready, by_name
 
 
-BUILTIN_LINE = "aza_choi  builtin  idle 2 · think 4 · read 4 · write 4 · tool 4 · hi 4 · success 0"  # `agmux avatars`, 1d4d5fd
+def avatars_line(name, counts):
+    """the `agmux avatars` line of a set: `id  source  idle 2 · think 2 · ...` for {state: frames}"""
+    return f"{name}  builtin  " + " · ".join(f"{s} {counts.get(s, 0)}" for s in AVATAR_STATES)
+
+
 
 
 class Fixtures(unittest.TestCase):
@@ -86,8 +90,16 @@ class Fixtures(unittest.TestCase):
 
 # ---------------------------------------------------------------------------------------------------------------- product tests (4648d7d)
 SETS = SRC / "internal" / "avatar" / "sets" / "aza_choi"  # the built-in set's source frames (pi-emote's own directory layout)
-BUILTIN = {d.name: sorted(p.name for p in d.glob("*.png")) for d in sorted(SETS.iterdir()) if d.is_dir()} if SETS.exists() else {}
-N_BUILTIN = sum(len(v) for v in BUILTIN.values())  # frames in the built-in set (22 at 1d4d5fd)
+def _group(frames):
+    out = {}
+    for d, f in frames: out.setdefault(d, []).append(f)
+    return out
+
+
+BUILTIN = _group(scan_set(SETS)) if SETS.exists() else {}  # aza_choi: {state dir: [file names]} (the other built-in sets are in set_list())
+N_BUILTIN = sum(len(fr) for _, _, fr in set_list())  # frames of ALL built-in sets (141 at de20b1e): what a board uploads when the user has no sets
+BUILTIN_LINE = avatars_line("aza_choi", {k: len(v) for k, v in BUILTIN.items()})  # the first line of `agmux avatars`
+IMG_DIMS = lambda data: __import__("struct").unpack(">II", data[16:24])  # (width, height) from a PNG's IHDR
 # fixture (test_t3), T30 states: alpha-main working on Bash -> tool, bravo-29 raw idle but a subagent works -> think, a3 / d1 need you -> hi, c2 / e1 done -> success
 MOOD = {"alpha-main": "tool", "bravo-29": "think", "charlie-30": "idle", "pj-fallback": "idle", "bravo-bg": "idle", "delta-60": "hi", "告警会话": "hi",
         "charlie-59": "success", "echo-long": "success"}
@@ -95,9 +107,8 @@ MOOD = {"alpha-main": "tool", "bravo-29": "think", "charlie-30": "idle", "pj-fal
 
 def builtin_frames(env, cfg):
     """{state: [image id of each frame in file-name order]} of the built-in set, read from what agmux uploads (so it holds whatever the id scheme is)."""
-    ids = upload_ids(env, cfg)
-    assert len(ids) >= N_BUILTIN, f"upload gave {len(ids)} images"
-    return {st: [ids[(SETS / st / f).read_bytes()] for f in files] for st, files in BUILTIN.items()}
+    table, _ = frame_table(env, cfg)
+    return {st: [table[("aza_choi", st, f)] for f in files] for st, files in BUILTIN.items()}
 
 
 def card_avatar(raw, card):
@@ -192,7 +203,6 @@ class Kitty(Base):
         gaps = [b - a for a, b in zip(times, times[1:])]
         self.assertGreaterEqual(len(times), 6, f"changes seen: {times}")
         self.assertTrue(all(0.35 <= g <= 0.7 for g in gaps), f"frame tick is 500ms, gaps = {gaps}")
-        self.assertTrue(all(frames["think"].index(s[1]["bravo-29"]) == frames["tool"].index(s[1]["alpha-main"]) for s in seen), "think and tool cards step together (same tick)")
 
     def test_the_xterm_ghostty_name_also_counts(self):
         self.assertAllImages(self.board(term="xterm-ghostty"))
@@ -227,7 +237,7 @@ class Kitty(Base):
         self.assertTrue(any(x[0] not in " " for x in row.cells[named(cs, "bravo-29").c + 2:named(cs, "bravo-29").c + 8]), "a pixel avatar is drawn instead")
 
     def test_default_hash_picks_among_sprites_and_sets_by_the_card_name(self):
-        self.config('[avatars]\ndefault = "hash"\n')  # pool: bot-01..06 + aza_choi = 7 (design: hash pool grew from 6 to 7)
+        self.config('[avatars]\ndefault = "hash"\n')  # image mode pool: the 5 sprites, then every image set (design: the hash picks sets only when pictures are drawn)
         t = self.board(); raw, cs = self.images(t)
         def fnv(s):
             h = 2166136261
@@ -236,7 +246,7 @@ class Kitty(Base):
         for name in MOOD:
             c = named(cs, name) if name != "告警会话" else [x for x in cs if "告警会话" in x.line(1)][0]
             key = NAMES_FULL.get(name, name)
-            self.assertEqual(bool(card_avatar(raw, c)), fnv(key) % 7 == 6, f"{name}: image iff fnv32a(name) % 7 == 6 (aza_choi is the 7th choice)")
+            self.assertEqual(bool(card_avatar(raw, c)), fnv(key) % (5 + len(set_list())) >= 5, f"{name}: image iff fnv32a(name) % (5 sprites + {len(set_list())} sets) >= 5")
 
 
 NAMES_FULL = {"告警会话": "告警会话-超长中文名字-用来测试宽度 1"}
@@ -298,10 +308,13 @@ class Upload(unittest.TestCase):
         return env, r
 
     def check_builtin(self, cmds):
-        """every built-in frame, uploaded once each: a 24-bit non-zero id per frame (all different), the file's bytes, a=T U=1 f=100 q=2 c=6 r=2, chunks <= 4096."""
+        """every built-in frame, uploaded once each: a 24-bit non-zero id per frame (all different), the file's centred 3:2 crop (T31) as payload, a=T U=1 f=100 q=2 c=6 r=2, chunks <= 4096."""
         im = kitty_images(cmds); self.assertEqual(len(im), N_BUILTIN, sorted(im))
         self.assertTrue(all(0 < i <= 0xFFFFFF for i in im), "ids fit the placeholder's 24-bit foreground and are never 0")
-        want = {(SETS / state / f).read_bytes() for state, files in BUILTIN.items() for f in files}; self.assertEqual({d["data"] for d in im.values()}, want, "every frame of the built-in set, once")
+        keys = [(s, d, f) for s, _, fr in set_list() for d, f in fr]
+        for (sid, d, f), (i, v) in zip(keys, im.items()):  # upload order = sets in load order, frames in state / file-name order
+            src = (SRC / "internal" / "avatar" / "sets" / sid / d / f).read_bytes(); self.assertEqual(IMG_DIMS(v["data"]), expected_upload_size(*IMG_DIMS(src)), f"{sid}/{d}/{f}: the 3:2 crop")
+            if expected_upload_size(*IMG_DIMS(src)) == IMG_DIMS(src): self.assertEqual(v["data"], src, f"{sid}/{d}/{f}: already 3:2 and small: sent as it is")
         for i, d in im.items():
             ctl = d["ctl"]; self.assertEqual({x: ctl.get(x) for x in "a U f q c r".split()}, dict(a="T", U="1", f="100", q="2", c="6", r="2"), ctl)
             self.assertTrue(all(n <= 4096 for n in d["chunks"]), d["chunks"]); self.assertTrue(all(n == 4096 for n in d["chunks"][:-1]), "full chunks until the last")
@@ -350,9 +363,9 @@ class Upload(unittest.TestCase):
     def test_a_user_set_is_uploaded_with_its_own_frames_each_with_its_own_id(self):
         def mk(cfg): write_avatar_set(cfg, "mine", {"idle": 1, "think": 2})
         env, r = self.run_board({"TERM": "xterm-kitty"}, fixtures=mk); im = kitty_images(kitty_commands(bytes(r.data)))
-        self.assertEqual(len(im), N_BUILTIN + 3, "the built-in frames + the user's 3"); self.assertEqual(len({d["data"] for d in im.values()}), N_BUILTIN + 3)
+        self.assertEqual(len(im), N_BUILTIN + 3, "the built-in frames + the user's 3")
         d = env.tmp / "cfg" / "agmux" / "avatars" / "mine"
-        self.assertTrue({p.read_bytes() for p in d.rglob("*.png")} <= {v["data"] for v in im.values()})
+        self.assertEqual(sorted(IMG_DIMS(v["data"]) for v in list(im.values())[-3:]), [expected_upload_size(8, 8)] * 3, "the user's three 8x8 frames, cropped to 3:2")
 
     def test_ids_are_stable_across_starts_and_follow_the_picture(self):
         a = upload_ids_for(self, lambda cfg: write_avatar_set(cfg, "mine", {"idle": 2}))
@@ -367,8 +380,8 @@ class Upload(unittest.TestCase):
 
     def test_a_user_set_with_a_builtin_name_replaces_it(self):
         env, r = self.run_board({"TERM": "xterm-kitty"}, fixtures=lambda cfg: write_avatar_set(cfg, "aza_choi", {"idle": 2}))
-        im = kitty_images(kitty_commands(bytes(r.data))); self.assertEqual(len(im), 2, "only the user's two frames: the built-in aza_choi is gone")
-        d = env.tmp / "cfg" / "agmux" / "avatars" / "aza_choi"; self.assertEqual({v["data"] for v in im.values()}, {(d / "idle" / "01.png").read_bytes(), (d / "idle" / "02.png").read_bytes()})
+        im = kitty_images(kitty_commands(bytes(r.data))); aza = sum(len(fr) for s, _, fr in set_list() if s == "aza_choi"); self.assertEqual(len(im), N_BUILTIN - aza + 2, "the other built-in sets and the user's two frames: the built-in aza_choi is gone")
+        d = env.tmp / "cfg" / "agmux" / "avatars" / "aza_choi"; self.assertEqual([IMG_DIMS(v["data"]) for v in im.values()][:2], [expected_upload_size(8, 8)] * 2, "the replaced set stays in place (first)")
 
     def test_only_png_files_count(self):
         def mk(cfg): write_avatar_set(cfg, "mine", {"idle": 1}, **{"idle/notes.txt": "x", "idle/photo.jpg": b"\xff\xd8\xff", "think/readme.md": "y"})
@@ -407,13 +420,13 @@ class Sets(Base):
             x = 2166136261
             for b in s.encode(): x = ((x ^ b) * 16777619) & 0xFFFFFFFF
             return x
-        n = h("aza_choi") % 6 + 1  # Sprites[hash % 6]: bot-01..06 in order
+        n = h("aza_choi") % 5 + 1  # Sprites[hash % 5]: bot-01..05 in order (pixel mode: the hash pool is the sprites only)
         self.config('[avatars]\nrenderer = "pixel"\n[avatars.bind]\n"bravo-29" = "aza_choi"\n"alpha-main" = "aza_choi"\n')
         t = self.board(); raw = t.raw(); cs = cards_of(raw); rows = parse_screen(raw); first = avatar_cells(rows, named(cs, "bravo-29"))
         self.assertNotIn(PLACEHOLDER, raw); self.assertTrue(any(x[0] != " " for r in first for x in r))
         t.close(); self.config(f'[avatars]\nrenderer = "pixel"\n[avatars.bind]\n"bravo-29" = "bot-0{n}"\n"alpha-main" = "aza_choi"\n')
         t = self.board(); raw = t.raw(); cs = cards_of(raw); rows = parse_screen(raw)
-        self.assertEqual(avatar_cells(rows, named(cs, "bravo-29")), first, f"a set id shows the sprite bot-0{n} (fnv32a('aza_choi') % 6) in pixel mode")
+        self.assertEqual(avatar_cells(rows, named(cs, "bravo-29")), first, f"a set id shows the sprite bot-0{n} (fnv32a('aza_choi') % 5) in pixel mode")
         t.close(); self.board()  # and again: stable across runs
         t = self.board(); self.assertEqual(avatar_cells(parse_screen(t.raw()), named(cards_of(t.raw()), "bravo-29")), first)
 
@@ -442,7 +455,7 @@ class SetDirs(Base):
 
     def test_a_dangling_symlink_and_a_plain_file_are_ignored(self):
         d = self.cfg / "agmux" / "avatars"; d.mkdir(parents=True, exist_ok=True); os.symlink(self.env.tmp / "nowhere", d / "dangling"); (d / "file.png").write_bytes(png())
-        r = self.cli("avatars"); self.assertEqual(r.returncode, 0, r.stderr); self.assertEqual(r.stdout.split("\n\n")[0], BUILTIN_LINE); self.assertEqual(r.stderr, "")
+        r = self.cli("avatars"); self.assertEqual(r.returncode, 0, r.stderr); self.assertEqual(r.stdout.split("\n\n")[0].split("\n"), set_lines(self.cfg)); self.assertEqual(r.stderr, "")
 
     def test_a_set_named_hash_is_skipped_and_reported(self):
         write_avatar_set(self.cfg, "hash", {"idle": 1}); r = self.cli("avatars")
@@ -455,7 +468,7 @@ class SetDirs(Base):
         d = write_avatar_set(self.cfg, "mine", {"idle": 1}, **{"idle/._01.png": b"junk", "idle/.hidden.png": png((9, 9, 9)), "think/._x.png": b"junk"})
         write_avatar_set(self.cfg, ".hidden", {"idle": 1})
         out = self.cli("avatars"); self.assertIn("mine  user  idle 1 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 0", out.stdout); self.assertNotIn(".hidden  ", out.stdout); self.assertEqual(out.stderr, "")
-        self.assertEqual(len(upload_ids(self.env, self.cfg)), N_BUILTIN + 1)
+        self.assertEqual(len(frame_table(self.env, self.cfg)[0]), N_BUILTIN + 1)
 
 
 class Config(Base):

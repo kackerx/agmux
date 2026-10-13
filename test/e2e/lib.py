@@ -691,19 +691,112 @@ class PtyRun:
 
 
 def upload_ids(env, cfg, extra=None):
-    """Start agmux on a bare pty as a kitty terminal would see it, let it upload, quit: {png bytes: image id}. Independent of how ids are numbered, so a test can
-    say 'this card shows the frame of such-and-such file' (needs the fixture sessions in env: it waits for the first card)."""
+    """Start agmux on a bare pty as a kitty terminal would see it, let it upload, quit: {source file bytes: image id}. Looks frames up by what is on disk (since T31 the
+    uploaded bytes are a crop of the file: see frame_table), so a test can say 'this card shows the frame of such-and-such file'. Needs the fixture sessions in env."""
+    table, _ = frame_table(env, cfg, extra)
+    roots = {s: (src, d) for s, src, d in [(n, "builtin", None) for n in ()]}
+    out = {}
+    for (sid, dirname, fname), i in table.items():
+        user = pathlib.Path(cfg) / "agmux" / "avatars" / sid / dirname / fname
+        p = user if user.exists() else SRC / "internal" / "avatar" / "sets" / sid / dirname / fname
+        out[p.read_bytes()] = i
+    return out
+
+
+# ---------------------------------------------------------------- T31 / T33: which uploaded image is which frame
+import re as _re
+_TAKE = _re.compile(r"_v\d+\.png$")  # alternate takes (idle_v2.png): not frames. idle_2.png is one.
+OLD_DIRS = {"think": "working", "hi": "attention", "success": "done"}
+
+
+def scan_set(d):
+    """Frames agmux finds in one set directory: [(dir, file)] in upload order (states idle, think, read, write, tool, hi, success; a state's old-name directory only when
+    the new one has no frame), or None when the set has no idle frame (skipped)."""
+    d = pathlib.Path(d); out = []
+    for st in AVATAR_STATES:
+        for dirname in [st] + ([OLD_DIRS[st]] if st in OLD_DIRS else []):
+            p = d / dirname
+            files = sorted(f.name for f in p.iterdir() if f.is_file() and f.name.endswith(".png") and not f.name.startswith(".") and not _TAKE.search(f.name)) if p.is_dir() else []
+            if files:
+                out += [(dirname, f) for f in files]; break
+    return out if any(x[0] == "idle" for x in out) else None
+
+
+def set_list(cfg=None, src=None):
+    """[(set id, source, [(dir, file)])] in load order: the built-in sets (SRC tree, sorted), then the user's in `cfg`/agmux/avatars (name order); a user set replaces a built-in
+    one of the same name in place; names starting with . or named hash are not sets; sets without idle frames are skipped."""
+    out = []
+    for root, source in ((pathlib.Path(src or SRC) / "internal" / "avatar" / "sets", "builtin"), (pathlib.Path(cfg or "/nonexistent") / "agmux" / "avatars", "user")):
+        if not root.is_dir(): continue
+        for d in sorted(root.iterdir()):
+            if d.name.startswith(".") or d.name == "hash" or not d.is_dir(): continue
+            fr = scan_set(d)
+            if fr is None: continue
+            i = next((k for k, s in enumerate(out) if s[0] == d.name), None)
+            if i is None: out.append((d.name, source, fr))
+            else: out[i] = (d.name, source, fr)
+    return out
+
+
+def frame_table(env, cfg, extra=None):
+    """{(set id, directory, file name): image id}: what agmux uploaded, matched to files by upload order (sets in load order, frames in state / file-name order). Asserts the number
+    of uploaded images equals the number of frames found on disk (so a skipped bad PNG makes it fail loudly: handle those sets in the test)."""
     e = {"XDG_CONFIG_HOME": str(cfg), "TERM": "xterm-kitty", **(extra or {})}
     r = PtyRun(env, extra=e)
     try:
         assert wait(lambda: b" sessions" in bytes(r.data), 8), bytes(r.data)[-300:]
-        r.send("q"); r.exited(5)
-        return {v["data"]: i for i, v in kitty_images(kitty_commands(bytes(r.data))).items()}
+        r.send("q"); r.exited(5); imgs = kitty_images(kitty_commands(bytes(r.data)))
     finally:
         r.close()
+    keys = [(s, d, f) for s, _, fr in set_list(cfg) for d, f in fr]
+    assert len(keys) == len(imgs), f"{len(imgs)} images uploaded, {len(keys)} frames on disk"
+    return dict(zip(keys, imgs)), imgs  # imgs: {id: dict(ctl, data, chunks)} in upload order
+
+
+def decode_png(data):
+    """(width, height, rows) of an 8-bit RGB / RGBA PNG; rows = list of bytes (channels interleaved). Enough for agmux's own re-encoded crops (Go writes NRGBA / RGBA)."""
+    import struct, zlib
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    i, idat, w = 8, b"", None
+    while i < len(data):
+        n = struct.unpack(">I", data[i:i + 4])[0]; typ = data[i + 4:i + 8]; body = data[i + 8:i + 8 + n]
+        if typ == b"IHDR": w, h, depth, ctype, _, _, inter = struct.unpack(">IIBBBBB", body); assert depth == 8 and ctype in (2, 6) and inter == 0, (depth, ctype, inter)
+        elif typ == b"IDAT": idat += body
+        i += 12 + n
+    ch = 3 if ctype == 2 else 4; raw = zlib.decompress(idat); stride = w * ch; rows, prev = [], bytearray(stride)
+    for y in range(h):
+        f = raw[y * (stride + 1)]; line = bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for x in range(stride):
+            a = line[x - ch] if x >= ch else 0; b = prev[x]; c = prev[x - ch] if x >= ch else 0
+            if f == 1: line[x] = (line[x] + a) & 255
+            elif f == 2: line[x] = (line[x] + b) & 255
+            elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
+            elif f == 4:
+                p = a + b - c; pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(bytes(line)); prev = line
+    return w, h, rows, ch
+
+
+def expected_upload_size(w, h):
+    """T31: the size of the uploaded frame for a w x h file: its centred 3:2 part (sizes round down), shrunk to at most 128 high; (w, h) itself when that changes nothing."""
+    if w * 2 > h * 3: cw, ch = max(h * 3 // 2, 1), h
+    else: cw, ch = w, max(w * 2 // 3, 1)
+    if ch > 128: return max(cw * 128 // ch, 1), 128
+    return cw, ch
 
 
 # ---------------------------------------------------------------- T30-T32 fixtures
+def png_pixels(w, h, fn):
+    """An 8-bit RGB PNG whose pixel (x, y) is fn(x, y) = (r, g, b): lets a test tell which part of the picture ended up in a crop."""
+    import struct, zlib
+    def chunk(t, d):
+        c = struct.pack(">I", len(d)) + t + d
+        return c + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    raw = b"".join(b"\x00" + b"".join(bytes(fn(x, y)) for x in range(w)) for y in range(h))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw, 1)) + chunk(b"IEND", b"")
+
+
 BAD_PNG = b"\x89PNG\r\n\x1a\nnot really"  # a .png whose header cannot be read: its size is unknown
 AVATAR_STATES = ("idle", "think", "read", "write", "tool", "hi", "success")  # pi-emote's state directories (T30); old names working / attention / done are aliases
 
@@ -763,3 +856,13 @@ def frames_for(frames, state):
     while not frames.get(state) and state != "idle":
         state = FALLBACK[state]
     return frames[state], state
+
+
+def set_lines(cfg=None):
+    """The `agmux avatars` lines expected for the image sets (built-in ones, then the user's in cfg), computed from the files: `id  source  idle 2 · think 2 · ...` (an old directory name counts under its new one)."""
+    inv = {v: k for k, v in OLD_DIRS.items()}; out = []
+    for sid, source, fr in set_list(cfg):
+        n = {}
+        for d, f in fr: n[inv.get(d, d)] = n.get(inv.get(d, d), 0) + 1
+        out.append(f"{sid}  {source}  " + " · ".join(f"{s} {n.get(s, 0)}" for s in AVATAR_STATES))
+    return out

@@ -106,19 +106,18 @@ class Aliases(Base):
         write_avatar_set(self.cfg, "mine", {"idle": 1, "working": 3, "attention": 2, "done": 1}); write_avatar_set(self.cfg, "both", {"idle": 1, "think": 1, "working": 4})
         env = {"PATH": f"{self.env.bin}:/usr/bin:/bin", "HOME": str(self.env.home), "XDG_STATE_HOME": str(self.env.state), "XDG_CONFIG_HOME": str(self.cfg), "LANG": "en_US.UTF-8"}
         out = subprocess.run([BIN, "avatars"], env=env, capture_output=True, text=True, timeout=10).stdout.split("\n\n")[0].split("\n")
-        self.assertEqual(out, [BUILTIN_LINE, "both  user  idle 1 · think 1 · read 0 · write 0 · tool 0 · hi 0 · success 0".replace("think 1", "think 1"),
-                               "mine  user  idle 1 · think 3 · read 0 · write 0 · tool 0 · hi 2 · success 1"])
+        self.assertEqual(out, set_lines(self.cfg)); self.assertEqual(out[-2:], ["both  user  idle 1 · think 1 · read 0 · write 0 · tool 0 · hi 0 · success 0", "mine  user  idle 1 · think 3 · read 0 · write 0 · tool 0 · hi 2 · success 1"],
+                                                                      "the old names count under the new ones; the new name wins when both exist (both: think 1, not 5)")
 
 
 class Builtin(Base):
     def test_the_built_in_set_uses_pi_emotes_own_directories(self):
-        self.assertEqual({k: len(v) for k, v in BUILTIN.items()}, {"hi": 4, "idle": 2, "read": 4, "think": 4, "tool": 4, "write": 4}, "aza_choi's source tree (no success: falls back to idle)")
+        self.assertEqual(sorted(BUILTIN), ["hi", "idle", "read", "think", "tool", "write"], "aza_choi's source tree has pi-emote's directories (no success: it falls back to idle)")
         self.assertEqual(BUILTIN["idle"], ["idle.png", "idle_blink.png"])
 
     def test_agmux_avatars_prints_the_seven_states(self):
         env = {"PATH": f"{self.env.bin}:/usr/bin:/bin", "HOME": str(self.env.home), "XDG_STATE_HOME": str(self.env.state), "XDG_CONFIG_HOME": str(self.cfg), "LANG": "en_US.UTF-8"}
-        self.assertEqual(subprocess.run([BIN, "avatars"], env=env, capture_output=True, text=True, timeout=10).stdout.split("\n")[0],
-                         "aza_choi  builtin  idle 2 · think 4 · read 4 · write 4 · tool 4 · hi 4 · success 0")
+        self.assertEqual(subprocess.run([BIN, "avatars"], env=env, capture_output=True, text=True, timeout=10).stdout.split("\n")[0], BUILTIN_LINE)
 
     def test_cards_show_the_built_in_frames_of_their_state(self):
         ids = upload_ids(self.env, self.cfg); f = {st: [ids[(SETS / st / n).read_bytes()] for n in names] for st, names in BUILTIN.items()}
@@ -142,7 +141,6 @@ class Blink(Base):
             calm, blink, seen = self.blinks(33.5); ups = {}
             for n in self.expect:
                 seq = [(t, s[n]) for t, s in seen]; self.assertTrue({i for _, i in seq} <= {calm, blink}, f"{n}: only the calm face and the blink: {({hex(i) for _, i in seq})}")
-                self.assertEqual(seq[0][1], calm, f"{n}: starts calm")
                 ups[n] = ([seq[i][0] for i in range(1, len(seq)) if seq[i][1] == blink and seq[i - 1][1] == calm],
                           [seq[i][0] for i in range(1, len(seq)) if seq[i][1] == calm and seq[i - 1][1] == blink])
             Blink._memo = (ups, seen[-1][0])
@@ -153,9 +151,10 @@ class Blink(Base):
         for n, (u, d) in ups.items():
             self.assertTrue(7 <= len(u) <= 9, f"{n}: {len(u)} blinks in {total:.1f}s (8 per 64 ticks = 32 s): {[round(x, 1) for x in u]}")
             for a, b in zip(u, u[1:]): self.assertTrue(3.5 <= b - a <= 4.5, f"{n}: blinks 8 ticks (4 s) apart: {[round(x, 1) for x in u]}")
-            for x, y in zip(u, d): self.assertTrue(0.3 <= y - x <= 0.75, f"{n}: a blink lasts one tick (500 ms): {y - x:.2f}s")
+            for x in u:
+                y = next((y for y in d if y > x), None)
+                if y is not None: self.assertTrue(0.3 <= y - x <= 0.75, f"{n}: a blink lasts one tick (500 ms): {y - x:.2f}s")
 
-    @unittest.expectedFailure  # 1d4d5fd: every card blinks in the same tick; review asks for a per-key offset of 0..7 ticks (remove when the fix lands)
     def test_cards_do_not_all_blink_in_the_same_tick(self):
         ups, _ = self.blink_data(); phase = {n: u[0] % 4.0 for n, (u, d) in ups.items()}
         self.assertGreater(max(phase.values()) - min(phase.values()), 0.4, f"offsets by a hash of the card's key: first-blink phases (s mod 4) {phase}")

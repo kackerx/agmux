@@ -39,9 +39,9 @@ class AvatarsCmd(unittest.TestCase):
         r = run_avatars(self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
         blocks = parse_blocks(r.stdout)
-        self.assertEqual(len(blocks), 7, f"want the image-set block + 6 sprite blocks separated by blank lines:\n{r.stdout}")
-        self.assertRegex(blocks[0][0], r"aza_choi  builtin  idle 2 · think 4 · read 4 · write 4 · tool 4 · hi 4 · success 0", "T29: the sets come first, one line each")
-        self.assertEqual(len(blocks[0]), 1); blocks = blocks[1:]
+        self.assertEqual(len(blocks), 6, f"want the image-set block + 5 sprite blocks separated by blank lines:\n{r.stdout}")
+        self.assertTrue(all(re.fullmatch(r"\S+  (builtin|user)  idle \d+ · think \d+ · read \d+ · write \d+ · tool \d+ · hi \d+ · success \d+", ln) for ln in blocks[0]), "T29: the sets come first, one line each")
+        self.assertTrue(blocks[0][0].startswith("aza_choi  builtin  "), blocks[0]); blocks = blocks[1:]
         ids, names = [], []
         for b in blocks:
             self.assertEqual(len(b), 3, f"block must be '<id>  <name>' + 2 render lines: {b}")
@@ -51,14 +51,14 @@ class AvatarsCmd(unittest.TestCase):
             for line in b[1:]:
                 self.assertEqual(disp_width(line), 6, f"{m.group(1)}: render line {line!r} must be 6 cells wide")
                 self.assertTrue(set(line) <= set(" ▀▄█"), f"{m.group(1)}: unexpected glyphs in {line!r}")
-        self.assertEqual(len(set(ids)), 6, ids); self.assertEqual(len(set(names)), 6, names)
+        self.assertEqual(len(set(ids)), 5, ids); self.assertEqual(len(set(names)), 5, names)
 
     def test_truecolor_in_tty(self):
         piped = [tuple(b[1:]) for b in sprite_blocks(run_avatars(self.env).stdout)]
         r = subprocess.run(f"{self.env.prefix} {shlex.quote(BIN)} avatars", shell=True, capture_output=True, text=True)
         self.assertNotIn("\x1b", r.stdout, "piped output must carry no ANSI")
         t = Term(self.env, args="avatars; sleep 8", w=80, h=40); self.addCleanup(t.close)
-        raw = wait(lambda: (lambda x: x if len(re.findall(r"bot-0\d  ", strip_ansi(x))) >= 6 and strip_ansi(x).rstrip().count("\n") >= 17 else None)(t.raw()), 5)
+        raw = wait(lambda: (lambda x: x if len(re.findall(r"bot-0\d  ", strip_ansi(x))) >= 5 and strip_ansi(x).rstrip().count("\n") >= 17 else None)(t.raw()), 5)
         time.sleep(0.2); raw = t.raw()  # all six blocks (header + 2 rows + blank) are on screen
         self.assertTrue(raw, t.text())
         self.assertRegex(raw, r"\x1b\[[0-9;]*38;2;\d+;\d+;\d+", "capture-pane -e must show truecolor fg escapes")
@@ -69,9 +69,9 @@ class AvatarsCmd(unittest.TestCase):
                 blk = snap[i + 1:i + 3]
                 sigs.append(tuple((c[0], c[1], c[2]) for r_ in blk for c in (r_.cells[:6] + [(" ", None, None, False)] * 6)[:6]))
                 plain.append(tuple("".join(c[0] for c in r_.cells[:6]).ljust(6) for r_ in blk))
-        self.assertEqual(len(sigs), 6)
+        self.assertEqual(len(sigs), 5)
         self.assertEqual(plain, piped, "tty render == piped render once ANSI is stripped")
-        self.assertEqual(len(set(sigs)), 6, "six sprites must differ once colour is counted")
+        self.assertEqual(len(set(sigs)), 5, "five sprites must differ once colour is counted")
         colours = {c[1] for r_ in snap for c in r_.cells if isin(c[0], "▀▄") and c[1]}
         self.assertTrue(any(c[0] == "rgb" for c in colours))
 
