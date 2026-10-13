@@ -122,12 +122,12 @@
 
 ## 第五批（用户 2026-10-13 下午验收意见：状态动作、头像等宽、选择框改格子 + 20 个默认头像）
 
-### T30 头像状态对齐 pi-emote（dev @1d4d5fd；审查退回 1 必改 + 2 建议，补丁 @2459066 送复审）
+### T30 头像状态对齐 pi-emote（dev @1d4d5fd；审查退回 1 必改 + 2 建议，补丁 @2459066 复审通过）
 - dev 定稿（照准）：其它 status（background）= idle；hi 优先于 working；别名帧 id 按实际目录名哈希；眨眼 tick>0 且 tick%8==0、多帧按 8/16/24 轮；aza_choi 无 success 回落 idle。
 - 设计 design.md「头像图片：状态、宽度、选择框」第 1–3 条。store 里按 pendingTool 算出头像状态（和 getEffectiveStatus 一样放 store 做一次，view 只读）；avatar 包的帧选择按新状态名 + 回落链 + 别名；idle 眨眼规则；内置 aza_choi 改用原目录。
 - 验收：单测 状态映射表（每种 pendingTool / 无 tool / attention / waiting / done / idle）；回落链；别名目录；idle 第 2 帧只在第 8k 个 tick 出现一个 tick；黑盒 pendingTool=Read 的卡出 read 帧、Write → write、Bash → tool、无 tool → think；旧目录名 working 仍被认。
 
-### T31 头像填满 6 格（dev @24cf734 审查通过；3 建议补丁 @38cc815 送复审；等测试）
+### T31 头像填满 6 格（dev @24cf734 审查通过；3 建议补丁 @38cc815 复审退回 1 条只加测试（缩放取样探针并入），补丁中；等测试）
 - 设计第 4 条（已改）：kitty 忽略占位符放置的源矩形，改为载入时 png.Decode 裁居中 3:2 再编码上传；坏 PNG 跳过并报。
 - 验收：单测 128×128 → 128×85、200×100 → 中间 150×100、3:2 原样；坏 PNG 跳过且 Problems 一行；黑盒 上传载荷解码后是 3:2（内置帧 64×42），不带 x/y/w/h。
 
