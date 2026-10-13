@@ -380,7 +380,12 @@ func line3(s store.Session, w int) string {
 			detail = ansi.Truncate(full, room, "…")
 		}
 	}
-	return spread(left+fg(cMuted, detail+c), model, w)
+	// the detail is the muted tool name, or "agents" (no pending tool) in the working color with the counts
+	dc := cMuted
+	if s.PendingTool == "" {
+		dc = cWorking
+	}
+	return spread(left+fg(dc, detail)+fg(cWorking, c), model, w)
 }
 
 // contextBar draws claude-hud's ■ bar, no number; pct<0 = unknown (all dark).

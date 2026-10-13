@@ -103,6 +103,34 @@ func TestScrollKeepsFocusVisible(t *testing.T) {
 	}
 }
 
+// What runs in the background is not muted: "agents" and the ⚇ / ⚙ counts are in the working color,
+// like the status word; a tool name after it stays muted.
+func TestBackgroundWorkIsWorkingColor(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	base := store.Session{ID: "a", Name: "n", Status: "working", ContextPct: -1, Subagents: make([]ccmux.Subagent, 2), Shells: 3}
+	agents := base
+	agents.AgentsWorking = true
+	tool := base
+	tool.PendingTool = "Bash"
+	for _, c := range []struct {
+		name string
+		s    store.Session
+		want []string
+	}{
+		{"agents", agents, []string{fg(cWorking, " · agents"), fg(cWorking, "  ⚇ 2 ⚙ 3")}},
+		{"a tool", tool, []string{fg(cMuted, " · Bash"), fg(cWorking, "  ⚇ 2 ⚙ 3")}},
+	} {
+		out := line3(c.s, 60)
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s: %q is missing %q", c.name, out, w)
+			}
+		}
+	}
+}
+
 func TestCardStatus(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	base := store.Session{ID: "a", Name: "n", AgentType: "claude", AvatarID: "bot-01", ContextPct: -1}

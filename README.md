@@ -104,7 +104,7 @@ max_columns = 4                     # 终端够宽时最多几列卡片（1–8�
 
 [avatars]
 renderer = "auto"                   # auto：kitty / ghostty 里用图片，其它终端用像素；image：强制图片；pixel：强制像素
-default = "hash"                    # 没绑定的会话：hash = 按名字固定挑一个；或写某个头像 id（图片集 id 或像素头像 id，agmux avatars 看全部）
+default = "hash"                    # 没绑定的会话：hash = 按名字固定挑一个（图片模式只在图片集里挑，像素模式只在像素头像里挑）；或写某个头像 id（图片集 id 或像素头像 id，agmux avatars 看全部）
 [avatars.bind]
 "sqlmux-orchestrator" = "bot-03"    # 键是会话名；值同样可以是图片集 id
 ```

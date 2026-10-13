@@ -696,21 +696,16 @@ func TestForSets(t *testing.T) {
 	if got := For(nil, map[string]string{"s": "nope"}, "kit", "s"); got != "kit" {
 		t.Errorf("unknown id falls through: %s", got)
 	}
-	// as pictures the hash picks among the sets and the sprites no set shadows, each once
+	// as pictures the hash picks among the sets only: the pixel sprites are for `a` to pick
 	HashImages = true
-	ch := Choices()
-	count := map[string]int{}
-	for _, id := range ch {
-		count[id]++
-	}
-	if len(ch) != len(Sprites)+1 || count["bot-01"] != 1 || count["kit"] != 1 { // bot-01 is a set now: 5 sprites + 2 sets
+	if ch := Choices(); !slices.Equal(ch, []string{"bot-01", "kit"}) {
 		t.Errorf("Choices: %v", ch)
 	}
 	picked := map[string]bool{}
 	for i := range 400 {
 		picked[For(nil, nil, "hash", fmt.Sprintf("session-%d", i))] = true
 	}
-	if !picked["kit"] || !picked["bot-01"] || len(picked) != len(Sprites)+1 { // bot-01 is the set now: 5 sprites + 2 sets
+	if !picked["kit"] || !picked["bot-01"] || len(picked) != 2 {
 		t.Errorf("hash picked %v", picked)
 	}
 	// as pixels a set is one fixed sprite, which would turn up twice as often: the pool is the sprites only
