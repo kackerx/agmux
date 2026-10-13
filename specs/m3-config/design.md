@@ -105,3 +105,4 @@
 - 上游状态目录 talk / failure / compact / bash / search / heard / error / sleep / wait / interrupted 不加载也不上传（已有规则：只认七个状态 + 三个别名）。
 - 内置帧照旧预缩到 64×64 后 embed；CREDITS.md 改记 pi-agent-portrait（MIT，作者 testy-cool；aza_choi 原出 pi-emote）；README 署名同步。
 - 选择框格宽改 10（8 字符 id 在 9 格里和邻格贴着），整框 52 × 14。内置 10 图集 + 5 像素 = 15 格，第 4 排只有 5 个像素头像（第 3 排空着无妨）。要凑 20 得再生成 5 个：pi-agent-portrait 的 draw-portrait 走 codex CLI（用户的 ChatGPT 登录，每个约 90 s，需 Pillow + NumPy），要用户点头后再做。
+- 删 bot-06 的后果（reviewer）：像素模式 hash 池 6 → 5，没绑定的会话默认头像再次洗牌（T28「和以前逐位一致」就此作废；尚未发布，无人受影响）；config.toml 里写 bot-06 报错退出，文案注明 "bot-06 was removed; pick another"，avatars.json 里的 bot-06 静默落 hash。只有 idle 一帧的静态集照样进 hash 池（T33 后内置全是动态集，静态只会是用户自己放的）。
