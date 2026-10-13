@@ -326,3 +326,31 @@ func TestBorderColor(t *testing.T) {
 		}
 	}
 }
+
+func TestFlow(t *testing.T) {
+	if Default().Flow != "bands" {
+		t.Errorf("default %q", Default().Flow)
+	}
+	for _, f := range []string{"bands", "stack"} {
+		c, err := Parse("cfg", []byte(fmt.Sprintf("[layout]\nflow = %q\n", f)))
+		if err != nil || c.Flow != f {
+			t.Errorf("%s: %v %q", f, err, c.Flow)
+		}
+		if back, err := Parse("cfg", []byte(c.String())); err != nil || back.Flow != f || !strings.Contains(c.String(), fmt.Sprintf("flow = %q\n", f)) {
+			t.Errorf("printed back: %v\n%s", err, c.String())
+		}
+	}
+	if c, _ := Parse("cfg", []byte("[layout]\nmax_columns = 3\n")); c.Flow != "bands" {
+		t.Error("a section without the key keeps the default")
+	}
+	for toml, want := range map[string]string{
+		"[layout]\nflow = \"waterfall\"\n": `cfg: layout.flow: "waterfall" is not a flow (use "bands" or "stack")`,
+		"[layout]\nflow = \"\"\n":          `layout.flow: "" is not a flow`,
+		"[layout]\nflow = 3\n":             "cfg: toml:",
+	} {
+		_, err := Parse("cfg", []byte(toml))
+		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "\n") {
+			t.Errorf("%q: %v, want one line with %q", toml, err, want)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package board
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
+	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -436,5 +438,108 @@ func TestFoldedTitleFocusColor(t *testing.T) {
 	focused, plain := header(g, 40, true, true, nil), header(g, 40, true, false, nil)
 	if !strings.HasPrefix(focused, "\x1b[38;2;255;142;190m▸") || strings.HasPrefix(plain, "\x1b[38;2;255;142;190m") {
 		t.Errorf("a focused folded title is #ff8ebe, an unfocused one is not: %q / %q", focused, plain)
+	}
+}
+
+// groupsOf: groups /g0.. with the given number of cards each.
+func groupsOf(counts ...int) []group {
+	var ss []store.Session
+	for g, n := range counts {
+		for i := range n {
+			id := fmt.Sprintf("g%d-%d", g, i)
+			ss = append(ss, store.Session{ID: id, Name: id, CWD: fmt.Sprintf("/g%d", g), GroupKey: fmt.Sprintf("/g%d", g), Status: "idle", ContextPct: -1})
+		}
+	}
+	return groups(ss)
+}
+
+func rectsOf(rects []rect) map[string]rect {
+	at := map[string]rect{}
+	for _, r := range rects {
+		at[r.id] = r
+	}
+	return at
+}
+
+// flow = "bands": every n groups are a row, as tall as its tallest group, with a blank line between
+// rows. (200 columns: 4 columns.)
+func TestLayoutBands(t *testing.T) {
+	_, rects := layout(groupsOf(1, 3, 1, 2, 1), 200, "", 0, now, nil, nil)
+	at := rectsOf(rects)
+	// row 0: groups 0-3 side by side from line 0; the tallest (3 cards) is 1 + 15 lines; row 1 after a blank line
+	if at["g0-0"].y != 1 || at["g1-0"].y != 1 || at["g3-1"].y != 6 || at["g0-0"].x != 0 || at["g1-0"].x != at["g0-0"].w+colGap {
+		t.Errorf("row 0: %+v %+v %+v", at["g0-0"], at["g1-0"], at["g3-1"])
+	}
+	if want := 1 + 15 + 1 + 1; at["g4-0"].y != want || at["g4-0"].x != 0 || at["g4-0"].band != 1 || at["g0-0"].band != 0 {
+		t.Errorf("row 1: g4-0 %+v, want y %d in band 1", at["g4-0"], want)
+	}
+}
+
+// flow = "stack": the k-th group goes to column k mod n and each column stacks its groups on its own:
+// no blank lines, no alignment between rows.
+func TestLayoutStack(t *testing.T) {
+	stackFlow = true
+	t.Cleanup(func() { stackFlow = false })
+	lines, rects := layout(groupsOf(1, 3, 1, 2, 1, 1, 2), 200, "", 0, now, nil, nil)
+	at := rectsOf(rects)
+	w := at["g0-0"].w
+	col := func(id string) int { return at[id].x / (w + colGap) }
+	if col("g0-0") != 0 || col("g1-0") != 1 || col("g2-0") != 2 || col("g3-0") != 3 || col("g4-0") != 0 || col("g5-0") != 1 || col("g6-0") != 2 {
+		t.Errorf("columns: %+v", rects)
+	}
+	// group 4 follows group 0 at once (a title line + one card), however tall the others are
+	if at["g4-0"].y != 1+cardH+1 || at["g5-0"].y != 1+3*cardH+1 || at["g6-0"].y != 1+cardH+1 || at["g0-0"].band != at["g6-0"].band {
+		t.Errorf("stacking: g4 %+v g5 %+v g6 %+v", at["g4-0"], at["g5-0"], at["g6-0"])
+	}
+	// the tallest column decides the height: g1, g5 = 2 titles + 4 cards
+	if want := 2 + 4*cardH; len(lines) != want {
+		t.Errorf("%d lines, want %d", len(lines), want)
+	}
+	// fewer groups than columns: only as many columns as groups
+	if lines, _ := layout(groupsOf(1, 1), 200, "", 0, now, nil, nil); ansi.StringWidth(lines[0]) > 2*at["g0-0"].w+colGap {
+		t.Errorf("two groups use %d columns", ansi.StringWidth(lines[0]))
+	}
+}
+
+// A group's title: the path, the count, then a heavy line to the column's right edge in the muted
+// color (folded or not); a title that fills the column has no room for one.
+func TestGroupHeaderRule(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	g := group{key: "/some/path", sessions: make([]store.Session, 3)}
+	for _, folded := range []bool{false, true} {
+		h := header(g, 40, folded, false, nil)
+		plain := ansi.Strip(h)
+		if ansi.StringWidth(h) != 40 || !strings.HasPrefix(plain, map[bool]string{false: "▾ ", true: "▸ "}[folded]+"/some/path (3) ━") || !strings.HasSuffix(plain, "━") ||
+			!strings.Contains(h, fg(cMuted, strings.Repeat("━", 40-ansi.StringWidth("▾ /some/path (3) ")))) {
+			t.Errorf("folded=%v: %q (%d wide)", folded, plain, ansi.StringWidth(h))
+		}
+	}
+	if h := header(g, 18, false, false, nil); ansi.StringWidth(h) != 18 || !strings.HasSuffix(ansi.Strip(h), " ━") { // room for the space and one stroke
+		t.Errorf("one stroke: %q", ansi.Strip(h))
+	}
+	long := group{key: "/a/very/long/path/that/fills/the/whole/column/and/more", sessions: make([]store.Session, 3)}
+	if h := header(long, 30, false, false, nil); ansi.StringWidth(h) != 30 || strings.Contains(h, "━") {
+		t.Errorf("full title: %q (%d wide)", ansi.Strip(h), ansi.StringWidth(h))
+	}
+	// in the layout every title line is a column wide
+	lines, _ := layout(groupsOf(1, 1), 120, "", 0, now, map[string]bool{"/g1": true}, nil)
+	_, colW := columns(120)
+	if ansi.StringWidth(lines[0]) != colW+colGap+colW {
+		t.Errorf("title line is %d wide: %q", ansi.StringWidth(lines[0]), ansi.Strip(lines[0]))
+	}
+}
+
+// [layout] flow reaches the layout through useConfig.
+func TestUseConfigFlow(t *testing.T) {
+	t.Cleanup(func() { useConfig(config.Default()) })
+	c := config.Default()
+	if useConfig(c); stackFlow {
+		t.Error("the default flow is bands")
+	}
+	c.Flow = "stack"
+	if useConfig(c); !stackFlow {
+		t.Error("flow = stack not used")
 	}
 }

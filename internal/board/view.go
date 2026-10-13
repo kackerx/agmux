@@ -30,6 +30,10 @@ const (
 // useConfig sets it from [layout] max_columns.
 var maxCols = 4
 
+// stackFlow: [layout] flow = "stack": the k-th group goes to column k mod n and every column stacks
+// its groups on its own; else "bands": each n groups are a row, as tall as its tallest group.
+var stackFlow bool
+
 // Colors; defaults match claude-hud's segments (ANSI slots) and ccmux's palette, and
 // useConfig replaces them with config.toml's [colors].
 var (
@@ -65,7 +69,7 @@ func useConfig(c *config.Config) {
 		*v = lipgloss.Color(c.Colors[name])
 	}
 	avatar.AlertColor = cRed
-	maxCols = c.MaxColumns
+	maxCols, stackFlow = c.MaxColumns, c.Flow == "stack"
 	footerKeys = footerFor(c)
 }
 
@@ -122,28 +126,24 @@ func layout(gs []group, width int, focus string, frame int, now time.Time, folde
 	n, colW := columns(width)
 	var lines []string
 	var rects []rect
-	for start := 0; start < len(gs); start += n {
-		row := gs[start:min(start+n, len(gs))]
-		if start > 0 {
-			lines = append(lines, "")
+	// place adds group g to the column col (the cells so far), whose first line is body line top
+	place := func(col []string, g group, x, top, band int) []string {
+		if folded[g.key] {
+			rects = append(rects, rect{headerID(g.key), x, top + len(col), colW, 1, band})
+			return append(col, header(g, colW, true, focus == headerID(g.key), dirHits(g, hits)))
 		}
-		top := len(lines)
-		cols := make([][]string, len(row))
+		col = append(col, header(g, colW, false, false, dirHits(g, hits)))
+		for _, s := range g.sessions {
+			rects = append(rects, rect{s.ID, x, top + len(col), colW, cardH, band})
+			col = append(col, strings.Split(card(s, colW, cardH, s.ID == focus, frame, now, hits[s.ID]), "\n")...)
+		}
+		return col
+	}
+	// emit joins the columns side by side into body lines
+	emit := func(cols [][]string) {
 		height := 0
-		for i, g := range row {
-			x := i * (colW + colGap)
-			if folded[g.key] {
-				rects = append(rects, rect{headerID(g.key), x, top, colW, 1, start / n})
-				cols[i] = append(cols[i], header(g, colW, true, focus == headerID(g.key), dirHits(g, hits)))
-				height = max(height, 1)
-				continue
-			}
-			cols[i] = append(cols[i], header(g, colW, false, false, dirHits(g, hits)))
-			for _, s := range g.sessions {
-				rects = append(rects, rect{s.ID, x, top + len(cols[i]), colW, cardH, start / n})
-				cols[i] = append(cols[i], strings.Split(card(s, colW, cardH, s.ID == focus, frame, now, hits[s.ID]), "\n")...)
-			}
-			height = max(height, len(cols[i]))
+		for _, c := range cols {
+			height = max(height, len(c))
 		}
 		for y := range height {
 			var b strings.Builder
@@ -159,6 +159,26 @@ func layout(gs []group, width int, focus string, frame int, now time.Time, folde
 			}
 			lines = append(lines, b.String())
 		}
+	}
+	if stackFlow {
+		cols := make([][]string, min(n, len(gs)))
+		for k, g := range gs {
+			c := k % n
+			cols[c] = place(cols[c], g, c*(colW+colGap), 0, 0) // one band: h / l go to the neighbouring column
+		}
+		emit(cols)
+		return lines, rects
+	}
+	for start := 0; start < len(gs); start += n {
+		row := gs[start:min(start+n, len(gs))]
+		if start > 0 {
+			lines = append(lines, "")
+		}
+		cols := make([][]string, len(row))
+		for i, g := range row {
+			cols[i] = place(nil, g, i*(colW+colGap), len(lines), start/n)
+		}
+		emit(cols)
 	}
 	return lines, rects
 }
@@ -215,7 +235,11 @@ func header(g group, w int, folded, focused bool, hl []int) string {
 	if focused {
 		c = cFocus
 	}
-	return fg(c, mark) + midTrunc(hilite(tildePath(g.key), hl, c), w-2-len(count)) + fg(cMuted, count)
+	title := fg(c, mark) + midTrunc(hilite(tildePath(g.key), hl, c), w-2-len(count)) + fg(cMuted, count)
+	if rule := w - ansi.StringWidth(title) - 1; rule > 0 { // a heavy line to the column's right edge
+		title += " " + fg(cMuted, strings.Repeat("━", rule))
+	}
+	return title
 }
 
 func tildePath(p string) string {

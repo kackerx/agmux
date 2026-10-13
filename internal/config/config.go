@@ -54,7 +54,8 @@ type Config struct {
 	Keys   map[string][]string // action → key names (bubbletea's, "space" for the space bar)
 	Colors map[string]string   // name → "#rrggbb" or an ANSI index "0".."255"
 
-	MaxColumns int // [layout] max_columns: the most columns of cards, if the terminal is wide enough
+	MaxColumns int    // [layout] max_columns: the most columns of cards, if the terminal is wide enough
+	Flow       string // [layout] flow: "bands" (a row of groups at a time) or "stack" (group k in column k mod n)
 
 	AvatarRenderer string            // [avatars] renderer: "auto", "image" or "pixel"
 	AvatarDefault  string            // [avatars] default: "hash" or an avatar ID (sprite or image set)
@@ -63,7 +64,7 @@ type Config struct {
 
 // Default is the configuration with no file.
 func Default() *Config {
-	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
+	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, Flow: "bands", AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
 	for k, v := range defaultKeys {
 		c.Keys[k] = slices.Clone(v) // callers may change c; the defaults stay
 	}
@@ -112,7 +113,8 @@ func Parse(path string, data []byte) (*Config, error) {
 		Keys   map[string][]string `toml:"keys"`
 		Colors map[string]string   `toml:"colors"`
 		Layout struct {
-			MaxColumns int `toml:"max_columns"`
+			MaxColumns int    `toml:"max_columns"`
+			Flow       string `toml:"flow"`
 		} `toml:"layout"`
 		Avatars struct {
 			Renderer string            `toml:"renderer"`
@@ -195,6 +197,12 @@ func Parse(path string, data []byte) (*Config, error) {
 			return nil, fmt.Errorf("%s: layout.max_columns: %d is out of range (%d to %d columns)", path, n, minMaxColumns, maxMaxColumns)
 		}
 		c.MaxColumns = raw.Layout.MaxColumns
+	}
+	if md.IsDefined("layout", "flow") {
+		if f := raw.Layout.Flow; f != "bands" && f != "stack" {
+			return nil, fmt.Errorf("%s: layout.flow: %q is not a flow (use \"bands\" or \"stack\")", path, f)
+		}
+		c.Flow = raw.Layout.Flow
 	}
 	if r := raw.Avatars.Renderer; r != "" {
 		if r != "auto" && r != "image" && r != "pixel" {
@@ -291,7 +299,7 @@ func (c *Config) String() string {
 	for _, n := range Colors {
 		fmt.Fprintf(&b, "%s = %q\n", n, c.Colors[n])
 	}
-	fmt.Fprintf(&b, "\n[layout]\nmax_columns = %d\n", c.MaxColumns)
+	fmt.Fprintf(&b, "\n[layout]\nmax_columns = %d\nflow = %q\n", c.MaxColumns, c.Flow)
 	fmt.Fprintf(&b, "\n[avatars]\nrenderer = %q\ndefault = %q\n\n[avatars.bind]\n", c.AvatarRenderer, c.AvatarDefault)
 	names := slices.Sorted(maps.Keys(c.AvatarBind))
 	for _, n := range names {
