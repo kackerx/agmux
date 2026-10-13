@@ -149,12 +149,14 @@
 
 ## 第六批（用户 2026-10-13 下午：22 张卡时底部被截、没法滚；要生成头像的 prompt）
 
-### T34 卡片区可滚动（待开工）
+### T34 卡片区可滚动（dev @6bdad7a 送审 / 送测）
+- dev 自报：搜索过滤态顶栏被过滤框替换看不到 more 提示；滚动中焦点卡被轮询删掉时焦点悄悄换到第一张、视图停在原偏移直到下次按键；单卡高于正文高的极窄终端没处理。
 - 现状：正文只跟着焦点滚（scrollOff），鼠标滚轮只滚预览，底部被截的卡没有任何提示；用户以为是 bug。
 - 做法：鼠标滚轮在卡片区（x < cardsW）每格滚 3 行，不动焦点；新增动作 `page_down` / `page_up`（默认 ctrl+d / ctrl+u）滚半个正文高度；手动滚过的偏移保留，直到按键移动焦点把焦点移出可见区才回到「跟着焦点」；顶栏在被截时加提示：下方还有内容 ` · ↓ more`、上方被滚走 ` · ↑ more`（都有就两个）。`agmux config` 打印新动作，README 键位表加一行。
 - 验收：单测 滚轮 3 行 / 到底停 / 到顶停；ctrl+d/u 半页；手动滚后 j 把焦点移出可见区则重新跟随；顶栏提示三态。黑盒 120×30 放 22 张卡：滚轮向下后最后一张可见、顶栏 `↑ more`；再按 j 若焦点在屏外则视图跟随。
 
-### T35 `agmux avatars import <sheet.png> --name <id>`（待开工）
+### T35 `agmux avatars import <sheet.png> --name <id>`（dev @4aab625 送审 / 送测）
+- dev 定稿：深色阈值三通道均值 ≤200 定边界，每格取 97% 中间正方形；--force 先移开旧集、换进失败还原；id 不能为空 / hash / 以 . 开头 / 含 /；目录 0755；退出码用法错 2、已存在 1。
 - 用户用 GPT 按 pi-agent-portrait 的 6×5 格式生成一张 sheet（prompt 由 orchestrator 给），导入成一个用户图集，文件名沿用 pi 的（idle/idle.png、idle/idle_blink.png、hi/hi1.png … 共 30 格，见 pi-agent-portrait scripts/draw-portrait 的 FRAMES + NEW_FRAMES），这样同一套在 pi 里也能用；我们只读其中七个状态。
 - 切法照 draw-portrait：找深色背景的边界，等分成 6×5 格（`--layout 19` 为 5×4），每格取中间的正方形，缩到 128×128 存 PNG。写到 `$XDG_CONFIG_HOME/agmux/avatars/<id>/`，已存在则报错除非 `--force`。只用标准库（image/png + 最近邻）。
 - 验收：单测 合成一张 6×5 的假 sheet（每格不同色、深色边）→ 30 个文件、名字对、每个 128²、颜色对应；5×4 布局；非 PNG / 目录已存在报错；黑盒 跑命令后 `agmux avatars` 列出该集七状态帧数，看板 `a` 里能选。
