@@ -4290,3 +4290,110 @@ func TestGInOtherModes(t *testing.T) {
 	m, _ = press(t, m, "/", "a", "enter", "g") // kept filter: g is an action
 	t.Logf("kept filter + g: group %s query %q", m.groupMode(), m.query)
 }
+
+// --stay: the board runs in a session of its own (fl-1), a popup client (a tmux, attached to fl-1)
+// shows it over the user's client. jump / quit close the popup (detach it) and keep the process.
+func stayModel(clients string) (Model, *fakeRunner) {
+	r := &fakeRunner{tmuxOut: map[string]string{"list-clients": clients, "display-message": "fl-1\n"}}
+	m := New(sessions, r)
+	m.getenv = func(k string) string { return map[string]string{"TMUX_PANE": "%2", "TMUX": "x"}[k] }
+	m.stay = true
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	return tm.(Model), r
+}
+
+const stayClients = "5\t/dev/outer\tmain\txterm-kitty\t/dev/outer\n9\t/dev/popup\tfl-1\ttmux-256color\t/dev/popup\n"
+
+func tmuxCalls(r *fakeRunner, sub string) [][]string {
+	var out [][]string
+	for _, c := range r.calls {
+		if len(c) > 1 && c[1] == sub {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestStayJumpHidesThePopup(t *testing.T) {
+	m, r := stayModel(stayClients)
+	_, quit := press(t, m, "enter")
+	if quit {
+		t.Error("the board quit")
+	}
+	if sw := tmuxCalls(r, "switch-client"); !reflect.DeepEqual(sw, [][]string{{"tmux", "switch-client", "-c", "/dev/outer", "-t", "%1"}}) {
+		t.Errorf("switch-client: %q", sw)
+	}
+	if d := tmuxCalls(r, "detach-client"); !reflect.DeepEqual(d, [][]string{{"tmux", "detach-client", "-t", "/dev/popup"}}) {
+		t.Errorf("detach-client: %q", d)
+	}
+}
+
+func TestStayQuitOnlyDetaches(t *testing.T) {
+	for _, k := range []string{"q", "esc"} {
+		m, r := stayModel(stayClients)
+		if _, quit := press(t, m, k); quit {
+			t.Errorf("%s quit the board", k)
+		}
+		if d := tmuxCalls(r, "detach-client"); !reflect.DeepEqual(d, [][]string{{"tmux", "detach-client", "-t", "/dev/popup"}}) || len(tmuxCalls(r, "switch-client")) != 0 {
+			t.Errorf("%s: detach %q, switch %q", k, d, tmuxCalls(r, "switch-client"))
+		}
+	}
+}
+
+func TestStayExitQuits(t *testing.T) {
+	m, r := stayModel(stayClients)
+	if _, quit := press(t, m, "Q"); !quit {
+		t.Error("Q did not end the board")
+	}
+	if len(tmuxCalls(r, "detach-client")) != 0 {
+		t.Errorf("Q detached: %q", r.calls)
+	}
+}
+
+// With no popup client — the board is in an ordinary pane, its session's client is the user's own
+// terminal (not a tmux) — --stay is what it never was: q quits, jump switches and quits, nothing is
+// detached (that would take the user's terminal).
+func TestStayWithoutAPopupFallsBack(t *testing.T) {
+	own := "9\t/dev/mine\tfl-1\txterm-kitty\t/dev/mine\n"
+	m, r := stayModel(own)
+	if _, quit := press(t, m, "q"); !quit || len(tmuxCalls(r, "detach-client")) != 0 {
+		t.Errorf("q: quit %v, detach %q", quit, tmuxCalls(r, "detach-client"))
+	}
+	m, r = stayModel(own + "5\t/dev/outer\tmain\txterm-kitty\t/dev/outer\n")
+	if _, quit := press(t, m, "enter"); !quit || len(tmuxCalls(r, "detach-client")) != 0 || len(tmuxCalls(r, "switch-client")) != 1 {
+		t.Errorf("enter: quit %v, calls %q", quit, r.calls)
+	}
+	// the only client is the popup itself: it is the one the jump would switch, there is no outer one
+	m, r = stayModel("9\t/dev/popup\tfl-1\ttmux-256color\t/dev/popup\n")
+	if _, quit := press(t, m, "q"); !quit || len(tmuxCalls(r, "detach-client")) != 0 {
+		t.Errorf("only a popup client: quit %v, detach %q", quit, tmuxCalls(r, "detach-client"))
+	}
+	m, r = stayModel("") // not even a client
+	if _, quit := press(t, m, "q"); !quit {
+		t.Error("q with no client did not quit")
+	}
+}
+
+// Without --stay, q and enter are what they were.
+func TestNoStayUnchanged(t *testing.T) {
+	m, r := stayModel(stayClients)
+	m.stay = false
+	if _, quit := press(t, m, "q"); !quit || len(tmuxCalls(r, "detach-client")) != 0 {
+		t.Errorf("q: quit %v, detach %q", quit, tmuxCalls(r, "detach-client"))
+	}
+}
+
+// The footer: q hides, the exit key quits.
+func TestStayFooter(t *testing.T) {
+	t.Cleanup(func() { stayFooter = false; useConfig(config.Default()) })
+	stayFooter = true
+	useConfig(config.Default())
+	if f := ansi.Strip(footer(false, 400, "cwd")); !strings.HasSuffix(f, "q hide · Q quit") {
+		t.Errorf("stay footer: %q", f)
+	}
+	stayFooter = false
+	useConfig(config.Default())
+	if f := ansi.Strip(footer(false, 400, "cwd")); !strings.HasSuffix(f, "q quit") || strings.Contains(f, "hide") {
+		t.Errorf("footer: %q", f)
+	}
+}

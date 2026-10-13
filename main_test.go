@@ -138,3 +138,11 @@ func TestShowAgentColumn(t *testing.T) {
 		t.Errorf("show:\n%s", out.String())
 	}
 }
+
+func TestBoardCmdArguments(t *testing.T) {
+	for _, args := range [][]string{{"--stay", "x"}, {"--sty"}, {"stay"}} {
+		if code := boardCmd(args); code != 2 {
+			t.Errorf("board %v: exit %d, want 2", args, code)
+		}
+	}
+}

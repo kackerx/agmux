@@ -45,6 +45,7 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 | `d` | 用 ccmux review 看改动 |
 | `a` | 给这个会话换头像：在这张卡正下方（放不下就在上方）弹出 5 列 × 4 行的头像格子，先是图片集（内置的，再是你的），最后是像素头像；`h` `j` `k` `l` / 方向键移动，`enter` 绑定，`esc` 取消；超过 20 个按行滚动，当前穿的那个一开始就选着，底下的消息行显示选中的 id |
 | `q` / `esc` | 退出（预览获焦时先按 `tab` 回到卡片；保留着 `/` 过滤时 `esc` 先清空过滤） |
+| `Q`（动作 `exit`） | 真正退出看板进程；`agmux board --stay` 下 `q` / `esc` 和 `enter` 跳转都只收起浮窗，进程留着，只有它能结束进程 |
 
 没有 tmux pane 的后台会话不能跳转和发送，底栏对应键会变暗。
 
@@ -73,6 +74,17 @@ tmux set-environment -h -t "$target" AGMUX_CLIENT "$(tmux display -p "#{client_n
 - 启动脚本里写的是普通（不带 `-h`）session 环境也认：`tmux set-environment -t "$target" AGMUX_CLIENT "$client"`。`-h` 的优先；两者都没有才按最近活动猜。普通的缺点见上：之后新开的 pane 会继承它。
 
 只有拿到了 `AGMUX_CLIENT`（进程环境或 session 环境），跳转后 agmux 才会把浮窗里的那个 client detach 掉、浮窗随之关闭；拿不到就只切换，浮窗留着。
+
+**常驻看板：`agmux board --stay`。** 上面「浮窗里再 attach 一个常驻 session」的用法里，`enter` 跳转后看板进程会退出，session 随之没了，下次要重起。加 `--stay`：`enter` 跳转（和 `q` / `esc`）只把 attach 在看板自己 session 上的那个浮窗 client detach 掉，进程不退，轮询照旧，下次 attach 回来是同一个进程、同一张卡获焦、头像也不用重传；`Q` 才真的退出。
+
+```sh
+# 启动脚本：看板跑在常驻 session 里，浮窗只是 attach 上去
+tmux has-session -t =fl-agmux 2>/dev/null || tmux new-session -d -s fl-agmux agmux board --stay
+tmux display-popup -E "tmux attach-session -t =fl-agmux"
+```
+
+- 被 detach 的只是「看板自己 session 上、本身是 tmux 的 client」（浮窗里 `tmux attach` 出来的那个）；看板若跑在普通 pane 里（自己 session 上的 client 就是你的终端），或不在 tmux 里，`--stay` 不会 detach 任何东西，行为和没加一样（`q` 退出、`enter` 跳转后退出），不在 tmux 里时底栏提示 `--stay needs the board in its own tmux session`。
+- 底栏在 `--stay` 下是 `q hide · Q quit`；退出键可以用 `[keys] exit` 改。
 
 ### 上下文百分比
 

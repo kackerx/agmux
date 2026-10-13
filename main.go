@@ -18,7 +18,9 @@ import (
 const usage = `usage: agmux <command>
 
 commands:
-  board   full-screen session board (open it in a tmux popup; AGMUX_CLIENT: see README)
+  board [--stay]
+          full-screen session board (open it in a tmux popup; AGMUX_CLIENT: see README);
+          --stay: in its own tmux session, enter / q only close the popup, Q ends the board
   show    print sessions one per line: id, name, group, status, model, context%, agent
   avatars print every avatar: image sets, then pixel sprites
   avatars import <sheet.png> --name <id> [--layout 30|19] [--force]
@@ -38,6 +40,8 @@ func main() {
 			os.Exit(statusline.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 		case "setup":
 			os.Exit(statusline.Setup(os.Args[2:], os.Stdout, os.Stderr))
+		case "board":
+			os.Exit(boardCmd(os.Args[2:]))
 		case "config":
 			os.Exit(configCmd(os.Args[2:]))
 		case "avatars":
@@ -53,7 +57,7 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "board":
-		err = runBoard()
+		err = runBoard(false)
 	case "show":
 		var p *store.Poller
 		if p, err = store.NewPoller(); err == nil {
@@ -92,6 +96,19 @@ func avatars(w, errw io.Writer) {
 			fmt.Fprintf(w, "%s  %s\n%s\n\n", s.ID, s.Name, avatar.Render(s, "claude", avatar.Normal, 0))
 		}
 	}
+}
+
+// boardCmd is `agmux board [--stay]`.
+func boardCmd(args []string) int {
+	if len(args) > 1 || len(args) == 1 && args[0] != "--stay" {
+		fmt.Fprintf(os.Stderr, "agmux: board: unknown argument %q\nusage: agmux board [--stay]\n", strings.Join(args, " "))
+		return 2
+	}
+	if err := runBoard(len(args) == 1); err != nil {
+		fmt.Fprintln(os.Stderr, "agmux:", err)
+		return 1
+	}
+	return 0
 }
 
 // avatarsCmd is `agmux avatars import <sheet.png> --name <id> [--layout 30|19] [--force]`.
@@ -174,7 +191,7 @@ func configCmd(args []string) int {
 	return 0
 }
 
-func runBoard() error {
+func runBoard(stay bool) error {
 	avatar.LoadSets()         // before the config: it may name image sets
 	cfg, err := config.Load() // a broken config stops here, before the screen is taken over
 	if err != nil {
@@ -189,5 +206,5 @@ func runBoard() error {
 	if err := p.Refresh(); err != nil {
 		return err
 	}
-	return board.Run(p, cfg, img)
+	return board.Run(p, cfg, img, stay)
 }

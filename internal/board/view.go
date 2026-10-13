@@ -35,6 +35,9 @@ var maxCols = 4
 // its groups on its own; else "bands": each n groups are a row, as tall as its tallest group.
 var stackFlow bool
 
+// stayFooter: the board runs with --stay, so q hides it and the exit key ends it; set by Run before useConfig.
+var stayFooter bool
+
 // Colors; defaults match claude-hud's segments (ANSI slots) and ccmux's palette, and
 // useConfig replaces them with config.toml's [colors].
 var (
@@ -608,7 +611,11 @@ func footerFor(c *config.Config) []footerKey {
 	add(false, "%s kill", "kill")
 	add(false, "%s review", "review")
 	add(false, "%s avatar", "avatar")
-	add(false, "%s quit", "quit")
+	if stayFooter {
+		add(false, "%s hide · %s quit", "quit", "exit")
+	} else {
+		add(false, "%s quit", "quit")
+	}
 	return out
 }
 

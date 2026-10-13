@@ -23,7 +23,7 @@ import (
 // Actions, in the order `agmux config` prints them.
 var Actions = []string{
 	"up", "down", "left", "right", "page_down", "page_up", "jump", "fold", "preview", "focus_preview", "leave_preview",
-	"reply", "handoff", "search", "next_match", "prev_match", "flash", "group", "restart", "kill", "review", "avatar", "quit", "confirm",
+	"reply", "handoff", "search", "next_match", "prev_match", "flash", "group", "restart", "kill", "review", "avatar", "quit", "exit", "confirm",
 }
 
 var defaultKeys = map[string][]string{
@@ -33,7 +33,7 @@ var defaultKeys = map[string][]string{
 	// search / flash are T19 / T20
 	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "flash": {"s"}, "group": {"g"},
 	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"},
-	"quit": {"q", "esc"}, "confirm": {"y"},
+	"quit": {"q", "esc"}, "exit": {"Q"}, "confirm": {"y"},
 }
 
 // Colors, in print order.

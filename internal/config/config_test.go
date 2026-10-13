@@ -389,3 +389,13 @@ func TestGroupBy(t *testing.T) {
 		t.Errorf("group key %v", k)
 	}
 }
+
+// exit (default Q) really ends the board, quit (q / esc) may only hide it under --stay.
+func TestExitKey(t *testing.T) {
+	if k := Default().Keys["exit"]; !slices.Equal(k, []string{"Q"}) {
+		t.Errorf("exit key %v", k)
+	}
+	if !strings.Contains(Default().String(), `exit = ["Q"]`) {
+		t.Errorf("agmux config does not print exit:\n%s", Default().String())
+	}
+}

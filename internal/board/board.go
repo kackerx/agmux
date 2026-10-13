@@ -87,6 +87,7 @@ type Model struct {
 	pick    int             // the avatar grid's cursor, an index into avatar.Listing()
 	folded  map[string]bool // group keys folded with f; this run only; cleared when the grouping changes
 	groupBy string          // how the cards are grouped now (g changes it); "" = [layout] group_by
+	stay    bool            // --stay: jump and quit hide the popup client instead of ending the board (see hideBoard)
 
 	query      string // the / filter; "" = every card
 	searching  bool   // the filter's input box has the keys
@@ -122,13 +123,18 @@ func New(src Source, run Runner) Model {
 
 // Run polls p in the background and runs the board until the user quits. img is DetectImages's
 // answer: when it says pictures, they are uploaded first.
-func Run(p *store.Poller, cfg *config.Config, img ImageMode) error {
+func Run(p *store.Poller, cfg *config.Config, img ImageMode, stay bool) error {
+	var stayNote string
+	if stay && os.Getenv("TMUX") == "" {
+		stay, stayNote = false, "--stay needs the board in its own tmux session"
+	}
+	stayFooter = stay
 	useConfig(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go p.Run(ctx)
 	m := New(p, realRunner{})
-	m.cfg, m.keymap = cfg, cfg.KeyMap()
+	m.cfg, m.keymap, m.stay = cfg, cfg.KeyMap(), stay
 	if img.On { // before the screen is taken over: bubbletea must not interleave with the upload
 		note, err := uploadImages(img, realRunner{})
 		if err != nil {
@@ -140,6 +146,9 @@ func Run(p *store.Poller, cfg *config.Config, img ImageMode) error {
 	lines := slices.Clone(avatar.Problems())
 	if img.Note != "" {
 		lines = append(lines, img.Note)
+	}
+	if stayNote != "" {
+		lines = append(lines, stayNote)
 	}
 	if len(lines) > 0 {
 		m = m.say(cRed, strings.Join(lines, "; "))
@@ -615,7 +624,16 @@ func (m *Model) followHidden() {
 // do runs a configured action on the focused card.
 func (m Model) do(action string) (tea.Model, tea.Cmd) {
 	switch action {
+	case "exit":
+		return m, tea.Quit
 	case "quit":
+		if m.stay {
+			r, getenv := m.run, m.getenv
+			return m, func() tea.Msg { // off the UI goroutine: it asks tmux
+				hidden, err := hideBoard(r, getenv)
+				return doneMsg{err: err, quit: !hidden && err == nil}
+			}
+		}
 		return m, tea.Quit
 	case "search": // even when the filter shows nothing: / edits it
 		m.searching, m.searchFrom, m.msg = true, m.focus, ""
@@ -844,8 +862,14 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	if s.TmuxPane == "" {
 		return m, nil // msgLine already shows noPane
 	}
-	r, getenv := m.run, m.getenv
-	return m, func() tea.Msg { return doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true} }
+	r, getenv, stay := m.run, m.getenv, m.stay
+	return m, func() tea.Msg {
+		if stay {
+			hidden, err := switchAndHide(r, getenv, s.TmuxPane)
+			return doneMsg{err: err, quit: !hidden && err == nil}
+		}
+		return doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true}
+	}
 }
 
 // clientsFormat: the termname and the tty are asked here, not by display-message -c, which in
@@ -972,6 +996,58 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 		}
 	}
 	return nil
+}
+
+// popupClients are the clients attached to agmux's own session that are a tmux themselves: what
+// a popup running `tmux attach` is, in the layout --stay is for (the board runs in a session of its
+// own, the popup only shows it). A client of that session that is not a tmux is the user's own
+// terminal (the board was started in an ordinary pane): never detached.
+func popupClients(pc pickedClient) []tmuxClient {
+	var out []tmuxClient
+	for _, c := range pc.clients {
+		if pc.own != "" && c.session == pc.own && nestedTerm(c.termname) && c.name != pc.name {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// detachAll detaches those clients; hidden says there were some.
+func detachAll(r Runner, cs []tmuxClient) (hidden bool, err error) {
+	for _, c := range cs {
+		if _, err := r.Tmux("detach-client", "-t", c.name); err != nil {
+			return false, err
+		}
+	}
+	return len(cs) > 0, nil
+}
+
+// hideBoard is quit under --stay: the popup closes, the board keeps running in its session.
+// hidden is false when there is no popup client to detach (the board is not in the layout --stay
+// is for): the caller then ends the board as quit always did.
+func hideBoard(r Runner, getenv func(string) string) (hidden bool, err error) {
+	pc, err := chooseClient(r, getenv)
+	if err != nil {
+		return false, nil // no client at all: nothing to hide from
+	}
+	return detachAll(r, popupClients(pc))
+}
+
+// switchAndHide is jump under --stay: the user's client goes to the pane, the popup closes, the
+// board stays. With no popup client it is switchTo, and hidden is false.
+func switchAndHide(r Runner, getenv func(string) string, pane string) (hidden bool, err error) {
+	pc, err := chooseClient(r, getenv)
+	if err != nil {
+		return false, err
+	}
+	popups := popupClients(pc)
+	if len(popups) == 0 {
+		return false, switchTo(r, getenv, pane)
+	}
+	if _, err := r.Tmux("switch-client", "-c", pc.name, "-t", pane); err != nil {
+		return false, err
+	}
+	return detachAll(r, popups)
 }
 
 func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
