@@ -51,6 +51,10 @@ AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 | `test_t32.py` | T32/T33 `a` 选择框 = 焦点卡下方 5 列格子（格宽从屏幕读出，T33 起 10）：顺序（内置集、用户集按名、最后 sprite）、名字行、像素模式集格 = 按 id hash 的 sprite、图片模式集格 = idle 第 0 帧占位符且不眨；按设计的 gridPlace 公式核对多种屏幕 × 每张卡（下方 / 上方 / 少画几行 / x 夹到屏内）；h/l 跨行、j/k 整行、短末行落末尾、>4 行滚动光标行居中；enter 绑定 / esc q 取消 / 消息行 id（sprite 带 name）/ 底栏；bot-06 状态文件落 hash、config 里绑 bot-06 报「was removed」 |
 | `test_t34.py` | T34 卡片区滚动（22 张卡 / 120×30）：滚轮每格 3 行不动焦点、到顶到底停；ctrl+d / ctrl+u 半个正文高（13）；手动偏移保留，直到按键把焦点移出可见区才重新跟随；点击按滚动后的屏幕位置选卡；顶栏 `↑ more` / `↓ more` 三态与过滤态不显示；预览区上的滚轮只滚预览；开板后第一次滚动 / ctrl+d 不丢（4aab625 上的缺陷，b8c0a36 修）；`agmux config` 多 page_down / page_up、可改键、被别的绑定占键则无键 |
 | `test_t35.py` | T35 `agmux avatars import <sheet.png> --name <id> [--layout 30\|19] [--force]`：6×5 假 sheet（深色网格、四周浅色，每格各色且左右有亮边）→ 30 个 pi 文件名、128²、每个像素 = 对应格颜色（中间 97% 正方形不含亮边）；`--layout 19`（5×4，第 20 格浅色空格）→ 前 19 个；flag 在 sheet 前后都行；已存在需 `--force`（整个替换、失败保留旧集、无 `.import-*` 残留）；非 PNG / 缺文件 / 无深色背景 / 坏 layout / 坏名字退出 1，用法错退出 2；导入后 `agmux avatars` 列七状态帧数、`a` 里可选并可绑、上传按 3:2 裁剪 |
+| `test_t36.py` | T36 状态行：` · agents` 与 `⚇ n` 用 working 色（工具名仍 muted，跟 colors.working 走）；100 个无绑定会话图片模式全是占位符头像、像素模式全是 sprite、绑 sprite 仍像素 |
+| `test_t37.py` | T37 卡片第 2 行右侧 agent 角色（colors.agent #bd93f9）：来源 = jsonl 尾 64KB 最后一条 agent-setting > 头 64KB 第一条 > 无；resume 换 agent、很久后才 --agent、坏值 / 其它行型忽略、后写入下一轮询出现；分支先截；无分支只显示右侧；`agmux show` 第 7 列；config 默认色 |
+| `test_t38.py` | T38 tmux 里图片直写 client tty（PtyTty 假终端）：裸 APC、无 \ePtmux; 包装、无 ?1049h、refresh-client -t；termname / tty 来自 `list-clients -F` 五字段；选 client（最近、非本 session、嵌套 tmux-/screen- 跳过、AGMUX_CLIENT 进程 / -h / 普通 / -AGMUX_CLIENT 不再问普通）；auto 判像素底栏说明；tty 非设备 / 打不开 / 不读 2s / 慢读者的回落与等待 |
+| `test_t40.py` | T40 `[layout] flow`：默认 bands、stack（组 k 进列 k mod n、列独立堆叠、无层对齐）、非法值一行报错、`agmux config` 打印；组标题 `▾ 路径 (n) ━━━` 画满列宽 muted、折叠同样、占满无线；T39 几何（列距 1、卡内无边距）在 lib 的 GAP / AV_X 常量里 |
 | `test_t7.py` | 固定排序（假 ccmux 每次轮询换数组顺序，卡片不动；同名按 id；组按 cwd 字符串）、`f` 折叠 / 展开（标题 ▾ ↔ ▸、其它组位置不动、折叠标题可获焦点且不响应 H/r/d/s/x、enter 展开、轮询不展开、不跨运行记忆） |
 
 `fixtures/catv.py` 是假 pane 里用的原始模式回显（BSD `cat -v` 会把被拆开的 UTF-8 弄乱码）；`fixtures/paste_probe.py` 是要求 bracketed paste 并回显收到字节的 pane。
