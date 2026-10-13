@@ -43,6 +43,7 @@ AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 | `test_t24.py` | 预览里画 pane 的光标（真 pane，`capture-pane -e` 的原始转义里读反色 / 下划线）：块状 → 文本后一格反色（空白格也画）、`tput civis` 不画、`\e[3..6 q` 的下划线 / 竖线 → 该格 focus 色下划线、`\e[0..2 q` → 反色；直通里随输入移动；宽字符占 2 格；tab 展开到 8 列制表位且光标列对齐；`seq 1 200` 光标在被裁掉的末尾空行 → 框最底行首格；cursor_x 超出预览宽度不画；往回滚不画、回到底部又画；换卡跟着换 |
 | `test_t25.py` | `[layout] max_columns`：232 列 =5 → 一行 5 列（colW = floor((W-2(n-1))/n)）、默认 / =4 → 4 列、180 列 =5 仍 4 列（最小列宽 40）、=1、resize 实时生效、导航按 5 列；0 / 9 / -1 / 字符串 / 小数 / 布尔 / 未知键各一行 stderr 退 1；1 与 8 合法；`agmux config` 打印并回环 |
 | `test_t26.py` | `colors.border`：设了 → 所有非焦点卡（working / done / 告警 / idle）边框都是该色（18;52;86）、焦点卡仍 focus 色（可配）、状态词颜色不变、焦点移动后旧焦点卡回到 border 色；空串 / 不配 = 跟状态；ANSI 索引合法；只有 border 允许空串；`agmux config` 打印并回环 |
+| `test_t27.py` | effort：`effort.level` → 第 3 行 `模型·level`（点 muted、level 用 colors.effort，换色核对 rgb）；缺字段 / null / 空串 / 顶层字符串 / 其它名字的 effort 字段 → 无 `·`，模型和上下文条照常；类型错（数字/数组/对象/布尔/顶层字符串）→ 同样照常（b35eb49 上 8 条 expectedFailure）；窄列时 model·effort 一起从右截、条和状态词保留；statusline 重跑后实时增删 |
 | `test_t7.py` | 固定排序（假 ccmux 每次轮询换数组顺序，卡片不动；同名按 id；组按 cwd 字符串）、`f` 折叠 / 展开（标题 ▾ ↔ ▸、其它组位置不动、折叠标题可获焦点且不响应 H/r/d/s/x、enter 展开、轮询不展开、不跨运行记忆） |
 
 `fixtures/catv.py` 是假 pane 里用的原始模式回显（BSD `cat -v` 会把被拆开的 UTF-8 弄乱码）；`fixtures/paste_probe.py` 是要求 bracketed paste 并回显收到字节的 pane。

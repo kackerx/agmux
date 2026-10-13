@@ -413,11 +413,14 @@ class HudModel(unittest.TestCase):
         sq = [x for x in b1.rows[3].cells if x[0] == "■"]
         self.assertEqual(len([x for x in sq if x[1] == C_RED]), (77 * 6 + 50) // 100, "77% -> red, 5 of 6 cells")
 
-    def test_effort_is_not_shown_yet(self):  # design: effort's field name is unverified, so it must not be read
+    def test_effort_only_from_effort_level(self):  # T27: a top-level string `effort` is not the real payload and stays unread; effort.level shows as `model·level`
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
-        self.feed(env, "n-b1", "Fancy Model 9", effort="xhigh", reasoning_effort="xhigh", thinking={"effort": "xhigh"})
+        self.feed(env, "n-b1", "Fancy Model 9", reasoning_effort="xhigh", thinking={"effort": "xhigh"})
+        self.feed(env, "n-c1", "Other Model", effort={"level": "high"})
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
-        cs = ready(t); self.assertTrue(cs); self.assertNotIn("xhigh", t.text())
+        cs = ready(t); self.assertTrue(cs)
+        self.assertRegex(by_name(cs, "bravo-29").line(3), r"Fancy Model 9 [│┃]$"); self.assertNotIn("xhigh", t.text())
+        self.assertRegex(by_name(cs, "charlie-30").line(3), r"Other Model·high [│┃]$")
 
     def test_live_update_when_statusline_runs_again(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
