@@ -127,9 +127,9 @@
 - 设计 design.md「头像图片：状态、宽度、选择框」第 1–3 条。store 里按 pendingTool 算出头像状态（和 getEffectiveStatus 一样放 store 做一次，view 只读）；avatar 包的帧选择按新状态名 + 回落链 + 别名；idle 眨眼规则；内置 aza_choi 改用原目录。
 - 验收：单测 状态映射表（每种 pendingTool / 无 tool / attention / waiting / done / idle）；回落链；别名目录；idle 第 2 帧只在第 8k 个 tick 出现一个 tick；黑盒 pendingTool=Read 的卡出 read 帧、Write → write、Bash → tool、无 tool → think；旧目录名 working 仍被认。
 
-### T31 头像填满 6 格（待开工）
-- 设计第 4 条：上传带源矩形取居中 3:2 区域；DecodeConfig 读尺寸；坏 PNG 跳过并报。
-- 验收：单测 128×128 → x=0,y=21,w=128,h=85（取整规则写进注释并测）；宽图（200×100）→ 取中间 150×100；坏 PNG 跳过且 Problems 有一行；黑盒 上传序列里每帧带 x/y/w/h。
+### T31 头像填满 6 格（dev @24cf734 送审 / 送测；改为程序内裁剪）
+- 设计第 4 条（已改）：kitty 忽略占位符放置的源矩形，改为载入时 png.Decode 裁居中 3:2 再编码上传；坏 PNG 跳过并报。
+- 验收：单测 128×128 → 128×85、200×100 → 中间 150×100、3:2 原样；坏 PNG 跳过且 Problems 一行；黑盒 上传载荷解码后是 3:2（内置帧 64×42），不带 x/y/w/h。
 
 ### T32 选择框改 5×4 格子 + 20 个内置头像（待开工，T30/T31 之后）
 - 设计第 5–6 条。CC0 来源逐个核对许可页后再收，CREDITS.md 记 URL / 作者 / 许可；README 署名。
