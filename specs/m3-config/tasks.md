@@ -229,7 +229,8 @@
 - 用户：横线现在 muted 灰不醒目，要和分组名同色（`dir` 色）。改：━ 用 `dir` 色（焦点在标题上时随标题用 focus 色）。design.md T40 那句同步。
 - 验收：单测 标题行的 ━ 转义码 = dir 色；黑盒抓屏带色核对。
 
-### T43 分组方式可切换：cwd / project / session / state，`g` 循环（dev 实现中）
+### T43 分组方式可切换：cwd / project / session / state，`g` 循环（dev @eb8759f 送审 / 送测）
+- dev 定稿（照准）：regroup 在 shown() 里换 GroupKey / GroupLabel，其余（layout / flow / 搜索 / flash / 鼠标 / `a`）不动；project 空 → "(no project)"；切换时焦点留原卡、手动滚动结束；名字标题不画路径命中；`agmux show` 分组列仍 cwd。底栏又长一段，120 列下尾部更早被截。
 - 定稿：切换方式清空折叠，各方式互不影响，切回不保留。
 - 用户：现在只有按 cwd 一种；参考 ccmux 加 project、tmux session，再加一个 state。`g` 切换。
 - 定稿：四种 `group_by`：`cwd`（现状，默认）→ `project`（ccmux 的 `project` 字段：worktree 归到主仓库名下，标题 = 项目名，如 `shopcart (8)`）→ `session`（`tmuxTarget` 的 session 名，没有 pane 的后台会话归 `(no pane)`）→ `state`（working / waiting / done / idle 四组，按这个顺序，不按名排）。`g`（新动作 `group`，默认 g）按上面顺序循环；底栏显示 `g group:cwd`；config `[layout] group_by` 定启动时的方式；折叠状态按「方式 + 标题」记，切换方式后各组展开。组内卡片排序不变（名字序）；state 分组里卡片仍显示自己的状态行。标题的路径缩写只用于 cwd；project / session / state 标题直接写名字。`flow` 两种模式都适用。
