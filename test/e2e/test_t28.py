@@ -81,6 +81,15 @@ class Fixtures(unittest.TestCase):
         for tool in ("s-read:Read", "s-write:Write", "s-bash:Bash"):
             n, tl = tool.split(":"); self.assertIn(tl, [x for x in cs if n in x.line(1)][0].line(3), "the pending tool is on the card's third line")
 
+    def test_many_fixture_overflows_a_small_screen_and_the_sheet_is_a_sheet(self):
+        env = Env(); self.addCleanup(env.cleanup); names = build_many_fixture(env); self.assertEqual(len(names), 22)
+        t = Term(env, w=120, h=30); self.addCleanup(t.close); self.assertTrue(wait(lambda: len(find_cards(t.snap())) >= 3, 8), t.text())
+        shown = find_cards(t.snap()); self.assertLess(len(shown), 22, "22 cards do not fit 120x30: the rest is below the fold")
+        data, w, h = sheet_png(); pw, ph, rows, ch = decode_png(data); self.assertEqual((pw, ph), (w, h)); self.assertEqual((w, h), (6 * 180 + 80, 5 * 150 + 80))
+        px = lambda x, y: tuple(rows[y][x * ch:x * ch + 3]); self.assertEqual(px(0, 0), SHEET_BG)
+        cells = {tuple(px(40 + c * 180 + 90, 40 + r * 150 + 75)) for r in range(5) for c in range(6)}; self.assertEqual(len(cells), 30, "every cell has its own colour"); self.assertNotIn(SHEET_BG, cells)
+        self.assertEqual(px(40 + 5, 40 + 5), tuple(v + 1 for v in sheet_colour(0, 0)), "the side strips are one step brighter")
+
     def test_ptyrun_records_bytes_and_exit_status(self):  # baseline binary: starts on a bare pty, q quits, no graphics sequence (pre-T28 behaviour; T28 tests replace this expectation)
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
         r = PtyRun(env); self.addCleanup(r.close)

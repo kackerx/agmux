@@ -866,3 +866,36 @@ def set_lines(cfg=None):
         for d, f in fr: n[inv.get(d, d)] = n.get(inv.get(d, d), 0) + 1
         out.append(f"{sid}  {source}  " + " · ".join(f"{s} {n.get(s, 0)}" for s in AVATAR_STATES))
     return out
+
+
+# ---------------------------------------------------------------- T34 / T35 fixtures
+def build_many_fixture(env, n=22, per_group=6):
+    """n sessions named m00.. in groups of per_group (project p0, p1, ...): more cards than a 120x30 screen shows, to scroll. Panes %301.. . Returns [names] in order."""
+    now = datetime.datetime.now(datetime.timezone.utc); h = env.home; S = []
+    for i in range(n):
+        g = f"p{i // per_group}"
+        S.append(dict(id=f"m{i:02d}", summary=f"m{i:02d}", agentType="claude", cwd=f"{h}/work/{g}", project=g, mainRepoRoot=f"{h}/work/{g}", gitBranch="main", status="idle",
+                      attentionType=None, pendingTool=None, tmuxPane=f"%{301 + i}", trackingMode="native", subagents=[], nativeSessionId=f"n-m{i:02d}", logPath=None,
+                      lastActivityAt=iso(now - datetime.timedelta(seconds=90)), updatedAt=iso(now), backgroundDetail=None, lastPrompt=None, attentionState=None))
+    env.write_show(S); env.pane_ids = {s["tmuxPane"]: s["id"] for s in S}
+    return [s["summary"] for s in S]
+
+
+SHEET_BG = (18, 18, 22)  # the dark background of a pi-agent-portrait sheet
+
+
+def sheet_colour(r, c):
+    """A colour of its own for grid cell (row r, column c): never dark, all 30 different (for a 6 x 5 sheet)."""
+    return (80 + 30 * c, 90 + 25 * r, 200 - 20 * c - 10 * r)
+
+
+def sheet_png(cols=6, rows=5, cw=180, ch=150, margin=40, edge=12):
+    """A synthetic portrait sheet: a dark background with `margin` pixels around a cols x rows grid of cw x ch cells; cell (r, c) is solid sheet_colour(r, c) except `edge` pixels
+    at its left and right sides, which are one step brighter (outside the centred square when cw > ch: a correct crop never contains them). Returns (png bytes, width, height)."""
+    w, h = 2 * margin + cols * cw, 2 * margin + rows * ch
+    def px(x, y):
+        gx, gy = x - margin, y - margin
+        if not (0 <= gx < cols * cw and 0 <= gy < rows * ch): return SHEET_BG
+        c, r = gx // cw, gy // ch; ix = gx % cw; col = sheet_colour(r, c)
+        return tuple(v + 1 for v in col) if ix < edge or ix >= cw - edge else col
+    return png_pixels(w, h, px), w, h
