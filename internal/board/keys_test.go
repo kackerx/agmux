@@ -3818,3 +3818,84 @@ func TestSwitchPlainSessionEnv(t *testing.T) {
 		}
 	}
 }
+
+// A kept filter that shows nothing does not make the board forget where the focus was: after a
+// tick, esc gives the focus back (T19). A focused session that a poll really removes still falls back.
+func TestFocusSurvivesZeroHitFilterTick(t *testing.T) {
+	src, m := scrollFixture(22)
+	m, _ = press(t, m, "j", "j")
+	if m.focus != "s02" {
+		t.Fatalf("focus %q", m.focus)
+	}
+	m, _ = press(t, m, "/", "q", "q", "q", "enter") // keeps a filter with no hit
+	if ss, _ := m.shown(); len(ss) != 0 || m.query == "" {
+		t.Fatalf("filter shows %d, query %q", len(ss), m.query)
+	}
+	tm, _ := m.Update(frameMsg{})
+	m = tm.(Model)
+	m, _ = press(t, m, "esc")
+	if m.focus != "s02" || m.query != "" {
+		t.Errorf("after a tick and esc: focus %q, query %q; want s02", m.focus, m.query)
+	}
+	// the focused session is gone from the poll: the focus falls back to the first card at once
+	src.ss = src.ss[:2]
+	tm, _ = m.Update(frameMsg{})
+	if m = tm.(Model); m.focus != "s00" {
+		t.Errorf("after the focused session left: focus %q", m.focus)
+	}
+}
+
+// A folded group's title can hold the focus: ticks leave it (and a manual scroll) alone.
+func TestFocusOnFoldedTitleSurvivesTicks(t *testing.T) {
+	_, m := scrollFixture(22)
+	m, _ = press(t, m, "f") // folds the group: the focus is its title
+	focus := m.focus
+	m.top, m.scrolled = 1, true
+	for range 3 {
+		tm, _ := m.Update(frameMsg{})
+		m = tm.(Model)
+	}
+	if m.focus != focus || !m.scrolled {
+		t.Errorf("focus %q -> %q, scrolled %v", focus, m.focus, m.scrolled)
+	}
+}
+
+// A kept filter with no match, frames go by (the preview captures on each one when it is on), esc
+// clears it: the focus is the card it was on.
+func TestNoMatchFramesKeepFocus(t *testing.T) {
+	for _, pv := range []bool{false, true} {
+		m, _ := press(t, wide(&fakeRunner{}, 232, 50), "l") // b1
+		if m.preview != pv {
+			m, _ = press(t, m, "p")
+		}
+		m, _ = press(t, m, "/")
+		m = typeKeys(t, m, "zzz")
+		m, _ = press(t, m, "enter")
+		for range 3 {
+			m.capturing = false // the last capture came back (tests never run the Cmd)
+			tm, _ := m.Update(frameMsg{})
+			m = tm.(Model)
+		}
+		m, _ = press(t, m, "esc")
+		if m.focus != "b1" {
+			t.Errorf("preview %v: focus %q after esc, want b1", m.previewOn(), m.focus)
+		}
+	}
+}
+
+// Any key under a kept filter with no match, then esc: the focus is where it was.
+func TestNoMatchKeysKeepFocus(t *testing.T) {
+	for _, k := range []string{"j", "s", "f", "p", "x", "a", "i", "ctrl+d"} {
+		m, _ := press(t, wide(&fakeRunner{}, 232, 50), "l")
+		m, _ = press(t, m, "/")
+		m = typeKeys(t, m, "zzz")
+		m, _ = press(t, m, "enter", k)
+		m, _ = press(t, m, "esc")
+		if m.query != "" {
+			m, _ = press(t, m, "esc")
+		}
+		if m.focus != "b1" {
+			t.Errorf("%s under no match, then esc: focus %q, want b1", k, m.focus)
+		}
+	}
+}

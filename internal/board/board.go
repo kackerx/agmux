@@ -324,11 +324,10 @@ func (m *Model) current() (gs []group, gi int, s store.Session, ok bool) {
 		}
 	}
 	if gi < 0 {
-		m.scroll = 0 // the focused card is gone (or there was none): a new card starts at the bottom
-		if len(gs) == 0 {
-			m.focus = ""
+		if len(gs) == 0 { // nothing shown (a filter without a hit, or no sessions): the focus is kept for esc to give back
 			return gs, 0, s, false
 		}
+		m.scroll = 0 // the focused card is gone (or there was none): a new card starts at the bottom
 		gi, ci = 0, 0
 		m.focus = items[0][0]
 	}
