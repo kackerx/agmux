@@ -318,6 +318,11 @@ func TestAvatarGrid(t *testing.T) {
 		if !strings.Contains(v, "48;2;255;142;190m   s07   ") { // the cursor starts on the avatar it wears
 			t.Errorf("images=%v: cursor not on s07:\n%q", images, lines[top+1+3*1+2])
 		}
+		// move the cursor off: the avatar the card wears keeps its name in the focus color, not inverse
+		moved, _ := press(t, m, "l")
+		if mv := moved.View(); !strings.Contains(mv, "38;2;255;142;190m   s07    ") || strings.Contains(mv, "48;2;255;142;190m   s07") || !strings.Contains(mv, "48;2;255;142;190m   s08") {
+			t.Errorf("images=%v: s07 is worn: focus color, not inverse; the cursor is on s08:\n%q", images, strings.Split(mv, "\n")[8+3*1+2])
+		}
 		if msg := lines[len(lines)-2]; strings.TrimSpace(msg) != "s07" {
 			t.Errorf("images=%v: message line %q", images, msg)
 		}
@@ -408,6 +413,13 @@ func TestAvatarGridScrolls(t *testing.T) {
 			if len(lines) != c.h || bottom-top+1 != c.boxH || bottom > c.h-3 || strings.Count(v, "48;2;255;142;190m") != 1 {
 				t.Fatalf("h=%d cursor %d (%s): %d lines, grid rows %d..%d, %d cursors:\n%s", c.h, i, id, len(lines), top, bottom, strings.Count(v, "48;2;255;142;190m"), strings.Join(lines, "\n"))
 			}
+			if i == len(all)-1 { // on the last avatar the grid still ends with it: no row of empty cells after it
+				for r := top + 1; r < bottom; r += 3 {
+					if strings.Trim(strings.Join(lines[r:r+3], ""), "│ ") == "" {
+						t.Errorf("h=%d: an empty row of cells at rows %d..%d:\n%s", c.h, r, r+2, strings.Join(lines, "\n"))
+					}
+				}
+			}
 			if i < len(all)-1 {
 				m, _ = press(t, m, "l")
 			}
@@ -494,5 +506,78 @@ func TestAvatarGridNamesKeepApart(t *testing.T) {
 	}
 	if gridW != 52 { // 5 cells of 10 and the border
 		t.Errorf("box is %d wide", gridW)
+	}
+}
+
+// For every card, screen height and width: the grid never covers the top bar, the message line or
+// the footer, never covers its own card when there was room, keeps the cursor on screen, and the
+// message line names what the cursor is on.
+func TestAvatarGridEverywhere(t *testing.T) {
+	names := []string{"s1@/a", "s2@/a", "s3@/a", "s4@/b", "s5@/b", "s6@/c", "s7@/c", "s8@/c", "s9@/c"}
+	p, _ := gridFixture(t, 18, "s05", names...)
+	checked, below, above, fallback := 0, 0, 0, 0
+	defer func() {
+		t.Logf("checked %d card×size cases: below %d, above %d, overlapping fallback %d", checked, below, above, fallback)
+	}()
+	for _, w := range []int{60, 120, 200} {
+		for _, h := range []int{7, 8, 9, 10, 12, 14, 17, 20, 24, 30, 40} {
+			for _, s := range p.Sessions() {
+				m := gridModel(p, w, h)
+				m.focus = s.ID
+				before := strings.Split(ansi.Strip(m.View()), "\n")
+				ct, cb := -1, -1
+				for y, l := range before {
+					if strings.Contains(l, "┏") && ct < 0 {
+						ct = y
+					}
+					if strings.Contains(l, "┗") {
+						cb = y
+					}
+				}
+				if ct < 0 || cb < 0 {
+					continue // the focused card is not fully on screen at this size
+				}
+				m, _ = press(t, m, "a")
+				checked++
+				if tp, bt, _ := gridAt(strings.Split(ansi.Strip(m.View()), "\n")); tp > cb {
+					below++
+				} else if bt < ct {
+					above++
+				} else {
+					fallback++
+				}
+				for step := range 10 { // walk the cursor around too
+					lines := strings.Split(ansi.Strip(m.View()), "\n")
+					where := fmt.Sprintf("w=%d h=%d card %s rows %d..%d step %d", w, h, s.Name, ct, cb, step)
+					top, bottom, _ := gridAt(lines)
+					if len(lines) != h || top < 0 || bottom < 0 {
+						t.Fatalf("%s: no grid (%d lines)\n%s", where, len(lines), strings.Join(lines, "\n"))
+					}
+					if lines[0] != before[0] {
+						t.Errorf("%s: top bar covered", where)
+					}
+					if bottom > h-3 && h >= 8 {
+						t.Errorf("%s: grid rows %d..%d cover the message line / footer", where, top, bottom)
+					}
+					roomBelow, roomAbove := h-3-cb >= 5, ct-1 >= 5
+					if (roomBelow || roomAbove) && top <= cb && bottom >= ct {
+						t.Errorf("%s: grid %d..%d covers its card although there was room", where, top, bottom)
+					}
+					id := avatar.Listing()[m.pick]
+					if !strings.Contains(lines[h-2], id) {
+						t.Errorf("%s: message line %q does not name %s", where, lines[h-2], id)
+					}
+					inGrid := false
+					for _, l := range lines[top : bottom+1] {
+						inGrid = inGrid || strings.Contains(l, ansi.Truncate(avatarName(id), cellW, "…"))
+					}
+					if !inGrid {
+						t.Errorf("%s: cursor on %s is not in the drawn rows\n%s", where, id, strings.Join(lines, "\n"))
+					}
+					keys := []string{"l", "j", "j", "h", "l", "l", "j", "k"}
+					m, _ = press(t, m, keys[step%len(keys)])
+				}
+			}
+		}
 	}
 }

@@ -95,6 +95,9 @@ func TestParseErrors(t *testing.T) {
 		{"keys = 3\n", "cfg: keys: must be a table, [keys]"},
 		{"colors = \"x\"\n", "cfg: colors: must be a table"},
 		{"[avatars]\nsize = 2\n", "cfg: avatars.size: unknown setting"},
+		{"[avatars]\ndefault = \"bot-06\"\n", `bot-05; see agmux avatars); bot-06 was removed; pick another`},
+		{"[avatars.bind]\nx = \"bot-06\"\n", `cfg: avatars.bind."x": "bot-06" is not an avatar id (`},
+		{"[avatars.bind]\nx = \"bot-06\"\n", `; bot-06 was removed; pick another`},
 		{"[avatars]\nrenderer = \"sixel\"\n", `cfg: avatars.renderer: "sixel" is not auto, image or pixel`},
 	} {
 		_, err := Parse("cfg", []byte(c.toml))
@@ -138,6 +141,17 @@ func TestAvatars(t *testing.T) {
 	}
 	if c, err := Parse("cfg", []byte("[avatars]\ndefault = \"bot-05\"\nbind = { x = \"bot-01\" }\n")); err != nil || c.AvatarDefault != "bot-05" || c.AvatarBind["x"] != "bot-01" {
 		t.Errorf("a sprite as default: %v", err)
+	}
+}
+
+// Only an avatar that used to exist gets the "was removed" sentence.
+func TestRemovedAvatarMessage(t *testing.T) {
+	_, err := Parse("cfg", []byte("[avatars]\ndefault = \"bot-99\"\n"))
+	if err == nil || strings.Contains(err.Error(), "removed") {
+		t.Errorf("an unknown id: %v", err)
+	}
+	if _, err := Parse("cfg", []byte("[avatars.bind]\nx = \"bot-06\"\n")); err == nil || !strings.HasSuffix(err.Error(), "; bot-06 was removed; pick another") {
+		t.Errorf("bind: %v", err)
 	}
 }
 

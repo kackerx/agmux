@@ -203,13 +203,13 @@ func Parse(path string, data []byte) (*Config, error) {
 	}
 	if d := raw.Avatars.Default; d != "" {
 		if d != "hash" && !avatar.Known(d) {
-			return nil, fmt.Errorf("%s: avatars.default: %q is neither hash nor an avatar id (%s; see agmux avatars)", path, d, avatarIDs())
+			return nil, fmt.Errorf("%s: avatars.default: %q is neither hash nor an avatar id (%s; see agmux avatars)%s", path, d, avatarIDs(), removed(d))
 		}
 		c.AvatarDefault = d
 	}
 	for name, id := range raw.Avatars.Bind {
 		if !avatar.Known(id) {
-			return nil, fmt.Errorf("%s: avatars.bind.%q: %q is not an avatar id (%s; see agmux avatars)", path, name, id, avatarIDs())
+			return nil, fmt.Errorf("%s: avatars.bind.%q: %q is not an avatar id (%s; see agmux avatars)%s", path, name, id, avatarIDs(), removed(id))
 		}
 		c.AvatarBind[name] = id
 	}
@@ -297,6 +297,15 @@ func (c *Config) String() string {
 		fmt.Fprintf(&b, "%q = %q\n", n, c.AvatarBind[n])
 	}
 	return b.String()
+}
+
+// removed is the sentence that goes after the error for an avatar that used to exist: a config that
+// names it stops the board, so it should say why.
+func removed(id string) string {
+	if id == "bot-06" {
+		return "; bot-06 was removed; pick another"
+	}
+	return ""
 }
 
 func avatarIDs() string { return strings.Join(avatar.Listing(), ", ") }
