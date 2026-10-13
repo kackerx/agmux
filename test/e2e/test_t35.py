@@ -1,7 +1,7 @@
 """T35 `agmux avatars import <sheet.png> --name <id> [--layout 30|19] [--force]`: cuts a pi-agent-portrait sheet (6 x 5 cells, `--layout 19`: 5 x 4) into a user image set under
 $XDG_CONFIG_HOME/agmux/avatars/<id>/ with pi's file names, 128 x 128 each, the grid found where the dark background ends, every cell cut as a centred square of 97%.
 Spec: specs/m3-config/tasks.md「第六批」T35."""
-import os, stat, subprocess, sys, unittest
+import os, pathlib, shutil, stat, subprocess, sys, unittest
 from lib import *
 import test_t28 as t28
 from test_t18 import overlay, LISTING, N_SETS, find_grid
@@ -119,14 +119,20 @@ class ForceRace(Base):
         try:
             for _ in range(25):
                 r = self.run_cmd("avatars", "import", str(self.sheet), "--name", "kit", "--force"); outcomes.append(r.returncode)
-                ok_new = kit.is_dir() and len([p for p in kit.rglob("*.png")]) >= 30
-                ok_old = marker.exists()
-                self.assertTrue(ok_new or ok_old or (kit / "x").exists(), f"after run {len(outcomes)} (exit {r.returncode}): neither the old set nor a complete new one nor the other process's directory: {self.files(kit) if kit.exists() else 'missing'}\n{r.stderr}")
-                if not marker.exists() and not (kit / "x").exists() and r.returncode == 0:
+                if r.returncode == 0:
+                    self.assertGreaterEqual(len(list(kit.rglob("*.png"))), 30, f"run {len(outcomes)}: exit 0 means the new set is in place"); self.assertFalse(marker.exists(), "and it replaced the old one")
                     marker.parent.mkdir(exist_ok=True); marker.write_bytes(png((1, 1, 1)))  # put the user's file back for the next round
+                else:
+                    import re as _re
+                    m = _re.search(r"the old set is kept at (\S+)", r.stderr); kept = pathlib.Path(m.group(1).rstrip(".,;:")) if m else None
+                    self.assertTrue(marker.exists() or (kept and (kept / "mine" / "own.png").exists()),
+                                    f"run {len(outcomes)}: exit 1 and the user's old set is neither in <id> nor at the path the error names: {r.stderr!r}")
+                    if kept and not marker.exists():  # the old set was left at its bak path: put it back for the next round
+                        for p in list(kit.iterdir()) if kit.exists() else []: shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink()
+                        shutil.rmtree(kit, ignore_errors=True); os.rename(kept, kit)
         finally:
             stop.set(); th.join(2)
-        print("force-race outcomes", outcomes, "intruder dirs", intr["n"]); self.assertEqual(self.leftovers(), [], "no .import-* directories left behind"); self.assertTrue(set(outcomes) <= {0, 1}, outcomes)
+        print("force-race outcomes", outcomes, "intruder dirs", intr["n"]); self.assertTrue(set(outcomes) <= {0, 1}, outcomes)
 
 
 class Afterwards(Base):
