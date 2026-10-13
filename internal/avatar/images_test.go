@@ -3,7 +3,9 @@ package avatar
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"hash/fnv"
 	"image"
 	"image/color"
@@ -515,10 +517,8 @@ func TestCropPNGShrinkSamplesTheCrop(t *testing.T) {
 // A small file can claim a huge picture: over 4096 pixels either way is refused from the header,
 // before anything is allocated.
 func TestCropPNGRefusesHuge(t *testing.T) {
-	for _, d := range [][2]int{{4097, 1}, {1, 4097}, {5000, 5000}} {
-		var b bytes.Buffer
-		png.Encode(&b, image.NewNRGBA(image.Rect(0, 0, d[0], d[1])))
-		if _, err := cropPNG(b.Bytes()); err == nil || !strings.Contains(err.Error(), "over 4096") {
+	for _, d := range [][2]int{{4097, 1}, {1, 4097}, {5000, 5000}, {60000, 60000}} {
+		if _, err := cropPNG(headerOnlyPNG(d[0], d[1])); err == nil || !strings.Contains(err.Error(), "over 4096") {
 			t.Errorf("%d × %d: %v", d[0], d[1], err)
 		}
 	}
@@ -527,14 +527,24 @@ func TestCropPNGRefusesHuge(t *testing.T) {
 	if _, err := cropPNG(b.Bytes()); err != nil {
 		t.Errorf("4096 wide is fine: %v", err)
 	}
-	probs := useSets(t, fstest.MapFS{"s/idle/1.png": file("ok"), "s/idle/2.png": &fstest.MapFile{Data: func() []byte {
-		var b bytes.Buffer
-		png.Encode(&b, image.NewNRGBA(image.Rect(0, 0, 4097, 1)))
-		return b.Bytes()
-	}()}})
+	probs := useSets(t, fstest.MapFS{"s/idle/1.png": file("ok"), "s/idle/2.png": &fstest.MapFile{Data: headerOnlyPNG(4097, 1)}})
 	if len(probs) != 1 || !strings.Contains(probs[0], "1 frame(s) are not usable") || len(Sets[0].Frames["idle"]) != 1 {
 		t.Errorf("a huge frame is skipped and reported: %q", probs)
 	}
+}
+
+// headerOnlyPNG is the start of a PNG that claims to be w × h pixels and has no pixels at all: all a
+// refusal by size can look at.
+func headerOnlyPNG(w, h int) []byte {
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], uint32(w))
+	binary.BigEndian.PutUint32(ihdr[4:], uint32(h))
+	ihdr[8], ihdr[9] = 8, 6 // 8 bits, RGBA
+	chunk := append([]byte("IHDR"), ihdr...)
+	out := []byte("\x89PNG\r\n\x1a\n")
+	out = binary.BigEndian.AppendUint32(out, uint32(len(ihdr)))
+	out = append(out, chunk...)
+	return binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(chunk))
 }
 
 // Every ID carries the version of what is uploaded, so a board of another version never finds a
