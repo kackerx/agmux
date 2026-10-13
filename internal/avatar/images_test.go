@@ -195,6 +195,31 @@ func TestAlternateTakes(t *testing.T) {
 	}
 }
 
+// Which file names are alternate takes: only a name ending in _v, digits and .png.
+func TestAlternateTakeNames(t *testing.T) {
+	dropped := []string{"idle_v2.png", "idle_v10.png", "x_v0.png"}
+	kept := []string{"idle_v.png", "idle_2.png", "idle_blink.png", "nav_v1x.png", "v2.png", "idle_V2.png", "a_v2.png.png", "idle_vv2.png", "idle.png"}
+	files := fstest.MapFS{}
+	for _, n := range append(append([]string{}, dropped...), kept...) {
+		files["c/idle/"+n] = file(n)
+	}
+	useSets(t, files)
+	var got []string
+	for _, f := range Sets[0].Frames["idle"] {
+		for _, n := range append(append([]string{}, dropped...), kept...) {
+			if bytes.Equal(f, pngOf(n)) {
+				got = append(got, n)
+			}
+		}
+	}
+	slices.Sort(got)
+	want := slices.Clone(kept)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("frames %v, want %v", got, want)
+	}
+}
+
 // A set directory may be a symbolic link (the same pictures shared by several configs, say).
 func TestLoadSetsSymlink(t *testing.T) {
 	root, real := t.TempDir(), t.TempDir()
@@ -454,7 +479,7 @@ func TestCropPNGShrinks(t *testing.T) {
 // Shrinking samples the part that is kept, not the whole picture: what the crop cuts off is green,
 // and no green is left after shrinking (a sampling that forgets the crop's offset pulls it in).
 func TestCropPNGShrinkSamplesTheCrop(t *testing.T) {
-	for _, d := range [][2]int{{1024, 1024}, {900, 300}, {1000, 3000}, {300, 200}, {512, 700}} {
+	for _, d := range [][2]int{{300, 300}, {600, 200}, {200, 600}, {390, 260}} { // all still over 128 high after the crop: the shrinking branch
 		w, h := d[0], d[1]
 		c := cropFor(w, h)
 		im := image.NewNRGBA(image.Rect(0, 0, w, h))
