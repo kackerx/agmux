@@ -165,7 +165,7 @@ func TestStringIsTheCommentedTemplate(t *testing.T) {
 	for prefix, want := range map[string]string{
 		`up = ["w"]`:         "# default: k, up",
 		`focus = "#010203"`:  "# default: #ff8ebe",
-		`border = "7"`:       `# default: "" (terminal default)`,
+		`border = "7"`:       `# default: "" (follow the status)`,
 		"max_columns = 6":    "# default: 4",
 		`flow = "stack"`:     `# default: "bands"`,
 		`group_by = "state"`: `# default: "cwd"`,
@@ -460,5 +460,57 @@ func TestExitKey(t *testing.T) {
 	}
 	if !strings.Contains(Default().String(), `exit = ["Q"]`) {
 		t.Errorf("agmux config does not print exit:\n%s", Default().String())
+	}
+}
+
+// Control characters in a name go out as \uXXXX: Go's %q spells them \a \v \xNN, which TOML can't read,
+// and a config.toml saved from `agmux config` would stop agmux from starting.
+func TestStringQuotesForTOML(t *testing.T) {
+	for in, want := range map[string]string{
+		"plain": `"plain"`, "a b": `"a b"`, "tab\t": `"tab\t"`, "q\"b\\s": `"q\"b\\s"`, `\x41`: `"\\x41"`,
+		"esc\x1b": `"esc\u001B"`, "del\x7f": `"del\u007F"`, "bell\a": `"bell\u0007"`, "vt\v": `"vt\u000B"`, "ff\f": `"ff\f"`, "bs\b": `"bs\b"`,
+		"é日\U0001F600": `"é日😀"`,
+	} {
+		if got := tomlQuote(in); got != want {
+			t.Errorf("tomlQuote(%q) = %s, want %s", in, got, want)
+		}
+	}
+	c := Default()
+	c.AvatarBind = map[string]string{"esc\x1b[0m": "bot-02", "bell\a\v\f\b\x00\x7f": "bot-03", "q\"\\": "bot-04", "日本": "bot-05"}
+	back, err := Parse("cfg", []byte(c.String()))
+	if err != nil || !reflect.DeepEqual(back.AvatarBind, c.AvatarBind) {
+		t.Errorf("round trip: %v\n%v\n%v", err, back.AvatarBind, c.AvatarBind)
+	}
+}
+
+// The defaults print as exactly testdata/config.example.toml: the template people are told to save as
+// their config.toml. A change to what `agmux config` says shows up here as a diff to read;
+// UPDATE_GOLDEN=1 go test ./internal/config rewrites the file.
+func TestStringMatchesTheExample(t *testing.T) {
+	const golden = "testdata/config.example.toml"
+	got := Default().String()
+	if os.Getenv("UPDATE_GOLDEN") != "" {
+		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(want) {
+		gl, wl := strings.Split(got, "\n"), strings.Split(string(want), "\n")
+		for i := 0; i < max(len(gl), len(wl)); i++ {
+			g, w := "<none>", "<none>"
+			if i < len(gl) {
+				g = gl[i]
+			}
+			if i < len(wl) {
+				w = wl[i]
+			}
+			if g != w {
+				t.Fatalf("line %d differs from %s (UPDATE_GOLDEN=1 rewrites it):\n got  %s\n want %s", i+1, golden, g, w)
+			}
+		}
 	}
 }

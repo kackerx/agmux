@@ -299,7 +299,7 @@ var actionUse = map[string]string{
 	"preview": "open / close the pane preview", "focus_preview": "pass keys through to the previewed pane",
 	"leave_preview": "back to the board", "reply": "type a reply into the focused session",
 	"handoff": "send /handoff to the focused session", "search": "filter the cards by fuzzy search",
-	"next_match": "next search hit", "prev_match": "previous search hit", "flash": "jump to a card by a typed label",
+	"next_match": "next search hit", "prev_match": "previous search hit", "flash": "move the focus to a card by its label",
 	"group": "cycle the grouping (see [layout] group_by)", "restart": "restart the focused session", "kill": "kill the focused session (asks first)",
 	"review": "run `ccmux review` on the focused session", "avatar": "open the avatar picker under the focused card",
 	"quit": "with `board --stay` inside a popup: hide instead", "exit": "always quit, even with --stay", "confirm": "answer yes to a prompt",
@@ -307,7 +307,7 @@ var actionUse = map[string]string{
 
 var colorUse = map[string]string{
 	"working": "card border / status while an agent works", "attention": "waiting for you / alerts",
-	"focus": "the focused card", "match": "search hits", "border": `borders of unfocused cards ("" = follow the status)`,
+	"focus": "the focused card", "match": "search hits", "border": "borders of unfocused cards",
 	"name": "session name", "agent": "the agent role on line 2", "dir": "group headers and their rule",
 	"bar_low": "context bar, low usage", "muted": "secondary text, footer",
 }
@@ -331,7 +331,7 @@ func (c *Config) String() string {
 # effective values. Defaults are shown in the comments; lines left at their default are harmless.
 
 [keys]
-# Each action takes a list of key names (bubbletea names): letters and digits, "enter", "esc",
+# Each action takes a list of key names (bubbletea names): any single character, "enter", "esc",
 # "tab", "shift+tab", "space", "backspace", "up"/"down"/"left"/"right", "home"/"end", "pgup"/"pgdown",
 # "f1".."f20", "ctrl+<letter>", "alt+<key>". An uppercase letter means shift+letter.
 # ctrl+c cannot be bound (it always quits); ctrl+i and ctrl+m are tab and enter.
@@ -345,7 +345,7 @@ func (c *Config) String() string {
 		}
 		q := make([]string, len(c.Keys[a]))
 		for i, k := range c.Keys[a] {
-			q[i] = strconv.Quote(k)
+			q[i] = strconv.Quote(k) // key names are printable: nothing Quote spells TOML can't read
 		}
 		line(fmt.Sprintf("%s = [%s]", a, strings.Join(q, ", ")), with(def, actionUse[a]))
 	}
@@ -356,7 +356,7 @@ func (c *Config) String() string {
 	for _, n := range Colors {
 		d := defaultColors[n]
 		if d == "" {
-			d = `"" (terminal default)`
+			d = `"" (follow the status)`
 		}
 		line(fmt.Sprintf("%s = %q", n, c.Colors[n]), with(d, colorUse[n]))
 	}
@@ -380,7 +380,38 @@ func (c *Config) String() string {
 # write, tool, hi, success) or ` + "`agmux avatars import <sheet.png> --name <id>`" + `.
 `)
 	for _, n := range slices.Sorted(maps.Keys(c.AvatarBind)) {
-		fmt.Fprintf(&b, "%q = %q\n", n, c.AvatarBind[n])
+		fmt.Fprintf(&b, "%s = %s\n", tomlQuote(n), tomlQuote(c.AvatarBind[n]))
+	}
+	return b.String()
+}
+
+// tomlQuote is s as a TOML basic string. Go's %q writes \a \v and \xNN for control characters, which
+// TOML has no escapes for (it has \b \t \n \f \r \uXXXX): they go as \u00XX.
+func tomlQuote(s string) string {
+	q := strconv.Quote(s)
+	var b strings.Builder
+	for i := 0; i < len(q); i++ {
+		if q[i] != '\\' || i+1 >= len(q) {
+			b.WriteByte(q[i])
+			continue
+		}
+		i++
+		switch q[i] {
+		case 'a':
+			b.WriteString(`\u0007`)
+		case 'v':
+			b.WriteString(`\u000B`)
+		case 'x':
+			if i+2 < len(q) {
+				b.WriteString(`\u00` + strings.ToUpper(q[i+1:i+3]))
+				i += 2
+				continue
+			}
+			b.WriteString(`\x`)
+		default:
+			b.WriteByte('\\')
+			b.WriteByte(q[i])
+		}
 	}
 	return b.String()
 }
