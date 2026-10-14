@@ -312,7 +312,7 @@
 - dev：T48 修复 b0e0ba3（switchAndHide 只返回 error）；T49 修复 fdac3c9（临时目录转换成功后再替换、拒绝 . / .. / 分隔符源、run() 可测变异 4 杀；CREDITS 措辞；386 常量）。本轮 T47–T49 目标 hash = fdac3c9，tester 起整套回归。
 - reviewer 复审：T48 b0e0ba3、T49 fdac3c9 均通过（误删复现被拒、坏输入不动旧套、重跑 diff 一致、变异 6 杀 5；CREDITS 与 386 满足）。不补：临时目录名以点开头无测试。本轮最终 hash fdac3c9，等 tester。
 
-### T50 `agmux config` 打印带注释的完整模板（修复 @6b683ca 送复审 + 测）
+### T50 `agmux config` 打印带注释的完整模板（复审通过 @6b683ca，等 tester 定点）
 - 用户 2026-10-14：配置文件里把所有可配置项都列上，带默认值，注释里写可选项，全英文。我已按现有选项手写了用户的 ~/.config/agmux/config.toml（保留他的 max_columns=5 / flow=stack / renderer=image / border），模板（默认值版）存 specs/m3-config/config.example.toml。
 - 定稿：`agmux config` 的输出改成 config.example.toml 这套带注释的格式，值用当前生效值（注释里的 default 不变）；每个动作 / 颜色一行加尾注释，[layout] / [avatars] 的可选项写在注释里，[avatars.bind] 的绑定照常打印在节下（注释在前）。README 配置一节说明 `agmux config > ~/.config/agmux/config.toml` 可生成完整文件。不加新子命令。
 - 验收：单测 打印结果能被 Parse 回读且等价（round-trip）、每个 Actions / Colors 都有一行、注释含 default；黑盒 `agmux config` 输出与模板逐行比对（值处除外）。
@@ -320,3 +320,4 @@
 - 定稿：整套回归以 fdac3c9 那轮为准（T50 只改 `agmux config` 输出），T50 在 fe4da7d 上跑 config 相关 e2e + 单测即可；装用户的是 fe4da7d。
 - reviewer（fe4da7d）：注释与代码事实逐条一致（键名范围、modal 共用键、avatars.json 优先、hash 池、顺序、`#` 在字符串里安全）；退回 1 必改：border 行「terminal default」与「follow the status」自相矛盾，代码只有后者 → 改成 `default: "" (follow the status)`。采纳 3 建议：绑定名含控制字符时 `%q` 的 `\x..` / `\a` 等 TOML 读不回（T18 起就有，T50 后生成文件成推荐用法所以修）→ 改 `\u00XX`；golden 测试 Default().String() = internal/config/testdata/config.example.toml（specs 里的 config.example.toml 删除，模板以 testdata 为准）；flash 措辞、"any single character"。
 - dev 6b683ca：border 注释改 follow the status；tomlQuote（\a \v \xNN → \u00XX）用于绑定名与值 + round-trip 用例；golden internal/config/testdata/config.example.toml + TestStringMatchesTheExample（UPDATE_GOLDEN=1 重写）；措辞两处。送复审；tester 目标改 6b683ca。
+- reviewer 复审 6b683ca 通过：border 注释一致；tomlQuote 对 ESC / DEL / BEL / NUL / 中文 / emoji / U+2028 等全部 round-trip；golden 杀 noUse；措辞同步。
