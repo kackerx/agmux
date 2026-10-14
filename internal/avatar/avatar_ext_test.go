@@ -166,7 +166,7 @@ func TestExtFallbackAndHash(t *testing.T) {
 	}
 	count := map[string]int{}
 	for i := 0; i < 600; i++ {
-		id := fmt.Sprintf("%08x-%04x-4000-8000-%012x", i*2654435761, i, i*40503)
+		id := fmt.Sprintf("%08x-%04x-4000-8000-%012x", uint64(i)*2654435761, i, i*40503)
 		a, c := avatar.For(empty, nil, "hash", id), avatar.For(empty, nil, "hash", id)
 		if a != c {
 			t.Fatalf("hash default not stable for %s", id)

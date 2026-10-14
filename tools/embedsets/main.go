@@ -12,6 +12,7 @@ import (
 	"image"
 	"image/draw"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,31 +32,48 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: embedsets <internal/avatar/sets> <character dir>...")
 		os.Exit(2)
 	}
-	dest := os.Args[1]
-	total := 0
-	for _, src := range os.Args[2:] {
-		n, err := convert(src, filepath.Join(dest, filepath.Base(src)))
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "embedsets:", err)
-			os.Exit(1)
-		}
-		fmt.Printf("%-10s %3d frames\n", filepath.Base(src), n)
-		total += n
+	if err := run(os.Args[1], os.Args[2:], os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, "embedsets:", err)
+		os.Exit(1)
 	}
-	fmt.Println("total", total, "frames")
 }
 
+func run(dest string, srcs []string, out io.Writer) error {
+	total := 0
+	for _, src := range srcs {
+		id := filepath.Base(src)
+		if id == "." || id == ".." || id == string(filepath.Separator) { // dest/<id> is replaced: it must not be dest itself, or its parent
+			return fmt.Errorf("%q does not name a character: give the directory by its own name (…/emotes/developer)", src)
+		}
+		n, err := convert(src, filepath.Join(dest, id))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%-10s %3d frames\n", id, n)
+		total += n
+	}
+	fmt.Fprintln(out, "total", total, "frames")
+	return nil
+}
+
+// convert makes dst out of src's state directories. It is built beside dst and moved in only when
+// it is complete, so that a source that is wrong leaves what is there alone.
 func convert(src, dst string) (frames int, err error) {
-	if err := os.RemoveAll(dst); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return 0, err
 	}
+	tmp, err := os.MkdirTemp(filepath.Dir(dst), ".embedsets-") // a dot: neither the loader nor go:embed takes it
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(tmp) // gone after the rename; what a failure left
 	for _, st := range states {
 		files, _ := os.ReadDir(filepath.Join(src, st))
 		for _, f := range files {
 			if f.IsDir() || !strings.HasSuffix(f.Name(), ".png") || alternateTake.MatchString(f.Name()) {
 				continue
 			}
-			if err := convertFrame(filepath.Join(src, st, f.Name()), filepath.Join(dst, st, f.Name())); err != nil {
+			if err := convertFrame(filepath.Join(src, st, f.Name()), filepath.Join(tmp, st, f.Name())); err != nil {
 				return frames, err
 			}
 			frames++
@@ -64,7 +82,10 @@ func convert(src, dst string) (frames int, err error) {
 	if frames == 0 {
 		return 0, fmt.Errorf("%s: no frames in %v", src, states)
 	}
-	return frames, nil
+	if err := os.RemoveAll(dst); err != nil {
+		return 0, err
+	}
+	return frames, os.Rename(tmp, dst)
 }
 
 // convertFrame writes the centered 3:2 part of src to dst.
