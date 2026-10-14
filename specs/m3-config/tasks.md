@@ -272,3 +272,5 @@
 - 验收：单测 每次 write 是完整序列且 ≤1024、非末块负载 4 的倍数、拼起来解得出 PNG、放不下就等、满队列 stall；reviewer 变异探针；tester 跑图片相关 e2e + go test -race + 整套回归。
 - tester 第一步（ba59d3b）：vet / race 全绿；图片相关 e2e 116 条只有 1 条旧断言（tty 路径与外路径序列逐块一致）按新机制改；新增 test_t46.py 5 条（假 pty 慢读 + 每 2 ms 插 BEL：修前 292/321 个 APC 被打断，修后 0，BEL 拉到每 0.1 ms 仍 0；序列 <1024、载荷 768 对齐、外路径仍 4096）。据此先装给用户复测（09:21，产品代码 ba59d3b）。
 - tester 真 kitty 验证：kitty --config NONE + script 录 tty + tmux -L set-titles on 每 30 ms rename-window，15 套图集。修前 764 个 APC 截 55–59 个（全是 BEL/ST），修后 3 × 3676 个 0 截断；上传 ~3 s → ~1 s（含启动与静默判定）。没做：真 kitty 肉眼看渲染、常驻 session + popup 路径、Linux pty。
+- reviewer（ba59d3b）：macOS 修法成立，真 pty 探针复核（HEAD 4392 个 APC 0 截；chunk 回 4096 → 842+/963 截；只切小块不问队列 → 2239+/4392 截，问队列是必须的）；room 用 q+n<=1024 刚好对；ioctl 出错退路照常上传；stall 后半截序列用 kitty headless 回放证实不出文字。退回 1 必改：outQueue 真 ioctl 无测试（换成别的 ioctl 号 macOS 返回 0 → room 恒真，修法失效而单测照过）→ 加 darwin 真 pty 测试。不改：room 多余判断、stall 半截、狂刷输出下上传耗时几十秒（修前就有）。
+- 定稿：Linux 不在本次范围——Linux pty 的 TIOCOUTQ 恒 0、队列 8–12 KB，room 恒真，只剩小块降低概率（reviewer 实测修后仍 1–65 个被截，比修前好无退化）；design.md 遗留补一句。备忘：Linux 走阻塞写（实测原子）+ 超时兜底，以后单开。
