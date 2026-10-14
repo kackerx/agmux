@@ -307,6 +307,11 @@ func Placeholder(id uint32) []string {
 // chunkSize is what kitty takes of base64 in one escape sequence.
 const chunkSize = 4096
 
+// ttyChunk is the base64 per sequence on a client's tty: with its framing a sequence must fit in the
+// 1024 bytes a pty holds, or one write of it is taken in pieces and tmux's own drawing (a BEL or an
+// ST in it ends the sequence early in kitty, which then prints what is left as text) lands between them.
+const ttyChunk = 768
+
 // Via is where Upload writes: how the bytes get to the terminal that stores the pictures.
 type Via int
 
@@ -326,8 +331,7 @@ const (
 // (U=1: nothing is drawn until placeholders show it), each the centered 3:2 part of its picture
 // (cropPNG) so that it fills all the cells. q=2 silences the terminal's replies, which
 // inside tmux would arrive as keystrokes. Every write is one sequence of at most chunkSize base64
-// bytes (plus its framing): through a tty shared with tmux's own drawing the chance to be
-// interleaved with it is smallest that way.
+// bytes (plus its framing), on a client's tty ttyChunk: see there.
 // The images are never deleted: they are small, stay in the terminal until it closes, and the next
 // start overwrites them under the same IDs (a second board's exit must not blank the first's).
 func Upload(w io.Writer, sets []*Set, via Via) (err error) {
@@ -341,12 +345,16 @@ func Upload(w io.Writer, sets []*Set, via Via) (err error) {
 			}
 		}()
 	}
+	size := chunkSize
+	if via == ToTTY {
+		size = ttyChunk
+	}
 	for _, s := range sets {
 		for _, st := range States {
 			for i, png := range s.sent[st] {
 				b64 := base64.StdEncoding.EncodeToString(png)
-				for off := 0; off < len(b64); off += chunkSize {
-					end := min(off+chunkSize, len(b64))
+				for off := 0; off < len(b64); off += size {
+					end := min(off+size, len(b64))
 					more := 1
 					if end == len(b64) {
 						more = 0

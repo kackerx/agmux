@@ -750,3 +750,50 @@ func TestOpenClientTTYNonblocking(t *testing.T) {
 		t.Errorf("flags %#x (errno %v): not O_NONBLOCK", fl, e)
 	}
 }
+
+// A write that fits the tty's queue waits until the whole of it fits: it is then taken in one piece,
+// and tmux's own drawing cannot land inside it (see avatar.ttyChunk). One that can't be asked (a
+// pipe) or is bigger than the queue is written at once.
+func TestTTYWriterWaitsForRoom(t *testing.T) {
+	var fds [2]int
+	if err := syscall.Pipe(fds[:]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { syscall.Close(fds[0]); syscall.Close(fds[1]) })
+	syscall.SetNonblock(fds[1], true)
+	old := outQueue
+	t.Cleanup(func() { outQueue = old })
+	asked := 0
+	outQueue = func(int) (int, error) { // 700 queued for the first 5 questions, then the terminal has read it
+		if asked++; asked <= 5 {
+			return 700, nil
+		}
+		return 0, nil
+	}
+	msg := make([]byte, 500)
+	if n, err := (ttyWriter{fds[1]}).Write(msg); n != 500 || err != nil || asked != 6 {
+		t.Errorf("wrote %d, %v, asked %d times (want 6: 5 without room, 1 with)", n, err, asked)
+	}
+	buf := make([]byte, 1<<16)
+	syscall.SetNonblock(fds[0], true)
+	if n, _ := syscall.Read(fds[0], buf); n != 500 {
+		t.Errorf("the pipe got %d bytes in one go", n)
+	}
+	// too big for any queue, or a tty that can't say: no waiting
+	outQueue = func(int) (int, error) { return 1024, nil }
+	if n, err := (ttyWriter{fds[1]}).Write(make([]byte, 2000)); n != 2000 || err != nil {
+		t.Errorf("bigger than the queue: %d, %v", n, err)
+	}
+	syscall.Read(fds[0], buf)
+	outQueue = func(int) (int, error) { return 0, syscall.ENOTTY }
+	if n, err := (ttyWriter{fds[1]}).Write(msg); n != 500 || err != nil {
+		t.Errorf("no queue to ask: %d, %v", n, err)
+	}
+	// a terminal that never reads is a stall, as before
+	outQueue = func(int) (int, error) { return 1000, nil }
+	ttyStall = 50 * time.Millisecond
+	t.Cleanup(func() { ttyStall = 2 * time.Second })
+	if n, err := (ttyWriter{fds[1]}).Write(msg); err == nil || n != 0 || !strings.Contains(err.Error(), "stopped reading") {
+		t.Errorf("full queue: %d, %v", n, err)
+	}
+}

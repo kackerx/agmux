@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/config"
@@ -158,6 +159,13 @@ type ttyWriter struct{ fd int }
 func (w ttyWriter) Write(p []byte) (done int, err error) {
 	last := time.Now()
 	for done < len(p) {
+		if done == 0 && !w.room(len(p)) { // a write that fits is taken whole, so tmux's drawing cannot land inside it
+			if time.Since(last) > ttyStall {
+				return done, fmt.Errorf("the terminal stopped reading (%v with no progress)", ttyStall)
+			}
+			time.Sleep(200 * time.Microsecond)
+			continue
+		}
 		n, err := syscall.Write(w.fd, p[done:])
 		if n > 0 {
 			done, last = done+n, time.Now()
@@ -174,6 +182,25 @@ func (w ttyWriter) Write(p []byte) (done int, err error) {
 		}
 	}
 	return done, nil
+}
+
+// ptyQueue is what a pty slave holds of output before a write is taken in pieces (macOS: 1024).
+const ptyQueue = 1024
+
+// room: n bytes would be taken whole now. Bigger than the queue, or a tty that can't say (a pipe),
+// it is true: nothing better to wait for.
+func (w ttyWriter) room(n int) bool {
+	q, err := outQueue(w.fd)
+	return err != nil || n > ptyQueue || q+n <= ptyQueue
+}
+
+// outQueue is how many bytes the tty has taken and the terminal has not read yet; tests replace it.
+var outQueue = func(fd int) (int, error) {
+	var q int32
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCOUTQ, uintptr(unsafe.Pointer(&q))); e != 0 {
+		return 0, e
+	}
+	return int(q), nil
 }
 
 func (w ttyWriter) Close() error { return syscall.Close(w.fd) }

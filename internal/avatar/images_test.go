@@ -740,23 +740,38 @@ func TestSpriteFor(t *testing.T) {
 	}
 }
 
-// To a client's tty the sequences go bare: no wrapper, no screen switch; and each write is one
-// sequence of at most chunkSize base64 bytes, so that tmux's own drawing has the least to cut into.
+// To a client's tty the sequences go bare: no wrapper, no screen switch; and each write is one whole
+// sequence that fits the 1024 bytes a pty holds. A bigger write is taken in pieces, and tmux's own
+// drawing lands between them: a BEL or an ST in it ends the sequence early in kitty, which then prints
+// the rest of the picture as text.
 func TestUploadToTTY(t *testing.T) {
-	png := noisePNG()
-	useSets(t, fstest.MapFS{"s/idle/1.png": &fstest.MapFile{Data: png}})
+	src := noisePNG()
+	useSets(t, fstest.MapFS{"s/idle/1.png": &fstest.MapFile{Data: src}})
 	w := &recordingWriter{}
 	if err := Upload(w, Sets, ToTTY); err != nil {
 		t.Fatal(err)
 	}
-	plain, _ := capture(t, false)
-	if len(w.writes) != len(plain) || len(w.writes) < 5 {
-		t.Fatalf("%d writes, want one per sequence (%d, more than 5)", len(w.writes), len(plain))
+	if len(w.writes) < 20 {
+		t.Fatalf("%d writes, want many small ones", len(w.writes))
 	}
+	var b64 strings.Builder
 	for i, got := range w.writes {
-		if got != plain[i] || strings.Contains(got, "\x1bPtmux;") || strings.Contains(got, "\x1b[?1049") || len(got) > chunkSize+100 {
+		if !strings.HasPrefix(got, "\x1b_G") || !strings.HasSuffix(got, "\x1b\\") || strings.Count(got, "\x1b") != 2 ||
+			strings.Contains(got, "\x1bPtmux;") || strings.Contains(got, "\x1b[?1049") || len(got) > 1024 {
 			t.Fatalf("write %d: %.60q (%d bytes)", i, got, len(got))
 		}
+		payload := got[strings.Index(got, ";")+1 : len(got)-2]
+		if i < len(w.writes)-1 && len(payload)%4 != 0 { // kitty wants every chunk but the last in whole groups of 4
+			t.Fatalf("write %d: %d payload bytes", i, len(payload))
+		}
+		b64.WriteString(payload)
+	}
+	raw, err := base64.StdEncoding.DecodeString(b64.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := png.Decode(bytes.NewReader(raw)); err != nil {
+		t.Errorf("the chunks do not add up to a picture: %v", err)
 	}
 }
 
