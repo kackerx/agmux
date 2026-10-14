@@ -89,7 +89,7 @@
 - **选择与绑定**：`[avatars] default` / `[avatars.bind]` / avatars.json 的值都可以是集 id 或 sprite id；`hash` 在图片模式下**只在图集里挑**（T36 改：用户以为像素头像是没装新版；sprite 只能按 `a` 手选）；**像素模式下只在 sprite 里挑**（和以前逐位一致；否则回落成固定 sprite 的集让那个 sprite 占双份）——所以 imageMode 要在 poller 第一次 Refresh 之前定下并告诉 avatar 包。集 id `hash` 是保留名，用户集叫这个名字跳过并报底栏；以 `.` 开头的文件（macOS 的 ._ AppleDouble）不算帧；集目录是符号链接也要认。`a` 列表先列图片集（每行 2 行占位符 + id），再列 sprite；像素模式下集那几行用 hash 出的 sprite 代画。`agmux avatars` 打印集（id、来源 builtin/user、各状态帧数）和 sprite。
 - 图片模式下没有像素头像底边的 agentType 色带（claude / codex 不再靠头像区分；要的话另立任务）。hash 池加入了图片集，所以无绑定会话的默认头像在像素模式下也会和以前不同（模数 6 → 7）。
 - 用户验收要含 **tmux 外直接在 kitty 里跑 `agmux board`**（spike 和 dev 实测都只在 tmux 浮窗里）。
-- 不做：运行中热加载用户目录；PNG 解码校验（坏图 = 空占位，不报错）；上传写 stdout 失败回落像素（直接退出）；allow-passthrough 的 pane 级覆盖（T38 起不再依赖它）；ghostty / WezTerm / iTerm2 实测（WezTerm、iTerm2 不支持占位符，走像素）；多 client 同时看同一个 session 的图片 id 冲突（同图同 id，无害）；kill -9 残留的图（下次启动同 id 覆盖）。
+- 不做：运行中热加载用户目录；PNG 解码校验（坏图 = 空占位，不报错）；上传写 stdout 失败回落像素（直接退出）；allow-passthrough 的 pane 级覆盖（T38 起不再依赖它）；ghostty / WezTerm / iTerm2 实测（WezTerm、iTerm2 不支持占位符，走像素）；多 client 同时看同一个 session 的图片 id 冲突（同图同 id，无害）；kill -9 残留的图（下次启动同 id 覆盖）。**Linux 不在 T46 的范围**：TIOCOUTQ 在 Linux 的 pty 上恒返回 0（`room` 恒真，只剩 768 字节小块降低被截的概率，没有保证）；macOS 才有「队列 1024、一次收完」的保证。
 
 ## 头像图片：状态、宽度、选择框（T30–T32，用户 2026-10-13 验收意见）
 - **状态名改成和 pi-emote 一样**，用户能把 pi-emote 的角色目录原样丢进来。状态和触发：`idle` = 原始 idle；`think` = working 且没有 pendingTool（含 agents）；`read` = pendingTool 是 Read / Grep / Glob / WebFetch / WebSearch；`write` = Write / Edit / MultiEdit / NotebookEdit；`tool` = 其它 pendingTool；`hi` = 需要处理（attention 非空或 waiting）；`success` = done。回落链：read / write / tool → think → idle；hi → idle；success → idle。旧名 `working` / `attention` / `done` 当别名（= think / hi / success）仍认。talk / failure / compact 没有触发源，目录存在也不用。
