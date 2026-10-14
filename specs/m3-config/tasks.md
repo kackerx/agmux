@@ -295,3 +295,11 @@
 - 定稿：T45 的「焦点停 2 tick 即已读」去掉；已读只在三种动作时记：在这张卡上开预览、进直通、enter 跳转（已有）。j/k 路过和停留都不算。hidden 标志若只为 dwell 而存在就一并删，T47 收起期间不问浮窗的逻辑还用它则保留。design.md T45 那段同步。
 - 验收：单测 焦点停 10 tick 仍 done、seen.json 无条目；预览 / 直通 / enter 立即已读（原用例保留）。黑盒 真 tmux 夹具 done 卡 focus 3 s 仍 done，开预览后变 idle。原 T45 dwell 用例改掉。
 - reviewer 复审 a43c00e 通过：四种情况底栏与 q 一致，变异 11 杀 9；两条小建议（失败后 quit 方向不变的断言、两个非 tmux 终端无浮窗的用例）并入 T48 的 commit。
+
+### T49 内置头像再加 10 套：GPT 做的 5 个角色 + 5 个火影角色（排入，dev 做，T48 之后）
+- 用户 2026-10-14：GPT 又做了 5 个火影主题（naruto / sasuke / sakura / kakashi / itachi，`~/Pictures/pi-agent-portraits-naruto/emotes/`，每套 30 帧 + sheet，1134×944），连同之前的 5 套（developer / researcher / operator / tester / designer，`~/Pictures/pi-agent-portraits/emotes/`）都进 agmux 默认，用户不用单独装。
+- 定稿：这 10 套按现有内置格式嵌进 internal/avatar/sets/（只取 agmux 用到的 7 个状态目录 idle / think / read / write / tool / hi / success，其余表情和 sheet.png / emotes.json 不嵌）；帧预先裁成居中 3:2 并缩到高 128（和加载时一样，再大是浪费），PNG；dev 回报嵌入后体积，总量超过约 8 MB 就缩到高 96。原件只读，不动用户 ~/Pictures 和 ~/.config。
+- 顺序：`a` 选择框里内置 pi 10 套在前，接 developer / researcher / operator / tester / designer，再 naruto / sasuke / sakura / kakashi / itachi，像素 5 个仍在最后；hash 池包含新 10 套。
+- 用户目录同 id 覆盖内置（用户之前把 5 套拷进了 ~/.config/agmux/avatars/，内置后那份多余，告诉用户可删，不替他删）。
+- 版权备注：火影角色是集英社 / Pierrot 的版权形象，GPT 生成的同人图嵌进开源发布的二进制有风险；用户已知情并决定加入，发布时 oss-maintainer 再提一次。
+- 验收：单测 内置集数 = 20、每套 7 个状态都有帧、帧高 ≤128 且 3:2、id 顺序；用户目录同 id 覆盖；`agmux avatars`（或等价列表）列出 20 套。黑盒 `a` 选择框 5 行滚动、新套头像在真 kitty 可显示（tester 字节流 + 截图）。
