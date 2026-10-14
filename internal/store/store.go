@@ -38,6 +38,8 @@ type Session struct {
 	AvatarState                                string // what an image avatar does: one of avatar.States, from the fields above
 	LastActivity                               time.Time
 	StatusChangedAt                            time.Time // when Status last changed; with the ID it names one done, which is what "seen" is kept for
+	Pinned                                     bool      // pinned to the top of its group (pins.json)
+	PinnedAt                                   time.Time // when; pinned cards sort by it, the first one pinned first
 }
 
 // AvatarKey is what avatar bindings are keyed by: the name, which survives restarts and
@@ -68,12 +70,13 @@ type Poller struct {
 	AvatarDefault string            // config.toml's [avatars] default; "" = hash
 
 	Seen *avatar.FileBindings // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
+	Pins *avatar.FileBindings // pins.json: session ID → when it was pinned (RFC 3339); nil = nothing is pinned
 
 	refreshMu sync.Mutex        // serializes Refresh; guards models
 	models    map[string]string // session ID → last model found in its jsonl
 	heads     map[string]string // transcript path → agent definition from its head (the head never changes), once known
 
-	avatarErr, seenErr error // avatars.json / seen.json could not be read, as of the last poll or bind
+	avatarErr, seenErr, pinsErr error // avatars.json / seen.json / pins.json could not be read, as of the last poll or bind
 
 	mu       sync.Mutex
 	sessions []Session
@@ -88,7 +91,8 @@ func NewPoller() (*Poller, error) {
 	// a corrupt avatars.json means no bindings (hash defaults); the error shows on the board, it never exits
 	b, err := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
 	seen, serr := avatar.LoadBindings(filepath.Join(dir, "seen.json")) // likewise: a corrupt one means nothing is seen
-	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b, avatarErr: err, Seen: seen, seenErr: serr}, nil
+	pins, perr := avatar.LoadBindings(filepath.Join(dir, "pins.json"))
+	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b, avatarErr: err, Seen: seen, seenErr: serr, Pins: pins, pinsErr: perr}, nil
 }
 
 func (p *Poller) Sessions() []Session {
@@ -98,7 +102,7 @@ func (p *Poller) Sessions() []Session {
 }
 
 // Err is the last poll's error (the previous sessions are kept when it fails),
-// else the avatars.json error, else the seen.json one.
+// else the avatars.json error, else the seen.json one, else the pins.json one.
 func (p *Poller) Err() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -108,7 +112,10 @@ func (p *Poller) Err() error {
 	if p.avatarErr != nil {
 		return p.avatarErr
 	}
-	return p.seenErr
+	if p.seenErr != nil {
+		return p.seenErr
+	}
+	return p.pinsErr
 }
 
 // seenKey names one done: the status changed at that time. A session that works and is done again has a new one.
@@ -163,16 +170,67 @@ func (p *Poller) SetAvatar(s Session, id string) error {
 	return nil
 }
 
+// TogglePin pins s to the top of its group, or takes it off when it is pinned. Pins are kept by
+// session ID, so they hold under every grouping and across restarts.
+func (p *Poller) TogglePin(s Session) error {
+	if p.Pins == nil {
+		return nil
+	}
+	p.refreshMu.Lock() // as MarkSeen: a poll in flight was built without it
+	defer p.refreshMu.Unlock()
+	at := time.Now().UTC()
+	var err error
+	if s.Pinned {
+		if err = p.Pins.Reload(); err == nil {
+			err = p.Pins.Prune(func(id string) bool { return id != s.ID })
+		}
+	} else {
+		err = p.Pins.Set(s.ID, at.Format(time.RFC3339Nano))
+	}
+	perr := p.Pins.Reload()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pinsErr = perr
+	if err != nil {
+		return err
+	}
+	ss := slices.Clone(p.sessions)
+	for i := range ss {
+		if ss[i].ID == s.ID {
+			ss[i].Pinned, ss[i].PinnedAt = !s.Pinned, time.Time{}
+			if !s.Pinned {
+				ss[i].PinnedAt = at
+			}
+		}
+	}
+	p.sessions = ss
+	return nil
+}
+
+// pinnedAt is when the session was pinned (ok false: it is not). A time that does not parse still
+// counts as pinned, before every other.
+func (p *Poller) pinnedAt(id string) (t time.Time, ok bool) {
+	if p.Pins == nil {
+		return t, false
+	}
+	v, ok := p.Pins.Get(id)
+	t, _ = time.Parse(time.RFC3339Nano, v)
+	return t, ok
+}
+
 // Refresh polls ccmux once.
 func (p *Poller) Refresh() error {
 	p.refreshMu.Lock()
 	defer p.refreshMu.Unlock()
-	var aerr, serr error
+	var aerr, serr, perr error
 	if p.Avatars != nil { // another board, or a hand edit, may have changed avatars.json
 		aerr = p.Avatars.Reload()
 	}
 	if p.Seen != nil {
 		serr = p.Seen.Reload()
+	}
+	if p.Pins != nil {
+		perr = p.Pins.Reload()
 	}
 	raw, err := p.Show()
 	var ss []Session
@@ -186,6 +244,15 @@ func (p *Poller) Refresh() error {
 				serr = perr
 			}
 		}
+		if p.Pins != nil { // a session that is gone loses its pin
+			live := map[string]bool{}
+			for _, r := range raw {
+				live[r.ID] = true
+			}
+			if e := p.Pins.Prune(func(id string) bool { return live[id] }); perr == nil {
+				perr = e
+			}
+		}
 		ss = make([]Session, len(raw))
 		for i, r := range raw {
 			ss[i] = p.convert(r)
@@ -193,7 +260,7 @@ func (p *Poller) Refresh() error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.err, p.avatarErr, p.seenErr = err, aerr, serr
+	p.err, p.avatarErr, p.seenErr, p.pinsErr = err, aerr, serr, perr
 	if err == nil {
 		p.sessions = ss
 	}
@@ -234,6 +301,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		}
 	}
 	s.StatusChangedAt = r.StatusChangedAt
+	s.PinnedAt, s.Pinned = p.pinnedAt(r.ID)
 	s.Done = s.Status == "idle" && r.AttentionState != "" && !p.seen(r)
 	s.AvatarState = avatarState(s)
 	s.GroupKey = groupKey(s)

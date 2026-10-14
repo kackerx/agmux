@@ -733,3 +733,99 @@ func TestMarkSeenOldDone(t *testing.T) {
 		t.Error("the newer done was taken off by a MarkSeen of the older one")
 	}
 }
+
+func pinPoller(t *testing.T, raw *[]ccmux.Session) (*Poller, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pins.json")
+	pins, _ := avatar.LoadBindings(path)
+	p := &Poller{Show: func() ([]ccmux.Session, error) { return *raw, nil }, StateDir: t.TempDir(), Pins: pins}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	return p, path
+}
+
+// TogglePin pins and unpins by session ID: at once on the sessions the board holds, in pins.json
+// (read back by another poller, a restart), and a session that is gone loses its pin.
+func TestTogglePin(t *testing.T) {
+	raw := []ccmux.Session{{ID: "a", Status: "idle"}, {ID: "b", Status: "idle"}, {ID: "c", Status: "idle"}}
+	p, path := pinPoller(t, &raw)
+	if byID(t, p.Sessions(), "a").Pinned {
+		t.Fatal("pinned from the start")
+	}
+	for _, id := range []string{"b", "a"} {
+		if err := p.TogglePin(byID(t, p.Sessions(), id)); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Millisecond) // two pins never share a time
+	}
+	a, b := byID(t, p.Sessions(), "a"), byID(t, p.Sessions(), "b")
+	if !a.Pinned || !b.Pinned || !b.PinnedAt.Before(a.PinnedAt) || byID(t, p.Sessions(), "c").Pinned {
+		t.Errorf("right after: a %+v b %+v", a, b)
+	}
+	p.Refresh()
+	if a2 := byID(t, p.Sessions(), "a"); !a2.Pinned || !a2.PinnedAt.Equal(a.PinnedAt) {
+		t.Errorf("a poll loses the pin: %+v", a2)
+	}
+	// a restart: a new poller on the same file
+	other, _ := avatar.LoadBindings(path)
+	p2 := &Poller{Show: p.Show, StateDir: t.TempDir(), Pins: other}
+	p2.Refresh()
+	if !byID(t, p2.Sessions(), "a").Pinned || !byID(t, p2.Sessions(), "b").Pinned || byID(t, p2.Sessions(), "c").Pinned {
+		t.Errorf("a restart forgets the pins: %+v", p2.Sessions())
+	}
+	// unpin
+	if err := p.TogglePin(byID(t, p.Sessions(), "b")); err != nil {
+		t.Fatal(err)
+	}
+	if byID(t, p.Sessions(), "b").Pinned || !byID(t, p.Sessions(), "a").Pinned {
+		t.Errorf("unpin b: %+v", p.Sessions())
+	}
+	if got := seenFile(t, path); !strings.HasPrefix(got, `{"a":"`) || strings.Contains(got, `"b"`) {
+		t.Errorf("pins.json %s", got)
+	}
+	// a's session is gone: its pin goes
+	raw = raw[1:]
+	p.Refresh()
+	if got := seenFile(t, path); got != "{}" {
+		t.Errorf("pins.json %s, want the gone session dropped", got)
+	}
+	// ... but not while ccmux fails
+	raw = append(raw, ccmux.Session{ID: "d", Status: "idle"})
+	p.Refresh()
+	p.TogglePin(byID(t, p.Sessions(), "d"))
+	p.Show = func() ([]ccmux.Session, error) { return nil, os.ErrDeadlineExceeded }
+	p.Refresh()
+	if got := seenFile(t, path); !strings.Contains(got, `"d"`) {
+		t.Errorf("a failed poll dropped the pin: %s", got)
+	}
+}
+
+// A pins.json that is not JSON means nothing is pinned; the board says so and the file is left for the user.
+func TestPinsCorruptFile(t *testing.T) {
+	raw := []ccmux.Session{{ID: "a", Status: "idle"}}
+	p, path := pinPoller(t, &raw)
+	os.WriteFile(path, []byte("{oops"), 0o644)
+	os.Chtimes(path, time.Now(), time.Now().Add(time.Hour))
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if e := p.Err(); e == nil || !strings.Contains(e.Error(), "pins.json") {
+		t.Errorf("Err() = %v, want the pins.json problem", e)
+	}
+	if p.Sessions()[0].Pinned {
+		t.Error("nothing is pinned")
+	}
+	if err := p.TogglePin(p.Sessions()[0]); err == nil || !strings.Contains(err.Error(), "pins.json") {
+		t.Errorf("TogglePin: %v", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "{oops" {
+		t.Errorf("the corrupt file was overwritten: %q", b)
+	}
+	os.WriteFile(path, []byte("{}"), 0o644)
+	os.Chtimes(path, time.Now(), time.Now().Add(2*time.Hour))
+	p.Refresh()
+	if p.Err() != nil {
+		t.Errorf("fixed by hand: %v", p.Err())
+	}
+}

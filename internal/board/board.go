@@ -33,7 +33,8 @@ type Source interface {
 	store.Store
 	Err() error
 	SetAvatar(s store.Session, id string) error
-	MarkSeen(s store.Session) error // the user saw s's done: it is idle from now on
+	MarkSeen(s store.Session) error  // the user saw s's done: it is idle from now on
+	TogglePin(s store.Session) error // pin s to the top of its group, or unpin it
 }
 
 // Runner runs ccmux and tmux; tests swap in one that records them.
@@ -814,6 +815,12 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "pin": // off the UI goroutine: it writes a file
+		src, verb := m.src, "pinned "
+		if s.Pinned {
+			verb = "unpinned "
+		}
+		return m, func() tea.Msg { return doneMsg{ok: verb + s.Name, err: src.TogglePin(s)} }
 	case "restart":
 		m.msg = fg(cMuted, " restarting "+s.Name+"…")
 		return m, m.ccmux("restarted "+s.Name, "restart", s.ID)

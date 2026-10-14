@@ -100,8 +100,9 @@ func (g group) title() string {
 	return tildePath(g.key)
 }
 
-// groups splits sessions by GroupKey. The order comes only from the data (groups by key,
-// cards by name then id), never from ccmux's array order, so polls don't shuffle the board.
+// groups splits sessions by GroupKey. The order comes only from the data (groups by key, cards
+// pinned first in the order they were pinned, then by name then id), never from ccmux's array
+// order, so polls don't shuffle the board.
 func groups(ss []store.Session) []group {
 	var gs []group
 	idx := map[string]int{}
@@ -118,6 +119,12 @@ func groups(ss []store.Session) []group {
 	for _, g := range gs {
 		sort.Slice(g.sessions, func(i, j int) bool {
 			a, b := g.sessions[i], g.sessions[j]
+			if a.Pinned != b.Pinned {
+				return a.Pinned
+			}
+			if a.Pinned && !a.PinnedAt.Equal(b.PinnedAt) {
+				return a.PinnedAt.Before(b.PinnedAt)
+			}
 			return a.Name < b.Name || a.Name == b.Name && a.ID < b.ID
 		})
 	}
@@ -388,7 +395,28 @@ func spread(left, right string, w int, cut string) string {
 
 // line1: the name, the time at the right edge; the name is cut only when it doesn't fit.
 func line1(s store.Session, w int, now time.Time, hl []int) string {
-	return spread(hilite(s.Name, hl, cName), fg(cMuted, relTime(s.LastActivity, now)), w, cutMark(cName))
+	return spread(pinMark(s)+hilite(s.Name, hl, cName), fg(cMuted, relTime(s.LastActivity, now)), w, cutMark(cName))
+}
+
+// pinMark goes before a pinned card's name; pinW is its width, which the name's place moves by.
+func pinMark(s store.Session) string {
+	if !s.Pinned {
+		return ""
+	}
+	return fg(cFocus, pinGlyph)
+}
+
+const (
+	pinGlyph = "▲ "
+	pinW     = 2
+)
+
+// pinWidth is the cells a card's name moves right by.
+func pinWidth(s store.Session) int {
+	if s.Pinned {
+		return pinW
+	}
+	return 0
 }
 
 // status is the colored status word and its plain detail (" · Bash", " · agents" or "").
@@ -875,7 +903,8 @@ func flashScan(gs []group, rects []rect, focus, pat string, off, bodyH, cardsW i
 			if t := relTime(s.LastActivity, now); t != "" {
 				rw = ansi.StringWidth(t) + 1
 			}
-			scan(ansi.Truncate(s.Name, max(tw-rw, 0), "…"), x0, y+1, s.ID, false)
+			pw := pinWidth(s)
+			scan(ansi.Truncate(s.Name, max(tw-rw-pw, 0), "…"), x0+pw, y+1, s.ID, false)
 			if s.Branch != "" {
 				avail := branchRoom(s, tw) - icon
 				text, _, _ := shownBranch(s.Branch, avail)
