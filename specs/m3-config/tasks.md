@@ -296,7 +296,7 @@
 - 验收：单测 焦点停 10 tick 仍 done、seen.json 无条目；预览 / 直通 / enter 立即已读（原用例保留）。黑盒 真 tmux 夹具 done 卡 focus 3 s 仍 done，开预览后变 idle。原 T45 dwell 用例改掉。
 - reviewer 复审 a43c00e 通过：四种情况底栏与 q 一致，变异 11 杀 9；两条小建议（失败后 quit 方向不变的断言、两个非 tmux 终端无浮窗的用例）并入 T48 的 commit。
 
-### T49 内置头像再加 10 套：GPT 做的 5 个角色 + 5 个火影角色（dev @dd7ada1 送审 + 测）
+### T49 内置头像再加 10 套：GPT 做的 5 个角色 + 5 个火影角色（dev @dd7ada1 审查退回 1 必改，修复中）
 - 用户 2026-10-14：GPT 又做了 5 个火影主题（naruto / sasuke / sakura / kakashi / itachi，`~/Pictures/pi-agent-portraits-naruto/emotes/`，每套 30 帧 + sheet，1134×944），连同之前的 5 套（developer / researcher / operator / tester / designer，`~/Pictures/pi-agent-portraits/emotes/`）都进 agmux 默认，用户不用单独装。
 - 定稿：这 10 套按现有内置格式嵌进 internal/avatar/sets/（只取 agmux 用到的 7 个状态目录 idle / think / read / write / tool / hi / success，其余表情和 sheet.png / emotes.json 不嵌）；帧预先裁成居中 3:2 并缩到高 128（和加载时一样，再大是浪费），PNG；dev 回报嵌入后体积，总量超过约 8 MB 就缩到高 96。原件只读，不动用户 ~/Pictures 和 ~/.config。
 - 顺序：`a` 选择框里内置 pi 10 套在前，接 developer / researcher / operator / tester / designer，再 naruto / sasuke / sakura / kakashi / itachi，像素 5 个仍在最后；hash 池包含新 10 套。
@@ -308,3 +308,4 @@
 - dev dd7ada1：sets 1.4 → 4.1 MB，二进制 7.82 → 10.33 MB（不用缩 96）；原帧本就 128×128，只裁居中 3:2 成 126×84（128×85 会被 cropFor 再裁一列，「上传 = 存储」不成立）；每套 7 态各 2 帧共 14 帧；转换器 tools/embedsets 可重跑；builtinOrder 固定顺序；用户同 id 覆盖内置（原规则）；CREDITS.md 注明来源与火影版权；README 提示用户可删 ~/.config 里的同名拷贝。副作用：无绑定会话的默认头像（hash 池 20 套）又会变一次；每次启动上传 20 套，dev 补数字。
 - dev 补数字：20 套全内置时一次启动上传 4.4 MB / 5796 个序列（T46 时 15 套 2.76 MB / 3676 个、0.55 s），估 <1 s；备忘「只上传当前用到的集」优先级提高。
 - reviewer（7f7a205）：行为正确，三种触发只在 done 卡记、停留与移动不记均有变异杀；退回 1 必改：switchAndHide 的 hidden 返回值已死 → 只返回 error（建在 dd7ada1 之上）。e2e test_t45.py 6 条 dwell / hidden 用例、lib.py 的 session_attached 分支、README 描述交 tester 改。不做：预览中变 done 再关预览记已读的用例。
+- reviewer（dd7ada1）：嵌入内容无误（140 帧全 126×84、逐字节 = 上传、重跑转换器 diff 一致、embed 范围只含 sets、顺序测试锁住）；真 pty 20 套 4.41 MB / 5796 个 APC 0 截，快读 0.11 s、慢读 1.8 s。退回 1 必改：tools/embedsets 先 RemoveAll 再检查，源参数 `.` 会删光 internal/avatar/sets → 临时目录转换成功后再替换 + 拒绝 "." / ".." / "/"。采纳：CREDITS 两处措辞（第二三组适用许可、火影版权归属与非官方声明）、avatar_ext_test.go 386 溢出一行。不做：embedsets 重抄常量。升级后无绑定会话默认头像大多会换，验收报告告知用户。
