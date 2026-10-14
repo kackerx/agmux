@@ -311,3 +311,8 @@
 - reviewer（dd7ada1）：嵌入内容无误（140 帧全 126×84、逐字节 = 上传、重跑转换器 diff 一致、embed 范围只含 sets、顺序测试锁住）；真 pty 20 套 4.41 MB / 5796 个 APC 0 截，快读 0.11 s、慢读 1.8 s。退回 1 必改：tools/embedsets 先 RemoveAll 再检查，源参数 `.` 会删光 internal/avatar/sets → 临时目录转换成功后再替换 + 拒绝 "." / ".." / "/"。采纳：CREDITS 两处措辞（第二三组适用许可、火影版权归属与非官方声明）、avatar_ext_test.go 386 溢出一行。不做：embedsets 重抄常量。升级后无绑定会话默认头像大多会换，验收报告告知用户。
 - dev：T48 修复 b0e0ba3（switchAndHide 只返回 error）；T49 修复 fdac3c9（临时目录转换成功后再替换、拒绝 . / .. / 分隔符源、run() 可测变异 4 杀；CREDITS 措辞；386 常量）。本轮 T47–T49 目标 hash = fdac3c9，tester 起整套回归。
 - reviewer 复审：T48 b0e0ba3、T49 fdac3c9 均通过（误删复现被拒、坏输入不动旧套、重跑 diff 一致、变异 6 杀 5；CREDITS 与 386 满足）。不补：临时目录名以点开头无测试。本轮最终 hash fdac3c9，等 tester。
+
+### T50 `agmux config` 打印带注释的完整模板（排入，dev 做，本轮回归之后）
+- 用户 2026-10-14：配置文件里把所有可配置项都列上，带默认值，注释里写可选项，全英文。我已按现有选项手写了用户的 ~/.config/agmux/config.toml（保留他的 max_columns=5 / flow=stack / renderer=image / border），模板（默认值版）存 specs/m3-config/config.example.toml。
+- 定稿：`agmux config` 的输出改成 config.example.toml 这套带注释的格式，值用当前生效值（注释里的 default 不变）；每个动作 / 颜色一行加尾注释，[layout] / [avatars] 的可选项写在注释里，[avatars.bind] 的绑定照常打印在节下（注释在前）。README 配置一节说明 `agmux config > ~/.config/agmux/config.toml` 可生成完整文件。不加新子命令。
+- 验收：单测 打印结果能被 Parse 回读且等价（round-trip）、每个 Actions / Colors 都有一行、注释含 default；黑盒 `agmux config` 输出与模板逐行比对（值处除外）。
