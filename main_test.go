@@ -39,7 +39,7 @@ func TestAvatarsOutput(t *testing.T) {
 	var out, errs bytes.Buffer
 	avatars(&out, &errs)
 	lines := strings.Split(out.String(), "\n")
-	// the ten built-in sets, with the frames of each state that are not alternate takes (_v2…)
+	// the twenty built-in sets, with the frames of each state that are not alternate takes (_v2…)
 	want := []string{
 		"aza_choi  builtin  idle 2 · think 2 · read 4 · write 4 · tool 4 · hi 4 · success 0",
 		"cipher  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 0",
@@ -51,6 +51,9 @@ func TestAvatarsOutput(t *testing.T) {
 		"quill  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2",
 		"red  builtin  idle 2 · think 2 · read 3 · write 2 · tool 2 · hi 2 · success 0",
 		"sprocket  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2",
+	}
+	for _, id := range []string{"developer", "researcher", "operator", "tester", "designer", "naruto", "sasuke", "sakura", "kakashi", "itachi"} {
+		want = append(want, id+"  builtin  idle 2 · think 2 · read 2 · write 2 · tool 2 · hi 2 · success 2")
 	}
 	want = append(want,
 		"bot-01  user  idle 1 · think 0 · read 0 · write 0 · tool 0 · hi 0 · success 0",

@@ -242,8 +242,8 @@ func TestBuiltinSet(t *testing.T) {
 	t.Cleanup(func() { Sets, problems = nil, nil })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no user sets
 	LoadSets()
-	if len(Sets) != 10 || len(Sprites) != 5 { // 15 built-in avatars: 10 characters and 5 pixel sprites
-		t.Errorf("%d built-in sets and %d sprites, want 10 and 5", len(Sets), len(Sprites))
+	if len(Sets) != 20 || len(Sprites) != 5 { // 25 built-in avatars: 20 characters and 5 pixel sprites
+		t.Errorf("%d built-in sets and %d sprites, want 20 and 5", len(Sets), len(Sprites))
 	}
 	var ids []string
 	for _, s := range Sets {
@@ -257,7 +257,7 @@ func TestBuiltinSet(t *testing.T) {
 			t.Errorf("%s has %d frames: alternate takes (_v2) are not frames", s.ID, n)
 		}
 	}
-	if got := strings.Join(ids, " "); got != "aza_choi cipher default forge moss nova oana quill red sprocket" {
+	if got := strings.Join(ids, " "); got != "aza_choi cipher default forge moss nova oana quill red sprocket developer researcher operator tester designer naruto sasuke sakura kakashi itachi" {
 		t.Errorf("built-in sets: %s", got)
 	}
 	s, ok := SetByID("aza_choi")
@@ -279,6 +279,51 @@ func TestBuiltinSet(t *testing.T) {
 	}
 }
 
+// The ten sets added in T49 have every state, and each frame is stored as it is uploaded: the centered
+// 3:2 part, at most maxHeight high (tools/embedsets cuts it so; a bigger one would be cut again at every
+// start, and is binary size for nothing).
+func TestBuiltinSetsArePrecropped(t *testing.T) {
+	t.Cleanup(func() { Sets, problems = nil, nil })
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	LoadSets()
+	for _, id := range builtinOrder[10:] {
+		s, ok := SetByID(id)
+		if !ok {
+			t.Fatalf("no built-in set %s", id)
+		}
+		for _, st := range States {
+			if len(s.Frames[st]) == 0 {
+				t.Errorf("%s has no %s frames", id, st)
+			}
+			for i, f := range s.Frames[st] {
+				cfg, err := png.DecodeConfig(bytes.NewReader(f))
+				if err != nil || cfg.Height > maxHeight || cfg.Height != cfg.Width*2/3 {
+					t.Errorf("%s %s %d: %d × %d (%v), want 3:2 and at most %d high", id, st, i, cfg.Width, cfg.Height, err, maxHeight)
+				}
+				if !bytes.Equal(f, s.sent[st][i]) {
+					t.Errorf("%s %s %d: uploaded differs from stored: cropped again at load", id, st, i)
+				}
+			}
+		}
+	}
+}
+
+// The picker lists the 20 sets in builtinOrder and the pixel sprites after them.
+func TestBuiltinListingOrder(t *testing.T) {
+	t.Cleanup(func() { Sets, problems = nil, nil })
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	LoadSets()
+	got := Listing()
+	if len(got) != 25 || !slices.Equal(got[:20], builtinOrder) {
+		t.Errorf("listing: %v", got)
+	}
+	for _, id := range got[20:] {
+		if _, isSet := SetByID(id); isSet {
+			t.Errorf("%s: a sprite is expected after the sets", id)
+		}
+	}
+}
+
 // A user set replaces a built-in one of the same ID; the others stay, in load order.
 func TestUserSetReplacesBuiltin(t *testing.T) {
 	t.Cleanup(func() { Sets, problems = nil, nil })
@@ -288,8 +333,8 @@ func TestUserSetReplacesBuiltin(t *testing.T) {
 		t.Fatal(err)
 	}
 	LoadSets()
-	if n := len(Sets); n != 11 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || !bytes.Equal(Sets[0].Frames["idle"][0], pngOf("mine")) || Sets[1].ID != "cipher" || Sets[1].Source != "builtin" || Sets[n-1].ID != "zed" {
-		t.Errorf("sets (want the 10 built-in ones, aza_choi replaced, then zed): %d %+v", n, Sets[0])
+	if n := len(Sets); n != 21 || Sets[0].ID != "aza_choi" || Sets[0].Source != "user" || !bytes.Equal(Sets[0].Frames["idle"][0], pngOf("mine")) || Sets[1].ID != "cipher" || Sets[1].Source != "builtin" || Sets[n-1].ID != "zed" {
+		t.Errorf("sets (want the 20 built-in ones, aza_choi replaced, then zed): %d %+v", n, Sets[0])
 	}
 }
 

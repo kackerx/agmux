@@ -137,6 +137,7 @@ func Known(id string) bool {
 func LoadSets() {
 	sub, _ := fs.Sub(builtin, "sets")
 	all, problems1 := loadSets(sub, "builtin")
+	slices.SortStableFunc(all, func(a, b *Set) int { return builtinRank(a.ID) - builtinRank(b.ID) })
 	var problems2 []string
 	if dir, err := xdg.ConfigDir(); err == nil {
 		var user []*Set
@@ -150,6 +151,21 @@ func LoadSets() {
 		}
 	}
 	Sets, problems = all, append(problems1, problems2...)
+}
+
+// builtinOrder is the order the built-in sets come in the picker (and so everywhere): pi-agent-portrait's
+// characters, the five roles, the five Naruto ones. A set not listed goes after them, by name.
+var builtinOrder = []string{
+	"aza_choi", "cipher", "default", "forge", "moss", "nova", "oana", "quill", "red", "sprocket",
+	"developer", "researcher", "operator", "tester", "designer",
+	"naruto", "sasuke", "sakura", "kakashi", "itachi",
+}
+
+func builtinRank(id string) int {
+	if i := slices.Index(builtinOrder, id); i >= 0 {
+		return i
+	}
+	return len(builtinOrder)
 }
 
 // UseSets makes the sets under fsys the only ones; for tests. It returns what it skipped.
