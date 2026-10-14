@@ -306,3 +306,4 @@
 - dev 7f7a205：dwell、hidden、asking、attachedMsg、doneMsg.hid、seenFrames 整套删（hidden 只为 dwell 存在；T47 收起期间不问浮窗也随之去掉，代价是收起期间每秒照常问、再 attach 后底栏最多晚 1 s，照准）；焦点停 10 帧 + j/k 仍 done；T47 两条小建议测试并入；README 去掉「停 1 秒」。
 - tester 终结论（c3e964b）：整套 809 条 OK（在 ba59d3b 上，1697 s；c3e964b 仅多单测，定点复跑 OK）；套件 d25ea78。已装用户的 ba59d3b 产品代码与 c3e964b 相同，不重装。
 - dev dd7ada1：sets 1.4 → 4.1 MB，二进制 7.82 → 10.33 MB（不用缩 96）；原帧本就 128×128，只裁居中 3:2 成 126×84（128×85 会被 cropFor 再裁一列，「上传 = 存储」不成立）；每套 7 态各 2 帧共 14 帧；转换器 tools/embedsets 可重跑；builtinOrder 固定顺序；用户同 id 覆盖内置（原规则）；CREDITS.md 注明来源与火影版权；README 提示用户可删 ~/.config 里的同名拷贝。副作用：无绑定会话的默认头像（hash 池 20 套）又会变一次；每次启动上传 20 套，dev 补数字。
+- dev 补数字：20 套全内置时一次启动上传 4.4 MB / 5796 个序列（T46 时 15 套 2.76 MB / 3676 个、0.55 s），估 <1 s；备忘「只上传当前用到的集」优先级提高。
