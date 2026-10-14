@@ -1003,3 +1003,12 @@ class PtyTty:
         for fd in (self.master, self._slave):
             try: os.close(fd)
             except OSError: pass
+
+
+def plain_config(out):
+    """T50: `agmux config` prints a commented template. The bare `key = value` lines of it (comments, `# default:` notes and their continuation lines dropped, the blank lines between sections kept): the old dump format, for the tests that look at values."""
+    keep = []
+    for l in out.splitlines():
+        if l.lstrip().startswith("#"): continue
+        keep.append(re.sub(r"\s+# default:.*$", "", l))
+    return "\n".join(keep).lstrip("\n").rstrip("\n") + "\n"

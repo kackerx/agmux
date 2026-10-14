@@ -144,7 +144,7 @@ class Cli(unittest.TestCase):
         r = self.run_cli("help"); out = r.stdout + r.stderr; self.assertIn("--stay", out)
 
     def test_config_prints_exit_after_quit(self):
-        out = self.run_cli("config").stdout; self.assertRegex(out, r'(?m)^quit = \["q", "esc"\]\nexit = \["Q"\]$')
+        out = plain_config(self.run_cli("config").stdout); self.assertRegex(out, r'(?m)^quit = \["q", "esc"\]\nexit = \["Q"\]$')
 
     def test_the_footer_says_hide_and_quit_in_stay_and_plain_quit_otherwise(self):
         """outside tmux --stay degrades: no `q hide`, one line on the footer why; the plain board says `q quit`"""

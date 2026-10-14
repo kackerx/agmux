@@ -202,7 +202,7 @@ class Config(Base):
         return subprocess.run([BIN, *a], env=env, capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
 
     def test_config_prints_the_new_actions_after_right(self):
-        out = self.cli("config").stdout; self.assertIn('right = ["l", "right"]\npage_down = ["ctrl+d"]\npage_up = ["ctrl+u"]\njump = ["enter"]', out)
+        out = plain_config(self.cli("config").stdout); self.assertIn('right = ["l", "right"]\npage_down = ["ctrl+d"]\npage_up = ["ctrl+u"]\njump = ["enter"]', out)
 
     def test_the_keys_are_configurable(self):
         t = self.board(config='[keys]\npage_down = ["ctrl+f"]\npage_up = ["ctrl+b"]\n'); r0 = self.rows(t)

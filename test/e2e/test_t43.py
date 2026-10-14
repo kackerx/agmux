@@ -89,7 +89,7 @@ class Base(unittest.TestCase):
 
 class Config(Base):
     def test_the_default_is_cwd_and_config_prints_it_after_flow(self):
-        out = self.cli("config", text="").stdout; self.assertIn('[layout]\nmax_columns = 4\nflow = "bands"\ngroup_by = "cwd"\n', out)
+        out = plain_config(self.cli("config", text="").stdout); self.assertIn('[layout]\nmax_columns = 4\nflow = "bands"\ngroup_by = "cwd"\n', out)
 
     def test_each_mode_round_trips(self):
         for m in MODES:
@@ -109,7 +109,7 @@ class Config(Base):
         self.assertEqual(t.exit_status(8), 1, t.text()); self.assertIn('layout.group_by: "nope" is not a grouping', t.text())
 
     def test_g_is_an_action_in_the_keys_table_and_readme_documents_it(self):
-        out = self.cli("config", text="").stdout; self.assertRegex(out, r'(?m)^group = \["g"\]$')
+        out = plain_config(self.cli("config", text="").stdout); self.assertRegex(out, r'(?m)^group = \["g"\]$')
         readme = (SRC / "README.md").read_text(); self.assertIn("group_by", readme); self.assertIn("`g`", readme)
         for m in MODES: self.assertIn(m, readme)
 

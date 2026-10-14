@@ -52,7 +52,7 @@ class Defaults(Base):
             self.assertIn(want, bar)
 
     def test_config_prints_the_defaults_and_path(self):
-        r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr); r.stdout = plain_config(r.stdout)  # T50: the bare values of the commented template (test_t50 has the template itself)
         self.assertTrue(r.stdout.startswith("[keys]\n"), r.stdout)
         keys = r.stdout.split("[colors]")[0]; cols = r.stdout.split("[colors]")[1].split("[layout]")[0]  # [layout] (T25) and [avatars] (T18) follow the colours
         self.assertEqual([l.split(" = ")[0] for l in keys.splitlines()[1:] if l], DEFAULT_KEYS)

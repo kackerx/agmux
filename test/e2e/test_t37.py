@@ -131,7 +131,7 @@ class Config(Base):
         return subprocess.run([BIN, *a], env={"PATH": "/usr/bin:/bin", "HOME": str(self.env.home), "XDG_CONFIG_HOME": str(cfg), "LANG": "en_US.UTF-8"}, capture_output=True, text=True, timeout=10)
 
     def test_the_default_colour_is_listed_between_effort_and_dir(self):
-        out = self.cli("config", text="").stdout; self.assertIn('effort = "13"\nagent = "#bd93f9"\ndir = "11"', out)
+        out = plain_config(self.cli("config", text="").stdout); self.assertIn('effort = "13"\nagent = "#bd93f9"\ndir = "11"', out)
 
     def test_a_bad_colour_is_reported_like_the_others(self):
         r = self.cli("config", text='[colors]\nagent = "nope"\n'); self.assertEqual(r.returncode, 1); self.assertIn("colors.agent", r.stderr)

@@ -487,15 +487,15 @@ class ConfigErrors(Base):
 
     def test_config_prints_the_avatars_sections_and_round_trips(self):
         self.config('[avatars]\ndefault = "bot-02"\n[avatars.bind]\n"pj-fallback" = "bot-05"\n')
-        out = self.cli("config").stdout
-        self.assertIn('avatar = ["a"]', out); self.assertIn('[avatars]\nrenderer = "auto"\ndefault = "bot-02"', out); self.assertIn('"pj-fallback" = "bot-05"', out)
+        out = self.cli("config").stdout; plain = plain_config(out)
+        self.assertIn('avatar = ["a"]', out); self.assertIn('[avatars]\nrenderer = "auto"\ndefault = "bot-02"', plain); self.assertIn('"pj-fallback" = "bot-05"', out)
         self.config(out)
         r = self.cli("config"); self.assertEqual(r.returncode, 0, r.stderr); self.assertEqual(r.stdout, out, "idempotent")
         t = self.board(); self.assertEqual((self.id_of(t, "a2"), self.id_of(t, "c1")), (("bot-05",), ("bot-02",)))
 
     def test_default_dump_says_hash_and_has_no_binds(self):
         out = self.cli("config").stdout
-        self.assertIn('[avatars]\nrenderer = "auto"\ndefault = "hash"', out); self.assertNotIn("pj-fallback", out)
+        self.assertIn('[avatars]\nrenderer = "auto"\ndefault = "hash"', plain_config(out)); self.assertNotIn("pj-fallback", out)
         self.config(out); self.assertEqual(self.cli("config").returncode, 0)
 
 

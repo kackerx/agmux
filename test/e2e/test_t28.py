@@ -481,7 +481,7 @@ class Config(Base):
         return subprocess.run([BIN, *args], env=env, capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
 
     def test_default_table_has_renderer_auto_before_default(self):
-        self.config("", default=None); out = self.cli("config").stdout; self.assertIn('[avatars]\nrenderer = "auto"\ndefault = "hash"\n', out)
+        self.config("", default=None); out = plain_config(self.cli("config").stdout); self.assertIn('[avatars]\nrenderer = "auto"\ndefault = "hash"\n', out)
 
     def test_renderer_values_round_trip(self):
         for v in ("auto", "image", "pixel"):
