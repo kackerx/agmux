@@ -1,6 +1,6 @@
 """T44 `agmux board --stay`: the board lives in a session of its own and a popup (`display-popup -E "tmux attach -t <it>"`) only shows it. enter = switch the user's client to the pane and detach the popup client, the
 process stays; q / esc = detach only; Q (the new `exit` action) ends the process; a client of the board's own session that is not a popup (no nested termname, or the one the jump goes to) is never detached; with no popup
-client (ordinary pane, the only client, no client at all) it is what it was: the jump / q end the board. Footer in stay: `q hide · Q quit`. Spec: specs/m3-config/tasks.md「第八批」T44.
+client (ordinary pane, the only client, no client at all) it is what it was: the jump / q end the board. Footer in stay with a popup: `q hide · Q quit` (T47: `q quit` with none). Spec: specs/m3-config/tasks.md「第八批」T44.
 
 Real tmux, two servers: the suite's private server (tm()) holds the sessions -- `work` (the user's terminal is attached to it), `tgt` / `tgt2` (the panes the cards point at) and `agboard` (agmux board --stay); a second
 server on a socket of its own (tmo()) runs the user's "terminal": a pane whose program is `tmux attach` to the first one, so there are real clients with real nested termnames. A real `display-popup -E` on that client is the popup.
@@ -31,16 +31,16 @@ class Real(unittest.TestCase):
     def tmo(self, *a): return subprocess.run(["tmux", "-L", self.out, "-f", "/dev/null", *map(str, a)], capture_output=True, text=True)
 
     # ---- the layout ---------------------------------------------------------------------------------------------------------------------
-    def start_board(self, args="--stay", config=None, session="agboard"):
+    def start_board(self, args="--stay", config=None, session="agboard", w=100):
         if config is not None: (self.cfg / "agmux" / "config.toml").write_text(config)
         cmd = f'{self.env.prefix_real} TMUX="$TMUX" TMUX_PANE="$TMUX_PANE" XDG_CONFIG_HOME={self.cfg} {BIN} board {args}'
-        r = tm("new-session", "-d", "-s", session, "-x", "100", "-y", "40", cmd); self.assertEqual(r.returncode, 0, r.stderr)
+        r = tm("new-session", "-d", "-s", session, "-x", str(w), "-y", "40", cmd); self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(wait(lambda: len(find_cards(self.screen(session))) >= 5, 10), tm("capture-pane", "-p", "-t", session).stdout); time.sleep(0.3)
 
-    def terminal(self, name="u", session="work"):
+    def terminal(self, name="u", session="work", w=150):
         """a user terminal: a pane of the second server running `tmux attach -t session` on the first; returns its client's name"""
         before = set(self.client_names())
-        r = self.tmo("new-session", "-d", "-s", name, "-x", "150", "-y", "45", f"env -u TMUX tmux -L {SOCK} -f /dev/null attach -t {session}"); self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.tmo("new-session", "-d", "-s", name, "-x", str(w), "-y", "45", f"env -u TMUX tmux -L {SOCK} -f /dev/null attach -t {session}"); self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(wait(lambda: set(self.client_names()) - before, 6)); return (set(self.client_names()) - before).pop()
 
     def clients(self):
@@ -51,9 +51,9 @@ class Real(unittest.TestCase):
 
     def sessions_of(self, session): return [c for c in self.clients() if c["session"] == session]
 
-    def popup(self, client, session="agboard"):
+    def popup(self, client, session="agboard", w=100):
         before = {c["name"] for c in self.sessions_of(session)}
-        p = subprocess.Popen(["tmux", "-L", SOCK, "-f", "/dev/null", "display-popup", "-c", client, "-w", "100", "-h", "40", "-E", f"env -u TMUX tmux -L {SOCK} -f /dev/null attach -t {session}"]); self.procs.append(p)
+        p = subprocess.Popen(["tmux", "-L", SOCK, "-f", "/dev/null", "display-popup", "-c", client, "-w", str(w), "-h", "40", "-E", f"env -u TMUX tmux -L {SOCK} -f /dev/null attach -t {session}"]); self.procs.append(p)
         self.assertTrue(wait(lambda: {c["name"] for c in self.sessions_of(session)} - before, 8), f"the popup client attached: {self.clients()}"); time.sleep(0.6); return p
 
     def closed(self, p, session="agboard", timeout=6):
@@ -120,10 +120,7 @@ class Stay(Real):
 
 
 class Degrade(Real):
-    def test_the_board_in_an_ordinary_pane_ends_on_the_jump_as_before(self):
-        self.start_board(session="work2"); uc = self.terminal("u", "work2"); self.assertEqual(self.user_session(uc), "work2")
-        self.press("Enter"); self.assertTrue(wait(lambda: self.user_session(uc) == "tgt", 6), self.clients()); self.assertTrue(wait(lambda: not self.alive("work2"), 6) or tm("has-session", "-t", "work2").returncode != 0, "no popup client to detach: the board ended as before")
-
+    """no popup client (ordinary pane, the only client, no client at all): q ends the board (the jump no longer does, T47: see test_t47)"""
     def test_q_with_no_popup_client_ends_the_board(self):
         self.start_board(session="solo"); uc = self.terminal("u", "solo"); self.press("q"); self.assertTrue(wait(lambda: tm("has-session", "-t", "solo").returncode != 0, 6), "the only client of its session is the user's: q ends it")
 
@@ -154,7 +151,7 @@ class Cli(unittest.TestCase):
         t = Term(self.env, w=220, h=30, args="board", extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t.close); self.assertTrue(wait(lambda: len(find_cards(t.snap())) >= 5, 10)); time.sleep(0.3)
         bar = last_text_row(t.snap()); self.assertIn("q quit", bar); self.assertNotIn("hide", bar)
         t2 = Term(self.env, w=220, h=30, args="board --stay", extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t2.close); self.assertTrue(wait(lambda: len(find_cards(t2.snap())) >= 5, 10)); time.sleep(0.3)
-        self.assertIn("--stay needs the board in its own tmux session", t2.text()); self.assertIn("q quit", last_text_row(t2.snap()))
+        self.assertIn("--stay only works inside tmux", t2.text()); self.assertNotIn("its own tmux session", t2.text()); self.assertIn("q quit", last_text_row(t2.snap()))
 
     def test_capital_q_quits_a_plain_board_too(self):
         t = Term(self.env, w=120, h=30, extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t.close); self.assertTrue(wait(lambda: len(find_cards(t.snap())) >= 5, 10)); t.keys("Q"); self.assertEqual(t.exit_status(5), 0)
@@ -202,13 +199,20 @@ class Fake(unittest.TestCase):
     def test_no_popup_client_q_ends_the_board_as_before(self):
         t = self.board([self.USER]); t.keys("q"); self.assertEqual(t.exit_status(5), 0); self.assertEqual(self.calls("detach-client"), [])
 
+    def test_no_popup_client_enter_switches_and_the_board_stays_and_nothing_is_detached(self):
+        t = self.board([self.USER]); t.keys("Enter"); time.sleep(1.0); self.assertTrue(t.alive(), t.text()); sw = self.calls("switch-client"); self.assertEqual(len(sw), 1, self.env.tmux_calls()); self.assertEqual(sw[0][:3], ["switch-client", "-c", "outer"])
+        self.assertEqual(self.calls("detach-client"), []); t.keys("Enter"); time.sleep(0.8); self.assertEqual(len(self.calls("switch-client")), 2, "and again"); self.assertTrue(t.alive())
+
+    def test_no_client_at_all_enter_says_so_and_the_board_stays(self):
+        t = self.board([]); t.keys("Enter"); time.sleep(1.0); self.assertTrue(t.alive(), t.text()); self.assertEqual(self.calls("switch-client", "detach-client"), [])
+
+    def test_two_nested_clients_one_is_the_users_jump_goes_by_the_chosen_one_and_the_other_is_the_popup(self):
+        t = self.board([self.USER, self.POPUP]); t.keys("Enter"); time.sleep(1.0); self.assertEqual([c[:3] for c in self.calls("switch-client")], [["switch-client", "-c", "outer"]]); self.assertEqual(self.calls("detach-client"), [["detach-client", "-t", "popup"]]); self.assertTrue(t.alive())
+
 
 class Footer(Real):
-    def test_stay_footer_names_both_keys(self):
-        self.start_board(); bar = last_text_row(self.screen_for_footer()); self.assertIn("q hide · Q quit", bar)
-
-    def screen_for_footer(self):
-        tm("resize-window", "-t", "agboard", "-x", "230", "-y", "30"); time.sleep(0.8); return self.screen()
+    def test_stay_footer_names_both_keys_while_a_popup_shows_the_board(self):
+        self.start_board(w=230); uc = self.terminal(w=240); self.popup(uc, w=230); self.assertTrue(wait(lambda: "q hide · Q quit" in last_text_row(self.screen()), 3), last_text_row(self.screen()))  # (no popup: `q quit`, see test_t47)
 
 
 if __name__ == "__main__":

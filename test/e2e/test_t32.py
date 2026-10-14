@@ -4,7 +4,7 @@ then the user's by name), the sprites last; h/j/k/l and arrows move, enter binds
 import json, re, subprocess, unittest
 from lib import *
 from test_t3 import ready, last_text_row, border_colours, C_FOCUS
-from test_t18 import overlay, find_grid, LISTING, IDS, SPRITE_NAMES, N_SETS, HASHED_SPRITE, GRID_COLS, CELL_H, _fnv
+from test_t18 import overlay, find_grid, sweep, to_start, LISTING, IDS, SPRITE_NAMES, N_SETS, HASHED_SPRITE, GRID_COLS, CELL_H, _fnv
 import test_t28 as t28
 from test_t28 import cards_of, named, card_avatar
 
@@ -55,9 +55,9 @@ class Base(t28.Base):
 
 class Layout(Base):
     def test_cells_in_order_with_names_under_the_avatars(self):
-        t = self.board(tmux=False); self.to_a2(t); ov = self.open(t)
-        self.assertEqual([r["id"] for r in ov["rows"]], LISTING); self.assertEqual([r["name"] for r in ov["rows"]], [None] * N_SETS + SPRITE_NAMES, "a set shows its id, a sprite its name")
-        self.assertEqual([(r["gr"], r["gc"]) for r in ov["rows"]], [(i // 5, i % 5) for i in range(len(LISTING))])
+        t = self.board(tmux=False); self.to_a2(t); ov = self.open(t); cells = sweep(t)
+        self.assertEqual([r["id"] for r in cells], LISTING); self.assertEqual([r["name"] for r in cells], [None] * N_SETS + SPRITE_NAMES, "a set shows its id, a sprite its name")
+        to_start(t); top = overlay(t.snap()); self.assertEqual([(r["gr"], r["gc"]) for r in top["rows"]], [(i // 5, i % 5) for i in range(len(top["rows"]))]); self.assertEqual([r["id"] for r in top["rows"]], LISTING[:20], "4 rows of 5 from the start")
         self.assertEqual(LISTING[:1], ["aza_choi"], "the built-in sets come first, aza_choi among them"); self.assertEqual(LISTING[N_SETS:], IDS, "the last row(s): the sprites")
         self.assertEqual(len(LISTING), N_SETS + 5)
         blocks = {b[0].split("  ")[0]: tuple(b[1:]) for b in t28.__dict__.get("sprite_blocks", lambda o: [])("")} if False else None
@@ -65,12 +65,12 @@ class Layout(Base):
     def test_every_cell_has_a_two_row_avatar_and_the_sprites_are_what_agmux_avatars_prints(self):
         from test_t2 import sprite_blocks, run_avatars
         blocks = {b[0].split("  ")[0]: tuple(b[1:]) for b in sprite_blocks(run_avatars(self.env).stdout)}
-        t = self.board(tmux=False); self.to_a2(t); ov = self.open(t)
-        for r in ov["rows"]:
+        t = self.board(tmux=False); self.to_a2(t); ov = self.open(t); cells = sweep(t)
+        for r in cells:
             self.assertTrue(all(len(x) == 6 for x in r["sprite"]) and any(ch != " " for x in r["sprite"] for ch in x), f"{r['id']}: a 6x2 face")
-        self.assertEqual([r["sprite"] for r in ov["rows"] if r["id"] in IDS], [blocks[i] for i in IDS])
-        self.assertEqual(ov["rows"][0]["sprite"], blocks[HASHED_SPRITE], "pixel mode: a set cell is drawn with the sprite its id hashes to (fnv32a(id) % 5)")
-        for r in ov["rows"][:N_SETS]: self.assertEqual(r["sprite"], blocks[f"bot-0{_fnv(r['id']) % 5 + 1}"], f"{r['id']}")
+        self.assertEqual([r["sprite"] for r in cells if r["id"] in IDS], [blocks[i] for i in IDS])
+        self.assertEqual(cells[0]["sprite"], blocks[HASHED_SPRITE], "pixel mode: a set cell is drawn with the sprite its id hashes to (fnv32a(id) % 5)")
+        for r in cells[:N_SETS]: self.assertEqual(r["sprite"], blocks[f"bot-0{_fnv(r['id']) % 5 + 1}"], f"{r['id']}")
 
     def test_the_box_sits_under_the_focused_card_at_its_left_edge(self):
         t = self.board(tmux=False); self.to_a2(t); card = self.focused(t); ov = self.open(t); x0, y0, w, h = ov["box"]
@@ -247,8 +247,8 @@ class Scrolling(Base):
 
     def test_a_set_with_a_sprite_name_takes_the_sprite_off_the_list(self):
         write_avatar_set(self.cfg, "bot-02", {"idle": 1}); order = self.listing(["bot-02"]); self.assertEqual(len(order), len(LISTING))
-        t = self.board(tmux=False); self.to_a2(t); ov = self.open(t); self.assertEqual([r["id"] for r in ov["rows"]], order)
-        self.assertNotIn("Boxy", "\n".join(r.text for r in t.snap())); self.assertEqual(len([r for r in ov["rows"] if r["id"] == "bot-02"]), 1)
+        t = self.board(tmux=False); self.to_a2(t); ov = self.open(t); cells = sweep(t, n=len(order) + 2); self.assertEqual([r["id"] for r in cells], order)
+        self.assertNotIn("Boxy", "\n".join(r.text for r in t.snap())); self.assertEqual(len([r for r in cells if r["id"] == "bot-02"]), 1)
 
 
 class ImageMode(Base):
@@ -264,16 +264,17 @@ class ImageMode(Base):
 
     def test_set_cells_are_pictures_the_first_idle_frame_and_sprites_stay_pixels(self):
         self.config('[avatars]\ndefault = "bot-01"\n'); table, _ = frame_table(self.env, self.cfg)
-        t = self.board_img(); self.to_a2(t); ov = self.open(t); raw = t.raw(); got = self.cell_ids(raw, ov)
+        t = self.board_img(); self.to_a2(t); ov = self.open(t); got = {}
+        sweep(t, visit=lambda ov: got.update({k: v for k, v in self.cell_ids(t.raw(), ov).items() if k not in got or not got[k][1]}))  # the placeholders of every cell, when it is on screen
         for sid in LISTING[:N_SETS]:
             first_idle = next(k for k in table if k[0] == sid and k[1] == "idle")
             self.assertEqual(got[sid], ({table[first_idle]}, 12), f"{sid}: its idle frame 0 (the calm face), 6x2 placeholders")
         for sid in IDS: self.assertEqual(got[sid], (set(), 0), f"{sid} is a pixel sprite")
 
     def test_the_picker_faces_do_not_blink(self):
-        self.config('[avatars]\ndefault = "bot-01"\n'); t = self.board_img(); self.to_a2(t); ov = self.open(t); seen = set()
+        self.config('[avatars]\ndefault = "bot-01"\n'); t = self.board_img(); self.to_a2(t); ov = self.open(t); seen = set(); to_start(t)
         for _ in range(60):
-            g = self.cell_ids(t.raw(), ov); seen |= {(k, tuple(sorted(v[0]))) for k, v in g.items() if k == "aza_choi"}; time.sleep(0.1)
+            ov = overlay(t.snap()); g = self.cell_ids(t.raw(), ov); seen |= {(k, tuple(sorted(v[0]))) for k, v in g.items() if k == "aza_choi"}; time.sleep(0.1)
         self.assertEqual(len(seen), 1, f"aza_choi's idle has a blink frame; the picker shows the calm one only: {seen}")
 
     def test_enter_on_a_set_turns_the_card_into_a_picture(self):

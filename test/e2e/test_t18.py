@@ -78,6 +78,25 @@ def overlay(snap, sets=None):
     return dict(rows=rows, box=(x0, y0, 5 * cw + 2, 2 + CELL_H * shown), shown=shown, cell_w=cw)
 
 
+def to_start(t, n=30):
+    """the picker cursor to the first cell (h clamps there): the grid then shows rows 0..3"""
+    for _ in range(n): t.keys("h"); time.sleep(0.04)
+    time.sleep(0.3)
+
+
+def sweep(t, n=None, visit=None, step=0.1):
+    """T49: more cells than the 4 rows the grid shows (20 sets + 5 sprites): walk the cursor from the first cell to the last with `l` and collect every cell once, in order: [cell dict] (the dict of its first sight).
+    visit(ov) is called at every step (a place to read t.raw() for the pictures in the cells)."""
+    to_start(t); n = n or len(LISTING) + 2; out, seen = [], set()
+    for _ in range(n):
+        ov = overlay(t.snap())
+        if visit: visit(ov)
+        for r in ov["rows"]:
+            if r["id"] not in seen: seen.add(r["id"]); out.append(r)
+        t.keys("l"); time.sleep(step)
+    return out
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.env = Env(); self.addCleanup(self.env.cleanup); self.fx = build_fixture(self.env)
@@ -141,11 +160,11 @@ class Picker(Base):
         ov = self.open_picker(t); x0, y0, w, h = ov["box"]
         rows = min(4, (len(LISTING) + 4) // 5); self.assertEqual((w, h), (5 * ov["cell_w"] + 2, 2 + 3 * rows), "5 columns of cells + border; as many rows of 3 as the listing needs, 4 at most")
         self.assertIn(ov["cell_w"], (9, 10)); self.assertEqual((x0, y0), (card.c, card.r + 5), "straight below the focused card, at its left edge")
-        self.assertEqual([r["id"] for r in ov["rows"]], LISTING); self.assertEqual([r["name"] for r in ov["rows"]], [None] * N_SETS + SPRITE_NAMES, "a set is labelled with its id, a sprite with its name")
-        self.assertEqual([r["sprite"] for r in ov["rows"]][N_SETS:], [self.blocks[i] for i in IDS], "each sprite cell shows the sprite `agmux avatars` prints for that id")
-        self.assertEqual(ov["rows"][0]["sprite"], self.blocks[HASHED_SPRITE], "pixel mode: the set cell is drawn with the sprite its id hashes to (fnv32a('aza_choi') % 5)")
-        self.assertEqual([(r["gr"], r["gc"]) for r in ov["rows"]], [(i // 5, i % 5) for i in range(len(LISTING))], "reading order, 5 per row")
         self.assertEqual(len([r for r in ov["rows"] if r["current"] or r["marker"]]), 1, "the cursor starts on the worn one: one highlighted cell"); self.assertIn(self.cursor(t), cur)
+        cells = sweep(t); self.assertEqual([r["id"] for r in cells], LISTING); self.assertEqual([r["name"] for r in cells], [None] * N_SETS + SPRITE_NAMES, "a set is labelled with its id, a sprite with its name")
+        self.assertEqual([r["sprite"] for r in cells][N_SETS:], [self.blocks[i] for i in IDS], "each sprite cell shows the sprite `agmux avatars` prints for that id")
+        self.assertEqual(cells[0]["sprite"], self.blocks[HASHED_SPRITE], "pixel mode: the set cell is drawn with the sprite its id hashes to (fnv32a('aza_choi') % 5)")
+        to_start(t); top = overlay(t.snap()); self.assertEqual([(r["gr"], r["gc"]) for r in top["rows"]], [(i // 5, i % 5) for i in range(len(top["rows"]))], "reading order, 5 per row"); self.assertEqual(len(top["rows"]), min(20, len(LISTING)), "4 rows shown")
         foot = last_text_row(t.snap()); self.assertIn("h/j/k/l move", foot); self.assertIn("enter bind", foot); self.assertIn("q cancel", foot)
         msg = [r.text for r in t.snap()[-3:-1]]; self.assertTrue(any(self.cursor(t) in m for m in msg), f"the message row names the cursor's id: {msg}")
 

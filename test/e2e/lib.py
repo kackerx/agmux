@@ -70,7 +70,6 @@ if [ -e "$d/tmux.fail" ] && [ "$(cat "$d/tmux.fail")" = "$1" ]; then printf 'tmu
 case "$1" in
   display-message) case " $* " in *" ; "*) echo "0 0 0 default 50"; exit 0;; esac
     case " $* " in *client_termname*) if [ -e "$d/tmux.termname" ]; then cat "$d/tmux.termname"; else echo xterm-256color; fi; exit 0;; esac  # T28: renderer auto-detect  # T24: the preview's `display-message <cursor format> ; capture-pane`: cursor hidden, then an empty screen
-    case " $* " in *session_attached*) if [ -e "$d/tmux.attached" ]; then cat "$d/tmux.attached"; else echo 0; fi; exit 0;; esac  # T45: `#{{session_attached}}` while a --stay board is hidden (0 = nobody has attached again; a test writes 1)
     if [ -e "$d/tmux.session" ]; then cat "$d/tmux.session"; else echo fl-own; fi; exit 0;;
   show|show-options) case " $* " in *allow-passthrough*) if [ -e "$d/tmux.passthrough" ]; then cat "$d/tmux.passthrough"; else echo on; fi; exit 0;; esac; exit 0;;  # T28
   list-clients) [ -e "$d/tmux.clients" ] || exit 0  # T38: five fields; a row with three gets the default termname (tmux.termname, xterm-256color) and a tty file of its own in $d/tty-<name>
@@ -743,13 +742,17 @@ def scan_set(d):
     return out if any(x[0] == "idle" for x in out) else None
 
 
+# T49: the built-in order is fixed (tasks.md T49 顺序): the first ten of pi-emote's by name, GPT's five characters, the five naruto ones; a directory not named here (none now) goes after them by name
+BUILTIN_ORDER = ["aza_choi", "cipher", "default", "forge", "moss", "nova", "oana", "quill", "red", "sprocket", "developer", "researcher", "operator", "tester", "designer", "naruto", "sasuke", "sakura", "kakashi", "itachi"]
+
+
 def set_list(cfg=None, src=None):
-    """[(set id, source, [(dir, file)])] in load order: the built-in sets (SRC tree, sorted), then the user's in `cfg`/agmux/avatars (name order); a user set replaces a built-in
+    """[(set id, source, [(dir, file)])] in load order: the built-in sets (SRC tree, BUILTIN_ORDER), then the user's in `cfg`/agmux/avatars (name order); a user set replaces a built-in
     one of the same name in place; names starting with . or named hash are not sets; sets without idle frames are skipped."""
     out = []
     for root, source in ((pathlib.Path(src or SRC) / "internal" / "avatar" / "sets", "builtin"), (pathlib.Path(cfg or "/nonexistent") / "agmux" / "avatars", "user")):
         if not root.is_dir(): continue
-        for d in sorted(root.iterdir()):
+        for d in sorted(root.iterdir(), key=(lambda p: (BUILTIN_ORDER.index(p.name) if p.name in BUILTIN_ORDER else len(BUILTIN_ORDER), p.name)) if source == "builtin" else None):
             if d.name.startswith(".") or d.name == "hash" or not d.is_dir(): continue
             fr = scan_set(d)
             if fr is None: continue

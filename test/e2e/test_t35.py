@@ -4,7 +4,7 @@ Spec: specs/m3-config/tasks.md「第六批」T35."""
 import os, pathlib, shutil, stat, subprocess, sys, unittest
 from lib import *
 import test_t28 as t28
-from test_t18 import overlay, LISTING, N_SETS, find_grid
+from test_t18 import overlay, LISTING, N_SETS, find_grid, sweep
 from test_t3 import ready, last_text_row
 
 
@@ -157,7 +157,7 @@ class Afterwards(Base):
     def test_the_picker_offers_it_after_the_built_in_sets_and_enter_binds_it(self):
         self.imported(); order = [i for i in LISTING if not i.startswith("bot-")] + ["kit"] + [i for i in LISTING if i.startswith("bot-")]
         self.config("", default=None); t = self.board(tmux=False); t.keys("j"); time.sleep(0.3); t.keys("a"); ov = wait(lambda: overlay(t.snap()), 3); self.assertTrue(ov, t.text())
-        self.assertEqual([r["id"] for r in ov["rows"]], order, "built-in sets, then the user's, then the sprites")
+        self.assertEqual([r["id"] for r in sweep(t, n=len(order) + 2)], order, "built-in sets, then the user's, then the sprites")
         for _ in range(order.index("kit") + 1): t.keys("l"); time.sleep(0.04)
         for _ in range(len(order)):
             cur = [r["id"] for r in overlay(t.snap())["rows"] if r["marker"]]
