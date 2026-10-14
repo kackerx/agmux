@@ -106,7 +106,7 @@ ccmux 要等你切到那个 pane 才把 done 清成 idle。看板里只有**看�
 
 ### 配置
 
-`~/.config/agmux/config.toml`（设了 `XDG_CONFIG_HOME` 就在它下面），没有就全用默认值。`agmux config` 打印生效的完整配置，复制出来改即可；`agmux config --path` 打印路径。
+`~/.config/agmux/config.toml`（设了 `XDG_CONFIG_HOME` 就在它下面），没有就全用默认值。`agmux config` 打印生效的完整配置：每个动作、每种颜色、`[layout]`、`[avatars]` 都占一行，行尾注释写着默认值和用途，可选项写在注释里（全英文）。**`agmux config > ~/.config/agmux/config.toml`** 就生成一份完整的配置文件，改要改的行即可（值是当时生效的值，注释里的 `default:` 永远是默认值；已有配置文件时先备份，别直接覆盖）；`agmux config --path` 打印路径。
 
 ```toml
 [keys]          # 动作 = 一个或多个键名（j、ctrl+k、enter、tab、shift+tab、esc、space、f5…）

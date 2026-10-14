@@ -127,8 +127,71 @@ func TestStringRoundTrip(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(back, c) {
 		t.Errorf("round trip: %v\n%s", err, c.String())
 	}
-	if !strings.HasPrefix(Default().String(), "[keys]\nup = [\"k\", \"up\"]\ndown = [\"j\", \"down\"]\n") {
-		t.Errorf("printed in action order:\n%s", Default().String())
+	d, err := Parse("cfg", []byte(Default().String())) // and the defaults print as a file that changes nothing
+	if err != nil || !reflect.DeepEqual(d.Keys, Default().Keys) || !reflect.DeepEqual(d.Colors, Default().Colors) || d.MaxColumns != 4 || d.Flow != "bands" {
+		t.Errorf("defaults: %v\n%s", err, Default().String())
+	}
+}
+
+// The printed config is the commented template: one line per action and per color, each with its
+// default in the comment (the default, not the current value), the layout and avatar options spelled
+// out, and everything in the order the code lists it.
+func TestStringIsTheCommentedTemplate(t *testing.T) {
+	c, err := Parse("cfg", []byte("[keys]\nup = [\"w\"]\n[colors]\nfocus = \"#010203\"\nborder = \"7\"\n[layout]\nmax_columns = 6\nflow = \"stack\"\ngroup_by = \"state\"\n[avatars]\nrenderer = \"pixel\"\ndefault = \"bot-02\"\n[avatars.bind]\nz = \"bot-03\"\na = \"bot-04\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := c.String()
+	lines := strings.Split(out, "\n")
+	find := func(prefix string) string {
+		for _, l := range lines {
+			if strings.HasPrefix(l, prefix) {
+				return l
+			}
+		}
+		t.Errorf("no line starting %q", prefix)
+		return ""
+	}
+	for _, a := range Actions {
+		if l := find(a + " = "); !strings.Contains(l, "# default: "+strings.Join(defaultKeys[a], ", ")) {
+			t.Errorf("%s: %q", a, l)
+		}
+	}
+	for _, n := range Colors {
+		if l := find(n + " = "); !strings.Contains(l, "# default: ") {
+			t.Errorf("%s: %q", n, l)
+		}
+	}
+	for prefix, want := range map[string]string{
+		`up = ["w"]`:         "# default: k, up",
+		`focus = "#010203"`:  "# default: #ff8ebe",
+		`border = "7"`:       `# default: "" (terminal default)`,
+		"max_columns = 6":    "# default: 4",
+		`flow = "stack"`:     `# default: "bands"`,
+		`group_by = "state"`: `# default: "cwd"`,
+		`renderer = "pixel"`: `# default: "auto"`,
+		`default = "bot-02"`: `# default: "hash"`,
+	} {
+		if l := find(prefix); !strings.Contains(l, want) {
+			t.Errorf("%q: %q, want %q", prefix, l, want)
+		}
+	}
+	// the sections, in order, and the bindings after the comment that explains them
+	var at []int
+	for _, h := range []string{"[keys]", "[colors]", "[layout]", "[avatars]", "[avatars.bind]"} {
+		at = append(at, strings.Index(out, "\n"+h+"\n"))
+	}
+	if !slices.IsSorted(at) || at[0] < 0 || strings.Index(out, `"a" = "bot-04"`) > strings.Index(out, `"z" = "bot-03"`) || strings.Index(out, `"a" = "bot-04"`) < at[4] {
+		t.Errorf("sections / bindings out of order:\n%s", out)
+	}
+	// the printed file is the whole config
+	if back, err := Parse("cfg", []byte(out)); err != nil || !reflect.DeepEqual(back, c) {
+		t.Errorf("round trip: %v\n%s", err, out)
+	}
+	for _, l := range lines { // a comment is a comment: nothing after # on a setting line changes what it says
+		if i := strings.Index(l, " # "); i > 0 && !strings.Contains(l[:i], "=") && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "#") {
+			t.Errorf("text before a comment that is not a setting: %q", l)
+		}
 	}
 }
 
@@ -160,7 +223,7 @@ func TestRemovedAvatarMessage(t *testing.T) {
 func TestAvatarRendererAndSets(t *testing.T) {
 	t.Cleanup(func() { avatar.Sets = nil })
 	avatar.Sets = []*avatar.Set{{ID: "aza_choi"}}
-	if got := Default().AvatarRenderer; got != "auto" || !strings.Contains(Default().String(), "[avatars]\nrenderer = \"auto\"\ndefault = \"hash\"\n") {
+	if got := Default().AvatarRenderer; got != "auto" || !strings.Contains(Default().String(), "\nrenderer = \"auto\"  ") || !strings.Contains(Default().String(), "\ndefault = \"hash\"  ") {
 		t.Errorf("default renderer %q:\n%s", got, Default())
 	}
 	for _, r := range []string{"auto", "image", "pixel"} {
@@ -278,7 +341,7 @@ func TestMaxColumns(t *testing.T) {
 		if err != nil || c.MaxColumns != n {
 			t.Errorf("%d: %v %d", n, err, c.MaxColumns)
 		}
-		if back, err := Parse("cfg", []byte(c.String())); err != nil || back.MaxColumns != n || !strings.Contains(c.String(), fmt.Sprintf("[layout]\nmax_columns = %d\n", n)) {
+		if back, err := Parse("cfg", []byte(c.String())); err != nil || back.MaxColumns != n || !strings.Contains(c.String(), fmt.Sprintf("[layout]\nmax_columns = %d ", n)) {
 			t.Errorf("printed back: %v\n%s", err, c.String())
 		}
 	}
@@ -304,7 +367,7 @@ func TestMaxColumns(t *testing.T) {
 
 // T26: colors.border, empty by default (borders follow the status); "" is allowed only there.
 func TestBorderColor(t *testing.T) {
-	if Default().Colors["border"] != "" || !strings.Contains(Default().String(), "border = \"\"\n") {
+	if Default().Colors["border"] != "" || !strings.Contains(Default().String(), "border = \"\" ") {
 		t.Errorf("default %q", Default().Colors["border"])
 	}
 	c, err := Parse("cfg", []byte("[colors]\nborder = \"#585b70\"\n"))
@@ -337,7 +400,7 @@ func TestFlow(t *testing.T) {
 		if err != nil || c.Flow != f {
 			t.Errorf("%s: %v %q", f, err, c.Flow)
 		}
-		if back, err := Parse("cfg", []byte(c.String())); err != nil || back.Flow != f || !strings.Contains(c.String(), fmt.Sprintf("flow = %q\n", f)) {
+		if back, err := Parse("cfg", []byte(c.String())); err != nil || back.Flow != f || !strings.Contains(c.String(), fmt.Sprintf("flow = %q ", f)) {
 			t.Errorf("printed back: %v\n%s", err, c.String())
 		}
 	}
@@ -365,7 +428,7 @@ func TestGroupBy(t *testing.T) {
 		if err != nil || c.GroupBy != g {
 			t.Errorf("%s: %v %q", g, err, c.GroupBy)
 		}
-		if back, err := Parse("cfg", []byte(c.String())); err != nil || back.GroupBy != g || !strings.Contains(c.String(), fmt.Sprintf("group_by = %q\n", g)) {
+		if back, err := Parse("cfg", []byte(c.String())); err != nil || back.GroupBy != g || !strings.Contains(c.String(), fmt.Sprintf("group_by = %q ", g)) {
 			t.Errorf("printed back: %v\n%s", err, c.String())
 		}
 	}

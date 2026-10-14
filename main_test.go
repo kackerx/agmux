@@ -14,6 +14,7 @@ import (
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
+	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -147,5 +148,46 @@ func TestBoardCmdArguments(t *testing.T) {
 		if code := boardCmd(args); code != 2 {
 			t.Errorf("board %v: exit %d, want 2", args, code)
 		}
+	}
+}
+
+// `agmux config` prints the commented template with the effective values: what is in config.toml
+// shows, everything else is the default, and the output saved as config.toml loads back as the same config.
+func TestConfigCmdPrintsTheTemplate(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "agmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agmux", "config.toml"), []byte("[layout]\nmax_columns = 6\nflow = \"stack\"\n[keys]\nquit = [\"q\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	code := configCmd(nil)
+	os.Stdout = old
+	w.Close()
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	got := out.String()
+	if code != 0 || !strings.HasPrefix(got, "# agmux configuration") {
+		t.Fatalf("exit %d:\n%s", code, got)
+	}
+	for _, want := range []string{"max_columns = 6 ", "# default: 4", `flow = "stack" `, `quit = ["q"] `, "# default: q, esc", "\n[avatars.bind]\n# session name = avatar id"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in:\n%s", want, got)
+		}
+	}
+	saved := filepath.Join(dir, "saved.toml")
+	if err := os.WriteFile(saved, []byte(got), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	back, err := config.Parse(saved, []byte(got))
+	if err != nil || back.MaxColumns != 6 || back.Flow != "stack" || len(back.Keys["quit"]) != 1 || back.Keys["exit"][0] != "Q" {
+		t.Errorf("saved as config.toml: %v %+v", err, back)
 	}
 }

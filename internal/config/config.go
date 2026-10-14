@@ -291,29 +291,95 @@ func (c *Config) First(action string) string {
 	return c.Keys[action][0]
 }
 
-// String is the effective config as TOML, ready to copy into config.toml.
+// actionUse and colorUse are what the printed config says about a setting after its default; none
+// for a self-explanatory one.
+var actionUse = map[string]string{
+	"page_down": "scroll the board a page down", "page_up": "scroll the board a page up",
+	"jump": "switch tmux to the focused pane", "fold": "fold / unfold the focused group",
+	"preview": "open / close the pane preview", "focus_preview": "pass keys through to the previewed pane",
+	"leave_preview": "back to the board", "reply": "type a reply into the focused session",
+	"handoff": "send /handoff to the focused session", "search": "filter the cards by fuzzy search",
+	"next_match": "next search hit", "prev_match": "previous search hit", "flash": "jump to a card by a typed label",
+	"group": "cycle the grouping (see [layout] group_by)", "restart": "restart the focused session", "kill": "kill the focused session (asks first)",
+	"review": "run `ccmux review` on the focused session", "avatar": "open the avatar picker under the focused card",
+	"quit": "with `board --stay` inside a popup: hide instead", "exit": "always quit, even with --stay", "confirm": "answer yes to a prompt",
+}
+
+var colorUse = map[string]string{
+	"working": "card border / status while an agent works", "attention": "waiting for you / alerts",
+	"focus": "the focused card", "match": "search hits", "border": `borders of unfocused cards ("" = follow the status)`,
+	"name": "session name", "agent": "the agent role on line 2", "dir": "group headers and their rule",
+	"bar_low": "context bar, low usage", "muted": "secondary text, footer",
+}
+
+// String is the effective config as a commented TOML file, ready to save as config.toml: each setting
+// on a line of its own with its current value, and after it a comment with its default (the same in
+// every file) and what it does. Parse reads it back as the same config.
 func (c *Config) String() string {
 	var b strings.Builder
-	b.WriteString("[keys]\n")
+	// line is a setting with a trailing comment starting at column 30; cont goes on under it
+	line := func(text, comment string) { fmt.Fprintf(&b, "%-29s # %s\n", text, comment) }
+	cont := func(comment string) { fmt.Fprintf(&b, "%30s#   %s\n", "", comment) }
+	with := func(def, use string) string {
+		if use == "" {
+			return "default: " + def
+		}
+		return "default: " + def + " — " + use
+	}
+	b.WriteString(`# agmux configuration — ~/.config/agmux/config.toml ($XDG_CONFIG_HOME/agmux/config.toml)
+# Every setting is optional; a missing one keeps its default. ` + "`agmux config`" + ` prints the
+# effective values. Defaults are shown in the comments; lines left at their default are harmless.
+
+[keys]
+# Each action takes a list of key names (bubbletea names): letters and digits, "enter", "esc",
+# "tab", "shift+tab", "space", "backspace", "up"/"down"/"left"/"right", "home"/"end", "pgup"/"pgdown",
+# "f1".."f20", "ctrl+<letter>", "alt+<key>". An uppercase letter means shift+letter.
+# ctrl+c cannot be bound (it always quits); ctrl+i and ctrl+m are tab and enter.
+# A key may be bound to only one action, but confirm and leave_preview may share keys with others.
+`)
 	for _, a := range Actions {
+		def := strings.Join(defaultKeys[a], ", ")
 		if len(c.Keys[a]) == 0 { // "a = []" would not load back
-			fmt.Fprintf(&b, "# %s: no key (another action took its default)\n", a)
+			fmt.Fprintf(&b, "# %s: no key (another action took its default)    # %s\n", a, with(def, actionUse[a]))
 			continue
 		}
 		q := make([]string, len(c.Keys[a]))
 		for i, k := range c.Keys[a] {
 			q[i] = strconv.Quote(k)
 		}
-		fmt.Fprintf(&b, "%s = [%s]\n", a, strings.Join(q, ", "))
+		line(fmt.Sprintf("%s = [%s]", a, strings.Join(q, ", ")), with(def, actionUse[a]))
 	}
-	b.WriteString("\n[colors]\n")
+	b.WriteString(`
+[colors]
+# A color is "#rrggbb" or an ANSI palette index "0".."255" (as a string).
+`)
 	for _, n := range Colors {
-		fmt.Fprintf(&b, "%s = %q\n", n, c.Colors[n])
+		d := defaultColors[n]
+		if d == "" {
+			d = `"" (terminal default)`
+		}
+		line(fmt.Sprintf("%s = %q", n, c.Colors[n]), with(d, colorUse[n]))
 	}
-	fmt.Fprintf(&b, "\n[layout]\nmax_columns = %d\nflow = %q\ngroup_by = %q\n", c.MaxColumns, c.Flow, c.GroupBy)
-	fmt.Fprintf(&b, "\n[avatars]\nrenderer = %q\ndefault = %q\n\n[avatars.bind]\n", c.AvatarRenderer, c.AvatarDefault)
-	names := slices.Sorted(maps.Keys(c.AvatarBind))
-	for _, n := range names {
+	b.WriteString("\n[layout]\n")
+	line(fmt.Sprintf("max_columns = %d", c.MaxColumns), with("4", fmt.Sprintf("%d to %d; fewer columns are used when the terminal is narrow", minMaxColumns, maxMaxColumns)))
+	line(fmt.Sprintf("flow = %q", c.Flow), with(`"bands"`, `"bands": a row of groups at a time, all rows the same`))
+	cont(`height; "stack": groups stack down each column, no gaps`)
+	line(fmt.Sprintf("group_by = %q", c.GroupBy), with(`"cwd"`, `grouping at start: "cwd", "project", "session" or`))
+	cont(`"state"; the group key cycles through them in that order`)
+	b.WriteString("\n[avatars]\n")
+	line(fmt.Sprintf("renderer = %q", c.AvatarRenderer), with(`"auto"`, `"auto": pictures in kitty / ghostty, pixel art`))
+	cont(`elsewhere; "image": always pictures; "pixel": always pixel art`)
+	line(fmt.Sprintf("default = %q", c.AvatarDefault), with(`"hash"`, `"hash": pick one from the session name (a picture set`))
+	cont(`in picture mode, a pixel avatar otherwise); or an avatar id (see ` + "`agmux avatars`" + `)`)
+	cont(`for every unbound session`)
+	b.WriteString(`
+[avatars.bind]
+# session name = avatar id, e.g.  "agmux" = "nova"
+# The picker (a) saves its choices in $XDG_STATE_HOME/agmux/avatars.json instead; they win over these.
+# Your own sets go in ~/.config/agmux/avatars/<id>/<state>/*.png (states: idle, think, read,
+# write, tool, hi, success) or ` + "`agmux avatars import <sheet.png> --name <id>`" + `.
+`)
+	for _, n := range slices.Sorted(maps.Keys(c.AvatarBind)) {
 		fmt.Fprintf(&b, "%q = %q\n", n, c.AvatarBind[n])
 	}
 	return b.String()
