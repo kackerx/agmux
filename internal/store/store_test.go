@@ -829,3 +829,33 @@ func TestPinsCorruptFile(t *testing.T) {
 		t.Errorf("fixed by hand: %v", p.Err())
 	}
 }
+
+// A pin is kept by name: a session restarted or handed off (a new ID, the same name) is still
+// pinned, and unpinning it works from the new ID; it goes when no session has the name.
+func TestPinSurvivesNewID(t *testing.T) {
+	raw := []ccmux.Session{{ID: "a1", Summary: "agmux-dev", Status: "idle"}, {ID: "b1", Summary: "other", Status: "idle"}}
+	p, path := pinPoller(t, &raw)
+	if err := p.TogglePin(byID(t, p.Sessions(), "a1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := seenFile(t, path); !strings.HasPrefix(got, `{"agmux-dev":"`) {
+		t.Errorf("pins.json %s, want it keyed by name", got)
+	}
+	raw[0].ID = "a2" // ccmux restart: same name, new ID
+	p.Refresh()
+	if a := byID(t, p.Sessions(), "a2"); !a.Pinned || byID(t, p.Sessions(), "b1").Pinned {
+		t.Errorf("after the restart: %+v", p.Sessions())
+	}
+	if !strings.Contains(seenFile(t, path), `"agmux-dev"`) {
+		t.Error("the restart dropped the pin")
+	}
+	if err := p.TogglePin(byID(t, p.Sessions(), "a2")); err != nil || byID(t, p.Sessions(), "a2").Pinned {
+		t.Errorf("unpin from the new ID: %v %+v", err, p.Sessions())
+	}
+	p.TogglePin(byID(t, p.Sessions(), "a2"))
+	raw[0].Summary = "renamed" // no session has the name now
+	p.Refresh()
+	if got := seenFile(t, path); got != "{}" {
+		t.Errorf("pins.json %s, want the name dropped", got)
+	}
+}

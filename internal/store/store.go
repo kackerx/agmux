@@ -70,7 +70,7 @@ type Poller struct {
 	AvatarDefault string            // config.toml's [avatars] default; "" = hash
 
 	Seen *avatar.FileBindings // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
-	Pins *avatar.FileBindings // pins.json: session ID → when it was pinned (RFC 3339); nil = nothing is pinned
+	Pins *avatar.FileBindings // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
 
 	refreshMu sync.Mutex        // serializes Refresh; guards models
 	models    map[string]string // session ID → last model found in its jsonl
@@ -171,7 +171,8 @@ func (p *Poller) SetAvatar(s Session, id string) error {
 }
 
 // TogglePin pins s to the top of its group, or takes it off when it is pinned. Pins are kept by
-// session ID, so they hold under every grouping and across restarts.
+// name (AvatarKey), like avatar bindings: they hold under every grouping, across restarts of the
+// board, and across a session's restart or handoff, which give it a new ID.
 func (p *Poller) TogglePin(s Session) error {
 	if p.Pins == nil {
 		return nil
@@ -182,10 +183,10 @@ func (p *Poller) TogglePin(s Session) error {
 	var err error
 	if s.Pinned {
 		if err = p.Pins.Reload(); err == nil {
-			err = p.Pins.Prune(func(id string) bool { return id != s.ID })
+			err = p.Pins.Prune(func(k string) bool { return k != s.AvatarKey() })
 		}
 	} else {
-		err = p.Pins.Set(s.ID, at.Format(time.RFC3339Nano))
+		err = p.Pins.Set(s.AvatarKey(), at.Format(time.RFC3339Nano))
 	}
 	perr := p.Pins.Reload()
 	p.mu.Lock()
@@ -196,7 +197,7 @@ func (p *Poller) TogglePin(s Session) error {
 	}
 	ss := slices.Clone(p.sessions)
 	for i := range ss {
-		if ss[i].ID == s.ID {
+		if ss[i].AvatarKey() == s.AvatarKey() { // every session of that name
 			ss[i].Pinned, ss[i].PinnedAt = !s.Pinned, time.Time{}
 			if !s.Pinned {
 				ss[i].PinnedAt = at
@@ -209,11 +210,11 @@ func (p *Poller) TogglePin(s Session) error {
 
 // pinnedAt is when the session was pinned (ok false: it is not). A time that does not parse still
 // counts as pinned, before every other.
-func (p *Poller) pinnedAt(id string) (t time.Time, ok bool) {
+func (p *Poller) pinnedAt(key string) (t time.Time, ok bool) {
 	if p.Pins == nil {
 		return t, false
 	}
-	v, ok := p.Pins.Get(id)
+	v, ok := p.Pins.Get(key)
 	t, _ = time.Parse(time.RFC3339Nano, v)
 	return t, ok
 }
@@ -244,18 +245,18 @@ func (p *Poller) Refresh() error {
 				serr = perr
 			}
 		}
-		if p.Pins != nil { // a session that is gone loses its pin
-			live := map[string]bool{}
-			for _, r := range raw {
-				live[r.ID] = true
-			}
-			if e := p.Pins.Prune(func(id string) bool { return live[id] }); perr == nil {
-				perr = e
-			}
-		}
 		ss = make([]Session, len(raw))
 		for i, r := range raw {
 			ss[i] = p.convert(r)
+		}
+		if p.Pins != nil { // no session of that name any more: the pin goes
+			live := map[string]bool{}
+			for _, s := range ss {
+				live[s.AvatarKey()] = true
+			}
+			if e := p.Pins.Prune(func(k string) bool { return live[k] }); perr == nil {
+				perr = e
+			}
 		}
 	}
 	p.mu.Lock()
@@ -301,8 +302,8 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		}
 	}
 	s.StatusChangedAt = r.StatusChangedAt
-	s.PinnedAt, s.Pinned = p.pinnedAt(r.ID)
 	s.Done = s.Status == "idle" && r.AttentionState != "" && !p.seen(r)
+	s.PinnedAt, s.Pinned = p.pinnedAt(s.AvatarKey())
 	s.AvatarState = avatarState(s)
 	s.GroupKey = groupKey(s)
 	s.AvatarID = avatar.For(p.Avatars, p.AvatarBind, p.AvatarDefault, s.AvatarKey())
