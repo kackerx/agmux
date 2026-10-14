@@ -322,7 +322,7 @@
 - dev 6b683ca：border 注释改 follow the status；tomlQuote（\a \v \xNN → \u00XX）用于绑定名与值 + round-trip 用例；golden internal/config/testdata/config.example.toml + TestStringMatchesTheExample（UPDATE_GOLDEN=1 重写）；措辞两处。送复审；tester 目标改 6b683ca。
 - reviewer 复审 6b683ca 通过：border 注释一致；tomlQuote 对 ESC / DEL / BEL / NUL / 中文 / emoji / U+2028 等全部 round-trip；golden 杀 noUse；措辞同步。
 
-### T51 直接切到某个分组方式的键位：`group_cwd` / `group_project` / `group_session` / `group_state`（审查通过 @fb91e04，等 tester）
+### T51 直接切到某个分组方式的键位：`group_cwd` / `group_project` / `group_session` / `group_state`（通过 @fb91e04 / 15 条；整套 855 条）
 - 用户 2026-10-14：经常要直接看 state 分组，`g` 循环要按好几下；要能配置某个键直接切到指定分组，并给他配 `G` = state。
 - 定稿：[keys] 新增四个动作 `group_cwd`、`group_project`、`group_session`、`group_state`，默认都不绑键（空列表 `[]` 表示不绑；Parse 对这四个动作允许空，其它动作仍要求至少一个键）。按键 = 切到该分组方式（和 `g` 切到同一方式时行为一致：清折叠、焦点留原卡、结束手动滚动；已在该方式则不动）。底栏不加文案（`g group:<mode>` 已显示当前方式）。`agmux config` 打印 `group_state = []  # default: none — switch straight to the state grouping`，四行跟在 group 后面；golden 同步。一个键仍只能绑一个动作。
 - 用户配置：我在他的 ~/.config/agmux/config.toml 里加 `group_state = ["G"]`（装好后）。
@@ -337,3 +337,4 @@
 - 没覆盖：真 kitty 渲染截图（另起实例截图全白，改为从字节流解帧看了 naruto / developer idle 正常）；真 kitty 读速；新套各态画面未逐帧看。
 - tester（6b683ca）：默认输出与 golden 逐字一致；合法 TOML；9 个非默认值只改值行、default 注释不变；写回再打印两轮相同；绑定名含控制字符 / 中文 / emoji 读回无损且输出只有 \u00XX；坏配置仍退出非 0；11 条旧用例改用 lib.plain_config() 读值后全绿。没覆盖：整套（留 T51 轮）、覆盖用户已有文件的用法。决定：先装 6b683ca 给用户验收 T46–T50，T51 过后再装。
 - 2026-10-14 12:08 已装 6b683ca（干净 clone 构建，不含 T51）；用户配置用新版重新生成（值不变、round-trip 一致）。
+- tester（fb91e04，套件 e4189b5 + 1 修测试）：T47–T51 最终整套 855 条 2061 s，唯一 error 是 t51 新用例读到重绘截断帧（测试问题，expect() 遇截断帧重读后 t43 + t51 复跑绿；改后整套未再全跑）；t18 宽字符用例未复现。T51 15 条：G 直达 state、g 继续循环、折叠清 / 焦点留 / 滚动结束、已在该方式折叠保留、四键 12 组合、默认无反应、搜索框 / 直通里 G 是输入、`["g"]` 拿走 g、config 四行与 golden、`[]` 只对四个合法；反向 13 红。没覆盖：flash 里按 G、用户真实 config、真机 kitty 渲染截图。
