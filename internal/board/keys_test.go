@@ -160,7 +160,7 @@ func run(m *Model, cmd tea.Cmd) (quit bool) {
 	switch msg := msg.(type) {
 	case tea.QuitMsg:
 		return true
-	case doneMsg, attachedMsg:
+	case doneMsg, attachedMsg, popupMsg:
 		tm, next := m.Update(msg)
 		*m = tm.(Model)
 		return run(m, next)
@@ -4356,26 +4356,90 @@ func TestStayExitQuits(t *testing.T) {
 }
 
 // With no popup client — the board is in an ordinary pane, its session's client is the user's own
-// terminal (not a tmux) — --stay is what it never was: q quits, jump switches and quits, nothing is
-// detached (that would take the user's terminal).
-func TestStayWithoutAPopupFallsBack(t *testing.T) {
+// terminal (not a tmux) — --stay still keeps the board: enter switches the client and the board runs
+// on, in its pane; nothing is detached (that would take the user's terminal), and the board is
+// not hidden (the pane is in plain view, so what the focus rests on counts as seen). q has nothing
+// to hide: it quits.
+func TestStayWithoutAPopup(t *testing.T) {
 	own := "9\t/dev/mine\tfl-1\txterm-kitty\t/dev/mine\n"
-	m, r := stayModel(own)
-	if _, quit := press(t, m, "q"); !quit || len(tmuxCalls(r, "detach-client")) != 0 {
-		t.Errorf("q: quit %v, detach %q", quit, tmuxCalls(r, "detach-client"))
+	for name, clients := range map[string]string{
+		"ordinary pane":  own + "5\t/dev/outer\tmain\txterm-kitty\t/dev/outer\n",
+		"only the user":  own,
+		"only one popup": "9\t/dev/popup\tfl-1\ttmux-256color\t/dev/popup\n", // it is the one the jump switches, no outer one
+	} {
+		m, r := stayModel(clients)
+		m2, quit := press(t, m, "enter")
+		if quit || m2.hidden || len(tmuxCalls(r, "detach-client")) != 0 || len(tmuxCalls(r, "switch-client")) != 1 {
+			t.Errorf("%s: enter: quit %v hidden %v, calls %q", name, quit, m2.hidden, r.calls)
+		}
+		m, r = stayModel(clients)
+		if _, quit := press(t, m, "q"); !quit || len(tmuxCalls(r, "detach-client")) != 0 {
+			t.Errorf("%s: q: quit %v, detach %q", name, quit, tmuxCalls(r, "detach-client"))
+		}
 	}
-	m, r = stayModel(own + "5\t/dev/outer\tmain\txterm-kitty\t/dev/outer\n")
-	if _, quit := press(t, m, "enter"); !quit || len(tmuxCalls(r, "detach-client")) != 0 || len(tmuxCalls(r, "switch-client")) != 1 {
-		t.Errorf("enter: quit %v, calls %q", quit, r.calls)
+	// the launcher named the client exactly: a plain jump would detach the other clients of the
+	// board's session (the user's own terminal among them); under --stay nothing but a popup goes
+	m, r := stayModel(own + "5\t/dev/outer\tmain\txterm-kitty\t/dev/outer\n")
+	m.getenv = func(k string) string {
+		return map[string]string{"TMUX_PANE": "%2", "TMUX": "x", "AGMUX_CLIENT": "/dev/outer"}[k]
 	}
-	// the only client is the popup itself: it is the one the jump would switch, there is no outer one
-	m, r = stayModel("9\t/dev/popup\tfl-1\ttmux-256color\t/dev/popup\n")
-	if _, quit := press(t, m, "q"); !quit || len(tmuxCalls(r, "detach-client")) != 0 {
-		t.Errorf("only a popup client: quit %v, detach %q", quit, tmuxCalls(r, "detach-client"))
+	if _, quit := press(t, m, "enter"); quit || len(tmuxCalls(r, "detach-client")) != 0 {
+		t.Errorf("AGMUX_CLIENT set: quit %v, calls %q", quit, r.calls)
 	}
-	m, r = stayModel("") // not even a client
+	m, r = stayModel("") // not even a client: q quits; enter has nowhere to switch, says so, and the board stays
 	if _, quit := press(t, m, "q"); !quit {
 		t.Error("q with no client did not quit")
+	}
+	m, r = stayModel("")
+	if m2, quit := press(t, m, "enter"); quit || !strings.Contains(m2.msg, "no tmux client") {
+		t.Errorf("enter with no client: quit %v, msg %q, calls %q", quit, m2.msg, r.calls)
+	}
+}
+
+// The footer follows the popup: q hides while a tmux client is attached to the board's session, q
+// quits in an ordinary pane (asked at the start and every second).
+func TestStayFooterFollowsPopup(t *testing.T) {
+	t.Cleanup(func() { stayFooter = false; useConfig(config.Default()) })
+	useConfig(config.Default())
+	const ask = "list-clients #{client_termname}"
+	m, r := stayModel(stayClients)
+	r.tmuxOut[ask] = "tmux-256color\n"
+	run(&m, m.Init())
+	if f := ansi.Strip(footer(false, 400, "cwd")); !stayFooter || !strings.HasSuffix(f, "q hide · Q quit") {
+		t.Errorf("popup attached: %q", f)
+	}
+	r.tmuxOut[ask] = "xterm-kitty\n" // the popup is gone, the board's pane has the user's terminal
+	m = frame(t, m)                  // frame 1: not asked yet
+	m = frame(t, m)                  // frame 2: asked
+	if f := ansi.Strip(footer(false, 400, "cwd")); stayFooter || !strings.HasSuffix(f, "q quit") || strings.Contains(f, "hide") {
+		t.Errorf("no popup: %q", f)
+	}
+	r.tmuxOut[ask] = "tmux-256color\n" // a popup attaches again
+	frame(t, frame(t, m))
+	if !stayFooter {
+		t.Error("popup attached again: footer still says quit")
+	}
+	// hidden, nobody sees the footer: only "is the popup back" is asked
+	m, r = stayModel(stayClients)
+	m, _ = press(t, m, "q")
+	r.reset()
+	for range 4 {
+		m = frame(t, m)
+	}
+	for _, c := range r.calls {
+		if c[len(c)-1] == "#{client_termname}" {
+			t.Errorf("asked for the footer while hidden: %q", c)
+		}
+	}
+	// no --stay, no asking
+	m, r = stayModel(stayClients)
+	m.stay = false
+	run(&m, m.Init())
+	m = frame(t, frame(t, m))
+	for _, c := range r.calls {
+		if c[len(c)-1] == "#{client_termname}" {
+			t.Errorf("asked without --stay: %q", c)
+		}
 	}
 }
 

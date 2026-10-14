@@ -35,7 +35,8 @@ var maxCols = 4
 // its groups on its own; else "bands": each n groups are a row, as tall as its tallest group.
 var stackFlow bool
 
-// stayFooter: the board runs with --stay, so q hides it and the exit key ends it; set by Run before useConfig.
+// stayFooter: the board runs with --stay and is shown through a popup, so q hides it and the exit key
+// ends it; set when a poll finds the popup, false in an ordinary pane (there q quits).
 var stayFooter bool
 
 // Colors; defaults match claude-hud's segments (ANSI slots) and ccmux's palette, and

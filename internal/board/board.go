@@ -88,7 +88,7 @@ type Model struct {
 	pick    int             // the avatar grid's cursor, an index into avatar.Listing()
 	folded  map[string]bool // group keys folded with f; this run only; cleared when the grouping changes
 	groupBy string          // how the cards are grouped now (g changes it); "" = [layout] group_by
-	stay    bool            // --stay: jump and quit hide the popup client instead of ending the board (see hideBoard)
+	stay    bool            // --stay: jump never ends the board, quit only hides a popup (see hideBoard)
 
 	query      string // the / filter; "" = every card
 	searching  bool   // the filter's input box has the keys
@@ -131,9 +131,9 @@ func New(src Source, run Runner) Model {
 func Run(p *store.Poller, cfg *config.Config, img ImageMode, stay bool) error {
 	var stayNote string
 	if stay && os.Getenv("TMUX") == "" {
-		stay, stayNote = false, "--stay needs the board in its own tmux session"
+		stay, stayNote = false, "--stay only works inside tmux"
 	}
-	stayFooter = stay
+	stayFooter = false // true once a popup is seen on the board's session
 	useConfig(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -167,6 +167,9 @@ func Run(p *store.Poller, cfg *config.Config, img ImageMode, stay bool) error {
 
 type frameMsg struct{}
 
+// popupMsg answers whether a popup (a tmux client) is attached to the board's session now (--stay).
+type popupMsg struct{ yes bool }
+
 // attachedMsg answers whether anyone is attached to the board's session again (--stay, hidden).
 type attachedMsg struct{ n int }
 
@@ -181,7 +184,21 @@ type doneMsg struct {
 
 func nextFrame() tea.Cmd { return tea.Tick(frameEvery, func(time.Time) tea.Msg { return frameMsg{} }) }
 
-func (m Model) Init() tea.Cmd { return nextFrame() }
+func (m Model) Init() tea.Cmd { return tea.Batch(nextFrame(), m.askPopup()) }
+
+// askPopup, under --stay, asks tmux whether the board is shown through a popup: the footer says
+// "q hide" then, and "q quit" for a board in an ordinary pane (where q has nothing to hide).
+func (m Model) askPopup() tea.Cmd {
+	pane := m.getenv("TMUX_PANE")
+	if !m.stay || pane == "" {
+		return nil
+	}
+	r := m.run
+	return func() tea.Msg {
+		out, err := r.Tmux("list-clients", "-t", pane, "-F", "#{client_termname}")
+		return popupMsg{err == nil && slices.ContainsFunc(strings.Fields(out), nestedTerm)}
+	}
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -207,7 +224,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmd := m.capture() // the preview refreshes on the 500ms frame; called first: it marks m.capturing
 		seen := m.dwell()  // before the return reads m: dwell counts in it
-		return m, tea.Batch(nextFrame(), cmd, seen)
+		var popup tea.Cmd
+		if m.frame%2 == 0 && !m.hidden { // a popup comes and goes; once a second is soon enough for a footer
+			popup = m.askPopup()
+		}
+		return m, tea.Batch(nextFrame(), cmd, seen, popup)
+	case popupMsg:
+		if stayFooter != msg.yes {
+			stayFooter = msg.yes
+			footerKeys = footerFor(m.cfg) // the "q hide" / "q quit" text is part of the key line
+		}
 	case previewMsg:
 		m.pv, m.capturing = msg, false
 		if msg.sendErr { // the key didn't reach the pane: say so where errors go
@@ -929,7 +955,8 @@ func (m Model) ccmux(ok string, args ...string) tea.Cmd {
 	return func() tea.Msg { return doneMsg{ok: ok, err: r.Run(args...)} }
 }
 
-// jump switches tmux to the session and leaves the board (the popup must close to show it).
+// jump switches tmux to the session and leaves the board (the popup must close to show it); under
+// --stay the board stays, and only a popup closes.
 func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	if s.TmuxPane == "" {
 		return m, nil // msgLine already shows noPane
@@ -939,7 +966,7 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 		var done doneMsg
 		if stay {
 			hidden, err := switchAndHide(r, getenv, s.TmuxPane)
-			done = doneMsg{err: err, quit: !hidden && err == nil, hid: hidden}
+			done = doneMsg{err: err, hid: hidden} // the board stays, in a popup's session or an ordinary pane
 		} else {
 			done = doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true}
 		}
@@ -1079,8 +1106,8 @@ func switchTo(r Runner, getenv func(string) string, pane string) error {
 }
 
 // popupClients are the clients attached to agmux's own session that are a tmux themselves: what
-// a popup running `tmux attach` is, in the layout --stay is for (the board runs in a session of its
-// own, the popup only shows it). A client of that session that is not a tmux is the user's own
+// a popup running `tmux attach` is (the board runs in a session of its own, the popup only shows
+// it). A client of that session that is not a tmux is the user's own
 // terminal (the board was started in an ordinary pane): never detached.
 func popupClients(pc pickedClient) []tmuxClient {
 	var out []tmuxClient
@@ -1102,9 +1129,9 @@ func detachAll(r Runner, cs []tmuxClient) (hidden bool, err error) {
 	return len(cs) > 0, nil
 }
 
-// hideBoard is quit under --stay: the popup closes, the board keeps running in its session.
-// hidden is false when there is no popup client to detach (the board is not in the layout --stay
-// is for): the caller then ends the board as quit always did.
+// hideBoard is quit under --stay: a popup closes, the board keeps running in its session.
+// hidden is false when there is no popup client to detach (the board is in an ordinary pane): the
+// caller then ends the board as quit always did.
 func hideBoard(r Runner, getenv func(string) string) (hidden bool, err error) {
 	pc, err := chooseClient(r, getenv)
 	if errors.Is(err, errNoClient) {
@@ -1116,17 +1143,14 @@ func hideBoard(r Runner, getenv func(string) string) (hidden bool, err error) {
 	return detachAll(r, popupClients(pc))
 }
 
-// switchAndHide is jump under --stay: the user's client goes to the pane, the popup closes, the
-// board stays. With no popup client it is switchTo, and hidden is false.
+// switchAndHide is jump under --stay: the user's client goes to the pane and a popup, if there is
+// one, closes; the board stays either way (nothing is detached when it runs in an ordinary pane).
 func switchAndHide(r Runner, getenv func(string) string, pane string) (hidden bool, err error) {
 	pc, err := chooseClient(r, getenv)
 	if err != nil {
 		return false, err
 	}
 	popups := popupClients(pc)
-	if len(popups) == 0 {
-		return false, switchTo(r, getenv, pane)
-	}
 	if _, err := r.Tmux("switch-client", "-c", pc.name, "-t", pane); err != nil {
 		return false, err
 	}

@@ -45,7 +45,7 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 | `d` | 用 ccmux review 看改动 |
 | `a` | 给这个会话换头像：在这张卡正下方（放不下就在上方）弹出 5 列 × 4 行的头像格子，先是图片集（内置的，再是你的），最后是像素头像；`h` `j` `k` `l` / 方向键移动，`enter` 绑定，`esc` 取消；超过 20 个按行滚动，当前穿的那个一开始就选着，底下的消息行显示选中的 id |
 | `q` / `esc` | 退出（预览获焦时先按 `tab` 回到卡片；保留着 `/` 过滤时 `esc` 先清空过滤） |
-| `Q`（动作 `exit`） | 真正退出看板进程；`agmux board --stay` 下 `q` / `esc` 和 `enter` 跳转都只收起浮窗，进程留着，只有它能结束进程 |
+| `Q`（动作 `exit`） | 真正退出看板进程；`agmux board --stay` 下 `enter` 跳转从不结束进程、`q` / `esc` 在浮窗里也只收起浮窗，只有它能结束一个浮窗里的看板 |
 
 没有 tmux pane 的后台会话不能跳转和发送，底栏对应键会变暗。
 
@@ -75,16 +75,19 @@ tmux set-environment -h -t "$target" AGMUX_CLIENT "$(tmux display -p "#{client_n
 
 只有拿到了 `AGMUX_CLIENT`（进程环境或 session 环境），跳转后 agmux 才会把浮窗里的那个 client detach 掉、浮窗随之关闭；拿不到就只切换，浮窗留着。
 
-**常驻看板：`agmux board --stay`。** 上面「浮窗里再 attach 一个常驻 session」的用法里，`enter` 跳转后看板进程会退出，session 随之没了，下次要重起。加 `--stay`：`enter` 跳转（和 `q` / `esc`）只把 attach 在看板自己 session 上的那个浮窗 client detach 掉，进程不退，轮询照旧，下次 attach 回来是同一个进程、同一张卡获焦、头像也不用重传；`Q` 才真的退出。
+**常驻看板：`agmux board --stay`。** `enter` 跳转后看板进程默认会退出，下次要重起。加 `--stay`，`enter` 跳转（把你的 tmux client 切到那个 pane）后看板进程**不退出**，轮询照旧，焦点、头像都留着。两种用法：
+
+1. **浮窗里**（看板跑在自己的常驻 session 里，浮窗只是 attach 上去）：`enter` 切过去并把浮窗 detach 掉，`q` / `esc` 也只是收起浮窗，下次 attach 回来是同一个进程、同一张卡获焦、头像不用重传；`Q` 才真的退出。
+2. **普通 pane 里**（直接 `agmux board --stay`）：`enter` 把 client 切到目标 pane，看板留在原 pane 继续跑，切回来焦点还在原来那张卡上；没有浮窗可收，`q` / `esc` 就是退出（`Q` 也行）。
 
 ```sh
-# 启动脚本：看板跑在常驻 session 里，浮窗只是 attach 上去
+# 浮窗用法的启动脚本：看板跑在常驻 session 里，浮窗只是 attach 上去
 tmux has-session -t =fl-agmux 2>/dev/null || tmux new-session -d -s fl-agmux agmux board --stay
 tmux display-popup -E "tmux attach-session -t =fl-agmux"
 ```
 
-- 被 detach 的只是「看板自己 session 上、本身是 tmux 的 client」（浮窗里 `tmux attach` 出来的那个）；看板若跑在普通 pane 里（自己 session 上的 client 就是你的终端），或不在 tmux 里，`--stay` 不会 detach 任何东西，行为和没加一样（`q` 退出、`enter` 跳转后退出），不在 tmux 里时底栏提示 `--stay needs the board in its own tmux session`。
-- 底栏在 `--stay` 下是 `q hide · Q quit`；退出键可以用 `[keys] exit` 改。
+- 被 detach 的只是「看板自己 session 上、本身是 tmux 的 client」（浮窗里 `tmux attach` 出来的那个）；普通 pane 里自己 session 上的 client 是你的终端，从不 detach。不在 tmux 里 `--stay` 不起作用（没有 pane 可跳），底栏提示 `--stay only works inside tmux`。
+- 底栏每秒问一次 tmux 有没有浮窗：有则 `q hide · Q quit`，没有 `q quit`；退出键可以用 `[keys] exit` 改。
 
 ### 上下文百分比
 
@@ -99,7 +102,7 @@ agmux setup --write   # 改 ~/.claude/settings.json 的 statusLine.command，原
 
 ### 看过的 done 算已读
 
-ccmux 要等你切到那个 pane 才把 done 清成 idle。看板里把焦点连续停在一张 done 的卡上 1 秒（`j` / `k` 路过不算）、在它上面开预览 / 进直通、或 `enter` 跳转，这个 done 就算已读：卡片按 idle 画，`agmux show` 也一样。记在 `$XDG_STATE_HOME/agmux/seen.json`（会话 ID → 那次 done 的 `statusChangedAt`），重启后还在；会话又干活、再完成一次就重新是 done；ccmux 自己清掉后条目自动删。告警 / 等权限的卡不做已读。`--stay` 下 `q` / `enter` 收起浮窗后不计时，直到浮窗再 attach 上来（收起期间看板每 0.5 秒问一次 tmux）或有按键；从脚本里 detach 的浮窗看板不知道，仍会计时。文件坏了当作都没看过，底栏报一行，修好或删掉即可。
+ccmux 要等你切到那个 pane 才把 done 清成 idle。看板里把焦点连续停在一张 done 的卡上 1 秒（`j` / `k` 路过不算）、在它上面开预览 / 进直通、或 `enter` 跳转，这个 done 就算已读：卡片按 idle 画，`agmux show` 也一样。记在 `$XDG_STATE_HOME/agmux/seen.json`（会话 ID → 那次 done 的 `statusChangedAt`），重启后还在；会话又干活、再完成一次就重新是 done；ccmux 自己清掉后条目自动删。告警 / 等权限的卡不做已读。`--stay` 下 `q` / `enter` 收起浮窗后不计时（普通 pane 里看板一直可见，照常计时），直到浮窗再 attach 上来（收起期间看板每 0.5 秒问一次 tmux）或有按键；从脚本里 detach 的浮窗看板不知道，仍会计时。文件坏了当作都没看过，底栏报一行，修好或删掉即可。
 
 ### 配置
 
