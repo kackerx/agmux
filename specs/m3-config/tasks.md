@@ -275,3 +275,10 @@
 - reviewer（ba59d3b）：macOS 修法成立，真 pty 探针复核（HEAD 4392 个 APC 0 截；chunk 回 4096 → 842+/963 截；只切小块不问队列 → 2239+/4392 截，问队列是必须的）；room 用 q+n<=1024 刚好对；ioctl 出错退路照常上传；stall 后半截序列用 kitty headless 回放证实不出文字。退回 1 必改：outQueue 真 ioctl 无测试（换成别的 ioctl 号 macOS 返回 0 → room 恒真，修法失效而单测照过）→ 加 darwin 真 pty 测试。不改：room 多余判断、stall 半截、狂刷输出下上传耗时几十秒（修前就有）。
 - 定稿：Linux 不在本次范围——Linux pty 的 TIOCOUTQ 恒 0、队列 8–12 KB，room 恒真，只剩小块降低概率（reviewer 实测修后仍 1–65 个被截，比修前好无退化）；design.md 遗留补一句。备忘：Linux 走阻塞写（实测原子）+ 超时兜底，以后单开。
 - dev 补丁 c3e964b：images_darwin_test.go 真 pty 验 outQueue（写 500 → 500；再写 4000 只收 524、队列 1024、room(1) 假；读空后 room(1024) 真），变异 TIOCOUTQ→FIONREAD 被杀；design.md 补 Linux 不在范围。送 reviewer 复审；tester 整套回归按 ba59d3b 跑完后在 c3e964b 补跑定点。
+
+### T47 `--stay` 在普通 pane 里也常驻：enter 跳转后进程不退出（排入，dev 做）
+- 用户 2026-10-14：在普通 pane 里跑 `agmux board --stay`，enter 跳转后进程退出回到 shell（截图 images/21.png）。想要不管在普通 pane 还是 display-popup 里，enter 跳转都只是切过去，看板进程留在原 pane 继续跑；不要只针对 popup。
+- 定稿：`--stay` 下 `jump`（enter / 再点卡片）一律不退出：照旧 switch-client / select-window / select-pane 把 client 切到目标 pane；own session 上有 popup client 就 detach 它（现状），没有就什么都不 detach，看板留在自己 pane 里继续轮询。去掉「--stay needs the board in its own tmux session」的退化与提示。
+- `quit`（q / esc）：有 popup client 时照旧只 detach；没有 popup client（普通 pane）时等于 `exit`，真退出。底栏按实际情况写：有 popup → `q hide · Q quit`，无 popup → `q quit`（`Q` 仍可用）。
+- hidden / 已读计时：普通 pane 下看板一直可见，不进 hidden，dwell 照常计（接受）。不在 tmux 里时 --stay 仍退化成普通行为（没有 pane 可跳）。
+- 验收：单测 stay + 无 popup client：jump 发 switch-client 且不 Quit、不发 detach；quit 发 Quit；底栏文案两种；stay + 有 popup 行为不变；非 stay 不变。黑盒 真 tmux 普通 pane 里 --stay：enter 后 client 到目标 pane、进程仍在、切回看板 pane 焦点仍在原卡；q 退出。原 T44 退化用例改掉。
