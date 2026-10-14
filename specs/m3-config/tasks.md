@@ -290,13 +290,13 @@
 - 备忘：区分浮窗与嵌套用户 client 的可用特征——display-popup 里 attach 的 client 其 client_pid 的父进程是 server 的 #{pid}（reviewer 真 tmux 实测），嵌套 / ssh 的不是；以后单开任务加进 popupClients。
 - dev a43c00e：askPopup = chooseClient + popupClients（errNoClient → false，其它错误 → nil 底栏不变）；TestStayFooterFollowsPopup 重写四种情况与 q 一致 + 第 1 帧不问 + 失败不变；README 措辞；TestSeenNotWhileHidden 改成只数 session_attached。每秒 2–4 次 tmux 调用，未省。
 
-### T48 done 已读只认预览 / 跳转，不再按停留计时（dev @7f7a205 审查退回 1 小必改，修复中）
+### T48 done 已读只认预览 / 跳转，不再按停留计时（修复 @b0e0ba3 送复审）
 - 用户 2026-10-14：焦点在 done 的卡上停一下就被取消 done，但并没有打开预览；要改成只有预览过或跳过去 focus 了 pane 才算看过结果。
 - 定稿：T45 的「焦点停 2 tick 即已读」去掉；已读只在三种动作时记：在这张卡上开预览、进直通、enter 跳转（已有）。j/k 路过和停留都不算。hidden 标志若只为 dwell 而存在就一并删，T47 收起期间不问浮窗的逻辑还用它则保留。design.md T45 那段同步。
 - 验收：单测 焦点停 10 tick 仍 done、seen.json 无条目；预览 / 直通 / enter 立即已读（原用例保留）。黑盒 真 tmux 夹具 done 卡 focus 3 s 仍 done，开预览后变 idle。原 T45 dwell 用例改掉。
 - reviewer 复审 a43c00e 通过：四种情况底栏与 q 一致，变异 11 杀 9；两条小建议（失败后 quit 方向不变的断言、两个非 tmux 终端无浮窗的用例）并入 T48 的 commit。
 
-### T49 内置头像再加 10 套：GPT 做的 5 个角色 + 5 个火影角色（dev @dd7ada1 审查退回 1 必改，修复中）
+### T49 内置头像再加 10 套：GPT 做的 5 个角色 + 5 个火影角色（修复 @fdac3c9 送复审 + 测）
 - 用户 2026-10-14：GPT 又做了 5 个火影主题（naruto / sasuke / sakura / kakashi / itachi，`~/Pictures/pi-agent-portraits-naruto/emotes/`，每套 30 帧 + sheet，1134×944），连同之前的 5 套（developer / researcher / operator / tester / designer，`~/Pictures/pi-agent-portraits/emotes/`）都进 agmux 默认，用户不用单独装。
 - 定稿：这 10 套按现有内置格式嵌进 internal/avatar/sets/（只取 agmux 用到的 7 个状态目录 idle / think / read / write / tool / hi / success，其余表情和 sheet.png / emotes.json 不嵌）；帧预先裁成居中 3:2 并缩到高 128（和加载时一样，再大是浪费），PNG；dev 回报嵌入后体积，总量超过约 8 MB 就缩到高 96。原件只读，不动用户 ~/Pictures 和 ~/.config。
 - 顺序：`a` 选择框里内置 pi 10 套在前，接 developer / researcher / operator / tester / designer，再 naruto / sasuke / sakura / kakashi / itachi，像素 5 个仍在最后；hash 池包含新 10 套。
@@ -309,3 +309,4 @@
 - dev 补数字：20 套全内置时一次启动上传 4.4 MB / 5796 个序列（T46 时 15 套 2.76 MB / 3676 个、0.55 s），估 <1 s；备忘「只上传当前用到的集」优先级提高。
 - reviewer（7f7a205）：行为正确，三种触发只在 done 卡记、停留与移动不记均有变异杀；退回 1 必改：switchAndHide 的 hidden 返回值已死 → 只返回 error（建在 dd7ada1 之上）。e2e test_t45.py 6 条 dwell / hidden 用例、lib.py 的 session_attached 分支、README 描述交 tester 改。不做：预览中变 done 再关预览记已读的用例。
 - reviewer（dd7ada1）：嵌入内容无误（140 帧全 126×84、逐字节 = 上传、重跑转换器 diff 一致、embed 范围只含 sets、顺序测试锁住）；真 pty 20 套 4.41 MB / 5796 个 APC 0 截，快读 0.11 s、慢读 1.8 s。退回 1 必改：tools/embedsets 先 RemoveAll 再检查，源参数 `.` 会删光 internal/avatar/sets → 临时目录转换成功后再替换 + 拒绝 "." / ".." / "/"。采纳：CREDITS 两处措辞（第二三组适用许可、火影版权归属与非官方声明）、avatar_ext_test.go 386 溢出一行。不做：embedsets 重抄常量。升级后无绑定会话默认头像大多会换，验收报告告知用户。
+- dev：T48 修复 b0e0ba3（switchAndHide 只返回 error）；T49 修复 fdac3c9（临时目录转换成功后再替换、拒绝 . / .. / 分隔符源、run() 可测变异 4 杀；CREDITS 措辞；386 常量）。本轮 T47–T49 目标 hash = fdac3c9，tester 起整套回归。
