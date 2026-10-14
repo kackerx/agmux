@@ -322,9 +322,10 @@
 - dev 6b683ca：border 注释改 follow the status；tomlQuote（\a \v \xNN → \u00XX）用于绑定名与值 + round-trip 用例；golden internal/config/testdata/config.example.toml + TestStringMatchesTheExample（UPDATE_GOLDEN=1 重写）；措辞两处。送复审；tester 目标改 6b683ca。
 - reviewer 复审 6b683ca 通过：border 注释一致；tomlQuote 对 ESC / DEL / BEL / NUL / 中文 / emoji / U+2028 等全部 round-trip；golden 杀 noUse；措辞同步。
 
-### T51 直接切到某个分组方式的键位：`group_cwd` / `group_project` / `group_session` / `group_state`（dev @fb91e04 送审 + 测）
+### T51 直接切到某个分组方式的键位：`group_cwd` / `group_project` / `group_session` / `group_state`（审查通过 @fb91e04，等 tester）
 - 用户 2026-10-14：经常要直接看 state 分组，`g` 循环要按好几下；要能配置某个键直接切到指定分组，并给他配 `G` = state。
 - 定稿：[keys] 新增四个动作 `group_cwd`、`group_project`、`group_session`、`group_state`，默认都不绑键（空列表 `[]` 表示不绑；Parse 对这四个动作允许空，其它动作仍要求至少一个键）。按键 = 切到该分组方式（和 `g` 切到同一方式时行为一致：清折叠、焦点留原卡、结束手动滚动；已在该方式则不动）。底栏不加文案（`g group:<mode>` 已显示当前方式）。`agmux config` 打印 `group_state = []  # default: none — switch straight to the state grouping`，四行跟在 group 后面；golden 同步。一个键仍只能绑一个动作。
 - 用户配置：我在他的 ~/.config/agmux/config.toml 里加 `group_state = ["G"]`（装好后）。
 - 验收：单测 四个动作各自切到对应方式、已在该方式时无变化、默认未绑不响应、`[]` 可解析、绑定后 KeyMap 包含、`agmux config` 四行与 golden；黑盒 配 `group_state = ["G"]` 后按 G 直接到 state 分组、再按 g 从 state 往下循环到 cwd。
 - dev fb91e04：Actions 在 group 后加四个，默认空；Parse 只对这四个允许 `[]`；String() 默认无键的动作打印 `= []  # default: none — …`；do("group"|"group_<mode>") 共用路径，已在该方式早返回；README 键位表 + 示例 group_state = ["G"]；变异 4 杀。已有语义提醒：文件里绑的键会从默认持有者拿走（配 ["g"] 则 g 循环失键）。
+- reviewer（fb91e04）通过无必改：`[]` 豁免只限四个、一键一动作仍生效、String() 两条路径不混、KeyMap 无空项、直切与 g 在四种状态下完全一致（直通 / flash / 搜索中两者都不切）；变异 7 杀。不做：头注释补「group_<mode> 可为 []」。
