@@ -43,16 +43,16 @@ class Direct(Base):
         tty = self.tty(); self.env.set_tmux(session="fl-own", clients=[(100, "outer", "main", "xterm-kitty", tty.path)])
         r = self.run_board(); self.assertEqual(len(self.frames(tty.bytes())), N_BUILTIN, "every frame, on the client's tty")
         data = tty.bytes(); self.assertNotIn(b"Ptmux", data, "no passthrough wrapper"); self.assertNotIn(b"\x1b[?1049h", data, "tmux's client is on the alternate screen already")
-        for c in kitty_commands(data): self.assertFalse(c["wrapped"]); self.assertLessEqual(len(c["payload"]), 4096)
+        for c in kitty_commands(data): self.assertFalse(c["wrapped"]); self.assertLessEqual(len(c["payload"]), 768)  # T46: <= 768 on a client tty
         out = bytes(r.data); self.assertNotIn(b"\x1b_G", out, "nothing of it on stdout (the pane)"); self.assertNotIn(b"Ptmux", out)
         r.send("q"); self.assertTrue(r.exited(5))
 
     def test_every_frame_arrives_whole_in_order_and_equals_the_uploads_outside_tmux(self):
         tty = self.tty(); self.env.set_tmux(session="fl-own", clients=[(100, "outer", "main", "xterm-kitty", tty.path)]); self.run_board()
-        via_tty = [(c["ctl"].get("i"), c["payload"]) for c in kitty_commands(tty.bytes())]
+        via_tty = [(i, im["data"]) for i, im in sorted(kitty_images(kitty_commands(tty.bytes())).items())]
         out = PtyRun(self.env, extra={"XDG_CONFIG_HOME": str(self.cfg), "TERM": "xterm-kitty"}); self.addCleanup(out.close); self.assertTrue(wait(lambda: b" sessions" in bytes(out.data), 10))
-        direct = [(c["ctl"].get("i"), c["payload"]) for c in kitty_commands(bytes(out.data))]
-        self.assertEqual(via_tty, direct, "the same sequences, chunk for chunk, whether they go to a tty inside tmux or to the terminal outside it")
+        direct = [(i, im["data"]) for i, im in sorted(kitty_images(kitty_commands(bytes(out.data))).items())]
+        self.assertEqual(via_tty, direct, "the same pictures under the same ids, whether they go to a tty inside tmux or to the terminal outside it (T46: cut in other chunks, 768 vs 4096)")
 
     def test_refresh_client_follows_the_upload_for_that_client(self):
         tty = self.tty(); self.env.set_tmux(session="fl-own", clients=[(100, "outer", "main", "xterm-kitty", tty.path)]); self.run_board()
