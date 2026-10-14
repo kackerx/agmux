@@ -261,7 +261,7 @@
 - 观察（不当缺陷，待定夺）：`(no project)` 按字节序排最前而 `(no pane)` 固定最后、大小写按字节序；`agmux show` 只有 status 列，done / 已读都显示 idle；list-clients 失败的消息行以命令行开头，120 列下原因被截；底栏加 g 后约 167 列，165 列以下 `q quit` 看不到；有 attention 的 working 会话在 state 模式落 working 组。
 - 没覆盖：真 kitty / ghostty 观感与 q=2、?1049l 兜底、真 pi sheet、≥100 用户图集耗时、flash 叠在占位符上、--force 竞态、嵌套 ssh 两 tmux-* client、脚本从浮窗 detach 时 hidden 靠轮询、fl-toggle.sh 真脚本未跑。
 
-### T46 看板启动时把头像图片数据当文字刷屏（缺陷；dev @ba59d3b 已装用户复测中；补丁 @c3e964b 复审通过，等整套回归 + 用户复测）
+### T46 看板启动时把头像图片数据当文字刷屏（通过 @c3e964b / 新增 5 条；整套 809 条 OK；用户复测通过）
 - 用户 2026-10-14：直接跑 `~/go/bin/agmux board`（7cefc08），看板没画出来，屏幕被几十行 base64 文本刷满（截图 images/20.png）。环境待用户补：终端、在不在 tmux 里、`$TERM $TERM_PROGRAM $TMUX`。
 - 交 dev 先找根因（真 kitty 三条路复现：tmux 外 / 普通 pane / 常驻 session + popup），怀疑点：ToTerminal 路径的转义序列完整性、上传与 bubbletea 并发写同一 fd、TERM 是 kitty 而真终端不是、自定义图集某张异常。修法等拍板。
 - 用户补充：kitty；popup 浮窗和普通 pane 都出，即直写 client tty（ToTTY）这条路。
@@ -296,7 +296,7 @@
 - 验收：单测 焦点停 10 tick 仍 done、seen.json 无条目；预览 / 直通 / enter 立即已读（原用例保留）。黑盒 真 tmux 夹具 done 卡 focus 3 s 仍 done，开预览后变 idle。原 T45 dwell 用例改掉。
 - reviewer 复审 a43c00e 通过：四种情况底栏与 q 一致，变异 11 杀 9；两条小建议（失败后 quit 方向不变的断言、两个非 tmux 终端无浮窗的用例）并入 T48 的 commit。
 
-### T49 内置头像再加 10 套：GPT 做的 5 个角色 + 5 个火影角色（排入，dev 做，T48 之后）
+### T49 内置头像再加 10 套：GPT 做的 5 个角色 + 5 个火影角色（dev @dd7ada1 送审 + 测）
 - 用户 2026-10-14：GPT 又做了 5 个火影主题（naruto / sasuke / sakura / kakashi / itachi，`~/Pictures/pi-agent-portraits-naruto/emotes/`，每套 30 帧 + sheet，1134×944），连同之前的 5 套（developer / researcher / operator / tester / designer，`~/Pictures/pi-agent-portraits/emotes/`）都进 agmux 默认，用户不用单独装。
 - 定稿：这 10 套按现有内置格式嵌进 internal/avatar/sets/（只取 agmux 用到的 7 个状态目录 idle / think / read / write / tool / hi / success，其余表情和 sheet.png / emotes.json 不嵌）；帧预先裁成居中 3:2 并缩到高 128（和加载时一样，再大是浪费），PNG；dev 回报嵌入后体积，总量超过约 8 MB 就缩到高 96。原件只读，不动用户 ~/Pictures 和 ~/.config。
 - 顺序：`a` 选择框里内置 pi 10 套在前，接 developer / researcher / operator / tester / designer，再 naruto / sasuke / sakura / kakashi / itachi，像素 5 个仍在最后；hash 池包含新 10 套。
@@ -304,3 +304,5 @@
 - 版权备注：火影角色是集英社 / Pierrot 的版权形象，GPT 生成的同人图嵌进开源发布的二进制有风险；用户已知情并决定加入，发布时 oss-maintainer 再提一次。
 - 验收：单测 内置集数 = 20、每套 7 个状态都有帧、帧高 ≤128 且 3:2、id 顺序；用户目录同 id 覆盖；`agmux avatars`（或等价列表）列出 20 套。黑盒 `a` 选择框 5 行滚动、新套头像在真 kitty 可显示（tester 字节流 + 截图）。
 - dev 7f7a205：dwell、hidden、asking、attachedMsg、doneMsg.hid、seenFrames 整套删（hidden 只为 dwell 存在；T47 收起期间不问浮窗也随之去掉，代价是收起期间每秒照常问、再 attach 后底栏最多晚 1 s，照准）；焦点停 10 帧 + j/k 仍 done；T47 两条小建议测试并入；README 去掉「停 1 秒」。
+- tester 终结论（c3e964b）：整套 809 条 OK（在 ba59d3b 上，1697 s；c3e964b 仅多单测，定点复跑 OK）；套件 d25ea78。已装用户的 ba59d3b 产品代码与 c3e964b 相同，不重装。
+- dev dd7ada1：sets 1.4 → 4.1 MB，二进制 7.82 → 10.33 MB（不用缩 96）；原帧本就 128×128，只裁居中 3:2 成 126×84（128×85 会被 cropFor 再裁一列，「上传 = 存储」不成立）；每套 7 态各 2 帧共 14 帧；转换器 tools/embedsets 可重跑；builtinOrder 固定顺序；用户同 id 覆盖内置（原规则）；CREDITS.md 注明来源与火影版权；README 提示用户可删 ~/.config 里的同名拷贝。副作用：无绑定会话的默认头像（hash 池 20 套）又会变一次；每次启动上传 20 套，dev 补数字。
