@@ -312,7 +312,7 @@
 - dev：T48 修复 b0e0ba3（switchAndHide 只返回 error）；T49 修复 fdac3c9（临时目录转换成功后再替换、拒绝 . / .. / 分隔符源、run() 可测变异 4 杀；CREDITS 措辞；386 常量）。本轮 T47–T49 目标 hash = fdac3c9，tester 起整套回归。
 - reviewer 复审：T48 b0e0ba3、T49 fdac3c9 均通过（误删复现被拒、坏输入不动旧套、重跑 diff 一致、变异 6 杀 5；CREDITS 与 386 满足）。不补：临时目录名以点开头无测试。本轮最终 hash fdac3c9，等 tester。
 
-### T50 `agmux config` 打印带注释的完整模板（复审通过 @6b683ca，等 tester 定点）
+### T50 `agmux config` 打印带注释的完整模板（通过 @6b683ca / 12 条；套件 3b6f716）
 - 用户 2026-10-14：配置文件里把所有可配置项都列上，带默认值，注释里写可选项，全英文。我已按现有选项手写了用户的 ~/.config/agmux/config.toml（保留他的 max_columns=5 / flow=stack / renderer=image / border），模板（默认值版）存 specs/m3-config/config.example.toml。
 - 定稿：`agmux config` 的输出改成 config.example.toml 这套带注释的格式，值用当前生效值（注释里的 default 不变）；每个动作 / 颜色一行加尾注释，[layout] / [avatars] 的可选项写在注释里，[avatars.bind] 的绑定照常打印在节下（注释在前）。README 配置一节说明 `agmux config > ~/.config/agmux/config.toml` 可生成完整文件。不加新子命令。
 - 验收：单测 打印结果能被 Parse 回读且等价（round-trip）、每个 Actions / Colors 都有一行、注释含 default；黑盒 `agmux config` 输出与模板逐行比对（值处除外）。
@@ -335,3 +335,4 @@
 - T47 真 tmux 9 条（普通 pane enter 不退不 detach、焦点留原卡、q/esc/Q 退出、底栏随 popup 2.5 s 内变化、不在 tmux 提示）；T48 t45 重写（停 3 s / 路过 / popup 里停仍 done，预览 / 直通 / enter 立即，waiting 不记，statusChangedAt 变了回 done）；T49 11 条（20 套顺序、每套 7 态 × 2、用户同 id 替换位置不变、选择框滚动、281 帧全经 tty 且 <1024、126×84、hash 落到新套）；真 kitty 3 次 5796 个 APC 0 损坏；反向在旧版均红。
 - 一次未复现：t18 选择框宽字符用例在连跑里红过一次（105 列「网格外一行变了」），单跑 11 次全绿，整套再跑留意。
 - 没覆盖：真 kitty 渲染截图（另起实例截图全白，改为从字节流解帧看了 naruto / developer idle 正常）；真 kitty 读速；新套各态画面未逐帧看。
+- tester（6b683ca）：默认输出与 golden 逐字一致；合法 TOML；9 个非默认值只改值行、default 注释不变；写回再打印两轮相同；绑定名含控制字符 / 中文 / emoji 读回无损且输出只有 \u00XX；坏配置仍退出非 0；11 条旧用例改用 lib.plain_config() 读值后全绿。没覆盖：整套（留 T51 轮）、覆盖用户已有文件的用法。决定：先装 6b683ca 给用户验收 T46–T50，T51 过后再装。
