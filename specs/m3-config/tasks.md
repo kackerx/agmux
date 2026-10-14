@@ -260,3 +260,7 @@
 - go vet / go test -race 全绿；e2e 804 条全过（tmux 3.8，1674 s）。
 - 观察（不当缺陷，待定夺）：`(no project)` 按字节序排最前而 `(no pane)` 固定最后、大小写按字节序；`agmux show` 只有 status 列，done / 已读都显示 idle；list-clients 失败的消息行以命令行开头，120 列下原因被截；底栏加 g 后约 167 列，165 列以下 `q quit` 看不到；有 attention 的 working 会话在 state 模式落 working 组。
 - 没覆盖：真 kitty / ghostty 观感与 q=2、?1049l 兜底、真 pi sheet、≥100 用户图集耗时、flash 叠在占位符上、--force 竞态、嵌套 ssh 两 tmux-* client、脚本从浮窗 detach 时 hidden 靠轮询、fl-toggle.sh 真脚本未跑。
+
+### T46 看板启动时把头像图片数据当文字刷屏（缺陷，阻塞验收；进行中）
+- 用户 2026-10-14：直接跑 `~/go/bin/agmux board`（7cefc08），看板没画出来，屏幕被几十行 base64 文本刷满（截图 images/20.png）。环境待用户补：终端、在不在 tmux 里、`$TERM $TERM_PROGRAM $TMUX`。
+- 交 dev 先找根因（真 kitty 三条路复现：tmux 外 / 普通 pane / 常驻 session + popup），怀疑点：ToTerminal 路径的转义序列完整性、上传与 bubbletea 并发写同一 fd、TERM 是 kitty 而真终端不是、自定义图集某张异常。修法等拍板。
