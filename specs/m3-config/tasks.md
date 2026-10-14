@@ -329,3 +329,9 @@
 - 验收：单测 四个动作各自切到对应方式、已在该方式时无变化、默认未绑不响应、`[]` 可解析、绑定后 KeyMap 包含、`agmux config` 四行与 golden；黑盒 配 `group_state = ["G"]` 后按 G 直接到 state 分组、再按 g 从 state 往下循环到 cwd。
 - dev fb91e04：Actions 在 group 后加四个，默认空；Parse 只对这四个允许 `[]`；String() 默认无键的动作打印 `= []  # default: none — …`；do("group"|"group_<mode>") 共用路径，已在该方式早返回；README 键位表 + 示例 group_state = ["G"]；变异 4 杀。已有语义提醒：文件里绑的键会从默认持有者拿走（配 ["g"] 则 g 循环失键）。
 - reviewer（fb91e04）通过无必改：`[]` 豁免只限四个、一键一动作仍生效、String() 两条路径不混、KeyMap 无空项、直切与 g 在四种状态下完全一致（直通 / flash / 搜索中两者都不切）；变异 7 杀。不做：头注释补「group_<mode> 可为 []」。
+
+## T47 + T48 + T49 整批回归（tester 2026-10-14，fdac3c9，套件 e65a8c6）
+- vet / race 全绿；整套 817 条 1865 s，16 条红全是 T49 预期变化（内置 10 → 20 套顺序、选择框 25 格要滚动），已按新语义改，受影响文件 300+ 条复跑全绿；改后整套未重跑，留给 T51 那轮做最终回归。
+- T47 真 tmux 9 条（普通 pane enter 不退不 detach、焦点留原卡、q/esc/Q 退出、底栏随 popup 2.5 s 内变化、不在 tmux 提示）；T48 t45 重写（停 3 s / 路过 / popup 里停仍 done，预览 / 直通 / enter 立即，waiting 不记，statusChangedAt 变了回 done）；T49 11 条（20 套顺序、每套 7 态 × 2、用户同 id 替换位置不变、选择框滚动、281 帧全经 tty 且 <1024、126×84、hash 落到新套）；真 kitty 3 次 5796 个 APC 0 损坏；反向在旧版均红。
+- 一次未复现：t18 选择框宽字符用例在连跑里红过一次（105 列「网格外一行变了」），单跑 11 次全绿，整套再跑留意。
+- 没覆盖：真 kitty 渲染截图（另起实例截图全白，改为从字节流解帧看了 naruto / developer idle 正常）；真 kitty 读速；新套各态画面未逐帧看。
