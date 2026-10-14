@@ -261,7 +261,7 @@
 - 观察（不当缺陷，待定夺）：`(no project)` 按字节序排最前而 `(no pane)` 固定最后、大小写按字节序；`agmux show` 只有 status 列，done / 已读都显示 idle；list-clients 失败的消息行以命令行开头，120 列下原因被截；底栏加 g 后约 167 列，165 列以下 `q quit` 看不到；有 attention 的 working 会话在 state 模式落 working 组。
 - 没覆盖：真 kitty / ghostty 观感与 q=2、?1049l 兜底、真 pi sheet、≥100 用户图集耗时、flash 叠在占位符上、--force 竞态、嵌套 ssh 两 tmux-* client、脚本从浮窗 detach 时 hidden 靠轮询、fl-toggle.sh 真脚本未跑。
 
-### T46 看板启动时把头像图片数据当文字刷屏（缺陷，阻塞验收；dev @ba59d3b 送审 + 测）
+### T46 看板启动时把头像图片数据当文字刷屏（缺陷，阻塞验收；dev @ba59d3b 已装用户复测中；补丁 @c3e964b 送复审）
 - 用户 2026-10-14：直接跑 `~/go/bin/agmux board`（7cefc08），看板没画出来，屏幕被几十行 base64 文本刷满（截图 images/20.png）。环境待用户补：终端、在不在 tmux 里、`$TERM $TERM_PROGRAM $TMUX`。
 - 交 dev 先找根因（真 kitty 三条路复现：tmux 外 / 普通 pane / 常驻 session + popup），怀疑点：ToTerminal 路径的转义序列完整性、上传与 bubbletea 并发写同一 fd、TERM 是 kitty 而真终端不是、自定义图集某张异常。修法等拍板。
 - 用户补充：kitty；popup 浮窗和普通 pane 都出，即直写 client tty（ToTTY）这条路。
@@ -274,3 +274,4 @@
 - tester 真 kitty 验证：kitty --config NONE + script 录 tty + tmux -L set-titles on 每 30 ms rename-window，15 套图集。修前 764 个 APC 截 55–59 个（全是 BEL/ST），修后 3 × 3676 个 0 截断；上传 ~3 s → ~1 s（含启动与静默判定）。没做：真 kitty 肉眼看渲染、常驻 session + popup 路径、Linux pty。
 - reviewer（ba59d3b）：macOS 修法成立，真 pty 探针复核（HEAD 4392 个 APC 0 截；chunk 回 4096 → 842+/963 截；只切小块不问队列 → 2239+/4392 截，问队列是必须的）；room 用 q+n<=1024 刚好对；ioctl 出错退路照常上传；stall 后半截序列用 kitty headless 回放证实不出文字。退回 1 必改：outQueue 真 ioctl 无测试（换成别的 ioctl 号 macOS 返回 0 → room 恒真，修法失效而单测照过）→ 加 darwin 真 pty 测试。不改：room 多余判断、stall 半截、狂刷输出下上传耗时几十秒（修前就有）。
 - 定稿：Linux 不在本次范围——Linux pty 的 TIOCOUTQ 恒 0、队列 8–12 KB，room 恒真，只剩小块降低概率（reviewer 实测修后仍 1–65 个被截，比修前好无退化）；design.md 遗留补一句。备忘：Linux 走阻塞写（实测原子）+ 超时兜底，以后单开。
+- dev 补丁 c3e964b：images_darwin_test.go 真 pty 验 outQueue（写 500 → 500；再写 4000 只收 524、队列 1024、room(1) 假；读空后 room(1024) 真），变异 TIOCOUTQ→FIONREAD 被杀；design.md 补 Linux 不在范围。送 reviewer 复审；tester 整套回归按 ba59d3b 跑完后在 c3e964b 补跑定点。
