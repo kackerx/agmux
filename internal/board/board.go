@@ -917,8 +917,7 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		var done doneMsg
 		if stay {
-			_, err := switchAndHide(r, getenv, s.TmuxPane)
-			done = doneMsg{err: err} // the board stays, in a popup's session or an ordinary pane
+			done = doneMsg{err: switchAndHide(r, getenv, s.TmuxPane)} // the board stays, in a popup's session or an ordinary pane
 		} else {
 			done = doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true}
 		}
@@ -1097,16 +1096,17 @@ func hideBoard(r Runner, getenv func(string) string) (hidden bool, err error) {
 
 // switchAndHide is jump under --stay: the user's client goes to the pane and a popup, if there is
 // one, closes; the board stays either way (nothing is detached when it runs in an ordinary pane).
-func switchAndHide(r Runner, getenv func(string) string, pane string) (hidden bool, err error) {
+func switchAndHide(r Runner, getenv func(string) string, pane string) error {
 	pc, err := chooseClient(r, getenv)
 	if err != nil {
-		return false, err
+		return err
 	}
 	popups := popupClients(pc)
 	if _, err := r.Tmux("switch-client", "-c", pc.name, "-t", pane); err != nil {
-		return false, err
+		return err
 	}
-	return detachAll(r, popups)
+	_, err = detachAll(r, popups)
+	return err
 }
 
 func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
