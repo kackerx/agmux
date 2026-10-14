@@ -276,7 +276,7 @@
 - 定稿：Linux 不在本次范围——Linux pty 的 TIOCOUTQ 恒 0、队列 8–12 KB，room 恒真，只剩小块降低概率（reviewer 实测修后仍 1–65 个被截，比修前好无退化）；design.md 遗留补一句。备忘：Linux 走阻塞写（实测原子）+ 超时兜底，以后单开。
 - dev 补丁 c3e964b：images_darwin_test.go 真 pty 验 outQueue（写 500 → 500；再写 4000 只收 524、队列 1024、room(1) 假；读空后 room(1024) 真），变异 TIOCOUTQ→FIONREAD 被杀；design.md 补 Linux 不在范围。送 reviewer 复审；tester 整套回归按 ba59d3b 跑完后在 c3e964b 补跑定点。
 
-### T47 `--stay` 在普通 pane 里也常驻：enter 跳转后进程不退出（修复 @a43c00e 送复审 + 测）
+### T47 `--stay` 在普通 pane 里也常驻：enter 跳转后进程不退出（复审通过 @a43c00e，等 tester 黑盒 + 整套回归）
 - 用户 2026-10-14：在普通 pane 里跑 `agmux board --stay`，enter 跳转后进程退出回到 shell（截图 images/21.png）。想要不管在普通 pane 还是 display-popup 里，enter 跳转都只是切过去，看板进程留在原 pane 继续跑；不要只针对 popup。
 - 定稿：`--stay` 下 `jump`（enter / 再点卡片）一律不退出：照旧 switch-client / select-window / select-pane 把 client 切到目标 pane；own session 上有 popup client 就 detach 它（现状），没有就什么都不 detach，看板留在自己 pane 里继续轮询。去掉「--stay needs the board in its own tmux session」的退化与提示。
 - `quit`（q / esc）：有 popup client 时照旧只 detach；没有 popup client（普通 pane）时等于 `exit`，真退出。底栏按实际情况写：有 popup → `q hide · Q quit`，无 popup → `q quit`（`Q` 仍可用）。
@@ -294,3 +294,4 @@
 - 用户 2026-10-14：焦点在 done 的卡上停一下就被取消 done，但并没有打开预览；要改成只有预览过或跳过去 focus 了 pane 才算看过结果。
 - 定稿：T45 的「焦点停 2 tick 即已读」去掉；已读只在三种动作时记：在这张卡上开预览、进直通、enter 跳转（已有）。j/k 路过和停留都不算。hidden 标志若只为 dwell 而存在就一并删，T47 收起期间不问浮窗的逻辑还用它则保留。design.md T45 那段同步。
 - 验收：单测 焦点停 10 tick 仍 done、seen.json 无条目；预览 / 直通 / enter 立即已读（原用例保留）。黑盒 真 tmux 夹具 done 卡 focus 3 s 仍 done，开预览后变 idle。原 T45 dwell 用例改掉。
+- reviewer 复审 a43c00e 通过：四种情况底栏与 q 一致，变异 11 杀 9；两条小建议（失败后 quit 方向不变的断言、两个非 tmux 终端无浮窗的用例）并入 T48 的 commit。
