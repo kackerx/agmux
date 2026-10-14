@@ -261,6 +261,12 @@
 - 观察（不当缺陷，待定夺）：`(no project)` 按字节序排最前而 `(no pane)` 固定最后、大小写按字节序；`agmux show` 只有 status 列，done / 已读都显示 idle；list-clients 失败的消息行以命令行开头，120 列下原因被截；底栏加 g 后约 167 列，165 列以下 `q quit` 看不到；有 attention 的 working 会话在 state 模式落 working 组。
 - 没覆盖：真 kitty / ghostty 观感与 q=2、?1049l 兜底、真 pi sheet、≥100 用户图集耗时、flash 叠在占位符上、--force 竞态、嵌套 ssh 两 tmux-* client、脚本从浮窗 detach 时 hidden 靠轮询、fl-toggle.sh 真脚本未跑。
 
-### T46 看板启动时把头像图片数据当文字刷屏（缺陷，阻塞验收；进行中）
+### T46 看板启动时把头像图片数据当文字刷屏（缺陷，阻塞验收；dev 修法已照准，等提交）
 - 用户 2026-10-14：直接跑 `~/go/bin/agmux board`（7cefc08），看板没画出来，屏幕被几十行 base64 文本刷满（截图 images/20.png）。环境待用户补：终端、在不在 tmux 里、`$TERM $TERM_PROGRAM $TMUX`。
 - 交 dev 先找根因（真 kitty 三条路复现：tmux 外 / 普通 pane / 常驻 session + popup），怀疑点：ToTerminal 路径的转义序列完整性、上传与 bubbletea 并发写同一 fd、TERM 是 kitty 而真终端不是、自定义图集某张异常。修法等拍板。
+- 用户补充：kitty；popup 浮窗和普通 pane 都出，即直写 client tty（ToTTY）这条路。
+- dev 根因（真 kitty + script 录字节复现 3/3）：macOS pty 输出队列只有 1024 字节，一个 4142 字节的 APC 必被拆成多次部分写，间隙里 tmux client 往同一 tty 写自己的绘制；kitty 在 APC 里遇到 BEL 或 ESC \ 就提前结束，剩下的 base64 当文字打印（CSI / CAN 等只是吞掉）。用户 tmux 开了 set-titles / automatic-rename，标题变更带 BEL。T38 时只有 10 套内置图集碰上概率低；拷进 5 套 GPT 图集后 2.7MB / 764 个 APC，每次启动截 25 个左右。不是 T39–T45 引入，T38「一次 write 一块最安全」的假设错了。
+- 定稿修法：ToTTY 的 chunk 4096 → 768（整序列 <820 字节），写前 ioctl TIOCOUTQ 问队列空位，放得下整个序列才一次写完，放不下等，2 s 无进展仍 stall 回落 passthrough；ToTerminal / ToPassthrough 不变。dev 实测修后 3 × 3676 个 APC 0 截断，上传 3.1 s → 0.55 s。
+- 遗留不阻塞：查队列到写之间 tmux 恰好写大块仍可能部分写（概率低几个量级）；tmux 自己 >1KB 的写被我们的序列插进去（原来就有，refresh-client 重画）；TIOCOUTQ 真 pty 只手工验过，单测用假队列。
+- 备忘：每次启动全量上传 2.7MB 是隐患，可改成只传当前会话用到的集、选头像时补传；这次不做。
+- 验收：单测 每次 write 是完整序列且 ≤1024、非末块负载 4 的倍数、拼起来解得出 PNG、放不下就等、满队列 stall；reviewer 变异探针；tester 跑图片相关 e2e + go test -race + 整套回归。
