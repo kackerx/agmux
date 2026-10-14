@@ -290,7 +290,7 @@
 - 备忘：区分浮窗与嵌套用户 client 的可用特征——display-popup 里 attach 的 client 其 client_pid 的父进程是 server 的 #{pid}（reviewer 真 tmux 实测），嵌套 / ssh 的不是；以后单开任务加进 popupClients。
 - dev a43c00e：askPopup = chooseClient + popupClients（errNoClient → false，其它错误 → nil 底栏不变）；TestStayFooterFollowsPopup 重写四种情况与 q 一致 + 第 1 帧不问 + 失败不变；README 措辞；TestSeenNotWhileHidden 改成只数 session_attached。每秒 2–4 次 tmux 调用，未省。
 
-### T48 done 已读只认预览 / 跳转，不再按停留计时（dev @7f7a205 送审 + 测）
+### T48 done 已读只认预览 / 跳转，不再按停留计时（dev @7f7a205 审查退回 1 小必改，修复中）
 - 用户 2026-10-14：焦点在 done 的卡上停一下就被取消 done，但并没有打开预览；要改成只有预览过或跳过去 focus 了 pane 才算看过结果。
 - 定稿：T45 的「焦点停 2 tick 即已读」去掉；已读只在三种动作时记：在这张卡上开预览、进直通、enter 跳转（已有）。j/k 路过和停留都不算。hidden 标志若只为 dwell 而存在就一并删，T47 收起期间不问浮窗的逻辑还用它则保留。design.md T45 那段同步。
 - 验收：单测 焦点停 10 tick 仍 done、seen.json 无条目；预览 / 直通 / enter 立即已读（原用例保留）。黑盒 真 tmux 夹具 done 卡 focus 3 s 仍 done，开预览后变 idle。原 T45 dwell 用例改掉。
@@ -307,3 +307,4 @@
 - tester 终结论（c3e964b）：整套 809 条 OK（在 ba59d3b 上，1697 s；c3e964b 仅多单测，定点复跑 OK）；套件 d25ea78。已装用户的 ba59d3b 产品代码与 c3e964b 相同，不重装。
 - dev dd7ada1：sets 1.4 → 4.1 MB，二进制 7.82 → 10.33 MB（不用缩 96）；原帧本就 128×128，只裁居中 3:2 成 126×84（128×85 会被 cropFor 再裁一列，「上传 = 存储」不成立）；每套 7 态各 2 帧共 14 帧；转换器 tools/embedsets 可重跑；builtinOrder 固定顺序；用户同 id 覆盖内置（原规则）；CREDITS.md 注明来源与火影版权；README 提示用户可删 ~/.config 里的同名拷贝。副作用：无绑定会话的默认头像（hash 池 20 套）又会变一次；每次启动上传 20 套，dev 补数字。
 - dev 补数字：20 套全内置时一次启动上传 4.4 MB / 5796 个序列（T46 时 15 套 2.76 MB / 3676 个、0.55 s），估 <1 s；备忘「只上传当前用到的集」优先级提高。
+- reviewer（7f7a205）：行为正确，三种触发只在 done 卡记、停留与移动不记均有变异杀；退回 1 必改：switchAndHide 的 hidden 返回值已死 → 只返回 error（建在 dd7ada1 之上）。e2e test_t45.py 6 条 dwell / hidden 用例、lib.py 的 session_attached 分支、README 描述交 tester 改。不做：预览中变 done 再关预览记已读的用例。
