@@ -111,10 +111,6 @@ type Model struct {
 	keys      *serial    // forwarded keys reach the pane in the order they were typed
 	scrolled  bool       // the cards were scrolled by the wheel or page keys, not by the focus: top is the offset
 	top       int        // lines scrolled off the top of the cards while scrolled; the focus leaving the view ends it
-	dwellID   string     // the done card the focus has rested on, and for how many frames: seenFrames of them make it seen
-	dwellN    int
-	hidden    bool // --stay hid the popup itself; the board runs on unseen, so nothing it shows counts as seen
-	asking    bool // while hidden: a "who is attached" question is out
 
 	cfg    *config.Config
 	keymap map[string]string // key (as KeyMsg.String() spells it) → action
@@ -170,16 +166,12 @@ type frameMsg struct{}
 // popupMsg answers whether a popup (a tmux client) is attached to the board's session now (--stay).
 type popupMsg struct{ yes bool }
 
-// attachedMsg answers whether anyone is attached to the board's session again (--stay, hidden).
-type attachedMsg struct{ n int }
-
 // doneMsg reports a finished ccmux or tmux command.
 type doneMsg struct {
 	ok      string // message on success
 	err     error
 	quit    bool // leave the board on success (switch)
 	retrack bool // came back from ExecProcess: bubbletea v1 leaves the mouse off, turn it back on
-	hid     bool // --stay detached the popup: nobody is looking until a key, a click or a resize says so
 }
 
 func nextFrame() tea.Cmd { return tea.Tick(frameEvery, func(time.Time) tea.Msg { return frameMsg{} }) }
@@ -209,7 +201,7 @@ func (m Model) askPopup() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.w, m.h, m.hidden = msg.Width, msg.Height, false
+		m.w, m.h = msg.Width, msg.Height
 		if m.pvFocus && !m.previewOn() { // not "session is gone": it isn't
 			m.pvFocus = false
 			m = m.say(cMuted, "preview closed: terminal too narrow")
@@ -229,12 +221,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flashFollow()
 		}
 		cmd := m.capture() // the preview refreshes on the 500ms frame; called first: it marks m.capturing
-		seen := m.dwell()  // before the return reads m: dwell counts in it
 		var popup tea.Cmd
-		if m.frame%2 == 0 && !m.hidden { // a popup comes and goes; once a second is soon enough for a footer
+		if m.frame%2 == 0 { // a popup comes and goes; once a second is soon enough for a footer
 			popup = m.askPopup()
 		}
-		return m, tea.Batch(nextFrame(), cmd, seen, popup)
+		return m, tea.Batch(nextFrame(), cmd, popup)
 	case popupMsg:
 		if stayFooter != msg.yes {
 			stayFooter = msg.yes
@@ -252,13 +243,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.capture()
 			return m, cmd
 		}
-	case attachedMsg: // a popup attached again sends no resize when its size is the same
-		m.asking = false
-		if msg.n > 0 {
-			m.hidden = false
-		}
 	case doneMsg:
-		m.hidden = m.hidden || msg.hid
 		switch {
 		case msg.err != nil:
 			m.msg = fg(cRed, " "+firstLine(msg.err.Error()))
@@ -271,7 +256,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.EnableMouseCellMotion
 		}
 	case tea.KeyMsg, tea.MouseMsg:
-		m.hidden = false
 		m.dropLostLock()
 		// whatever moved the focus (hjkl, a click, unfolding), the preview follows right away
 		before := m.focus
@@ -288,7 +272,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok || nm.focus == before {
 			return tm, cmd
 		}
-		nm.scroll, nm.dwellN = 0, 0 // a new card starts at the bottom, and its dwell time at 0
+		nm.scroll = 0 // a new card starts at the bottom
 		// only what the event moved counts, not the fallback shown was made for
 		if nm.focus != shown.focus {
 			nm.followHidden()
@@ -376,44 +360,6 @@ func (m Model) shown() ([]store.Session, map[string]hit) {
 		}
 	}
 	return out, hits
-}
-
-// seenFrames is how many frames (500 ms) the focus rests on a done card before it counts as seen.
-const seenFrames = 2
-
-// dwell counts the frames the focus has rested on a done card (the key / click that moved it zeroes
-// the count, so passing through does not count), and marks it seen at seenFrames.
-func (m *Model) dwell() tea.Cmd {
-	if m.hidden { // nothing counts; every frame asks tmux whether the popup is back (only here, only while hidden)
-		m.dwellN = 0
-		pane := m.getenv("TMUX_PANE")
-		if m.asking || pane == "" {
-			return nil
-		}
-		m.asking = true
-		r := m.run
-		return func() tea.Msg {
-			out, err := r.Tmux("display-message", "-p", "-t", pane, "#{session_attached}")
-			n, _ := strconv.Atoi(strings.TrimSpace(out))
-			if err != nil {
-				n = 0
-			}
-			return attachedMsg{n}
-		}
-	}
-	c := *m // what the screen shows: with no focus set yet that is the first card; m's focus stays unset
-	_, _, s, ok := c.current()
-	if !ok || !s.Done {
-		m.dwellID = ""
-		return nil
-	}
-	if s.ID != m.dwellID {
-		m.dwellID, m.dwellN = s.ID, 0
-	}
-	if m.dwellN++; m.dwellN != seenFrames {
-		return nil
-	}
-	return m.markSeen(s)
 }
 
 // markSeen records that the user saw s's done, off the UI goroutine: it writes a file.
@@ -732,7 +678,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			r, getenv := m.run, m.getenv
 			return m, func() tea.Msg { // off the UI goroutine: it asks tmux
 				hidden, err := hideBoard(r, getenv)
-				return doneMsg{err: err, quit: !hidden && err == nil, hid: hidden}
+				return doneMsg{err: err, quit: !hidden && err == nil}
 			}
 		}
 		return m, tea.Quit
@@ -971,13 +917,13 @@ func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		var done doneMsg
 		if stay {
-			hidden, err := switchAndHide(r, getenv, s.TmuxPane)
-			done = doneMsg{err: err, hid: hidden} // the board stays, in a popup's session or an ordinary pane
+			_, err := switchAndHide(r, getenv, s.TmuxPane)
+			done = doneMsg{err: err} // the board stays, in a popup's session or an ordinary pane
 		} else {
 			done = doneMsg{err: switchTo(r, getenv, s.TmuxPane), quit: true}
 		}
 		if s.Done { // after the switch: it may wait for a poll in flight
-			src.MarkSeen(s) // an error here has nowhere to show: the board is on its way out (or hidden)
+			src.MarkSeen(s) // an error here has nowhere to show: the board is on its way out (or the popup closed)
 		}
 		return done
 	}

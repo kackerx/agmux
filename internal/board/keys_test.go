@@ -160,7 +160,7 @@ func run(m *Model, cmd tea.Cmd) (quit bool) {
 	switch msg := msg.(type) {
 	case tea.QuitMsg:
 		return true
-	case doneMsg, attachedMsg, popupMsg:
+	case doneMsg, popupMsg:
 		tm, next := m.Update(msg)
 		*m = tm.(Model)
 		return run(m, next)
@@ -4368,9 +4368,9 @@ func TestStayWithoutAPopup(t *testing.T) {
 		"only one popup": "9\t/dev/popup\tfl-1\ttmux-256color\t/dev/popup\n", // it is the one the jump switches, no outer one
 	} {
 		m, r := stayModel(clients)
-		m2, quit := press(t, m, "enter")
-		if quit || m2.hidden || len(tmuxCalls(r, "detach-client")) != 0 || len(tmuxCalls(r, "switch-client")) != 1 {
-			t.Errorf("%s: enter: quit %v hidden %v, calls %q", name, quit, m2.hidden, r.calls)
+		_, quit := press(t, m, "enter")
+		if quit || len(tmuxCalls(r, "detach-client")) != 0 || len(tmuxCalls(r, "switch-client")) != 1 {
+			t.Errorf("%s: enter: quit %v, calls %q", name, quit, r.calls)
 		}
 		m, r = stayModel(clients)
 		if _, quit := press(t, m, "q"); !quit || len(tmuxCalls(r, "detach-client")) != 0 {
@@ -4427,6 +4427,13 @@ func TestStayFooterFollowsPopup(t *testing.T) {
 	if listCalls() == 0 || hides() {
 		t.Errorf("popup gone, asked %d times: q quits", listCalls())
 	}
+	r.tmuxFail = map[string]error{"list-clients": errors.New("no server")}
+	r.tmuxOut["list-clients"] = user + popup
+	m = frame(t, frame(t, m)) // tmux can't say, with no popup before: still no popup
+	if hides() {
+		t.Error("a failed question turned the footer to q hide")
+	}
+	r.tmuxFail = nil
 	r.tmuxOut["list-clients"] = user + popup // the popup attaches again
 	m = frame(t, frame(t, m))
 	if !hides() {
@@ -4440,7 +4447,7 @@ func TestStayFooterFollowsPopup(t *testing.T) {
 	r.tmuxFail = nil
 	// q's own rule: a popup client that is the only one is what a jump would switch, and a user's
 	// terminal that is itself a tmux is the only client: q quits, so the footer must say so
-	for name, clients := range map[string]string{"only a popup": popup, "a tmux terminal alone": "9\t/dev/term\tfl-1\ttmux-256color\t/dev/term\n", "no client": ""} {
+	for name, clients := range map[string]string{"only a popup": popup, "a tmux terminal alone": "9\t/dev/term\tfl-1\ttmux-256color\t/dev/term\n", "no client": "", "two terminals on other sessions": user + "6\t/dev/other\tother\txterm-kitty\t/dev/other\n"} {
 		stayFooter = true
 		m, r = stayModel(clients)
 		run(&m, m.Init())
@@ -4450,16 +4457,6 @@ func TestStayFooterFollowsPopup(t *testing.T) {
 		if _, quit := press(t, m, "q"); !quit {
 			t.Errorf("%s: q did not quit", name)
 		}
-	}
-	// hidden, nobody sees the footer: only "is the popup back" is asked
-	m, r = stayModel(user + popup)
-	m, _ = press(t, m, "q")
-	r.reset()
-	for range 4 {
-		m = frame(t, m)
-	}
-	if n := len(tmuxCalls(r, "list-clients")); n != 0 {
-		t.Errorf("asked for the footer while hidden: %d list-clients calls", n)
 	}
 	// no --stay, no asking
 	m, r = stayModel(user + popup)

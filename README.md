@@ -102,7 +102,7 @@ agmux setup --write   # 改 ~/.claude/settings.json 的 statusLine.command，原
 
 ### 看过的 done 算已读
 
-ccmux 要等你切到那个 pane 才把 done 清成 idle。看板里把焦点连续停在一张 done 的卡上 1 秒（`j` / `k` 路过不算）、在它上面开预览 / 进直通、或 `enter` 跳转，这个 done 就算已读：卡片按 idle 画，`agmux show` 也一样。记在 `$XDG_STATE_HOME/agmux/seen.json`（会话 ID → 那次 done 的 `statusChangedAt`），重启后还在；会话又干活、再完成一次就重新是 done；ccmux 自己清掉后条目自动删。告警 / 等权限的卡不做已读。`--stay` 下 `q` / `enter` 收起浮窗后不计时（普通 pane 里看板一直可见，照常计时），直到浮窗再 attach 上来（收起期间看板每 0.5 秒问一次 tmux）或有按键；从脚本里 detach 的浮窗看板不知道，仍会计时。文件坏了当作都没看过，底栏报一行，修好或删掉即可。
+ccmux 要等你切到那个 pane 才把 done 清成 idle。看板里只有**看过结果**才算已读：在这张 done 的卡上开预览（`p`）、进直通（`tab` / `i`，含点预览区）、或 `enter` 跳转。焦点停在卡上多久、`j` / `k` 路过都不算。已读后卡片按 idle 画，`agmux show` 也一样。记在 `$XDG_STATE_HOME/agmux/seen.json`（会话 ID → 那次 done 的 `statusChangedAt`），重启后还在；会话又干活、再完成一次就重新是 done；ccmux 自己清掉后条目自动删。告警 / 等权限的卡不做已读。文件坏了当作都没看过，底栏报一行，修好或删掉即可。
 
 ### 配置
 
