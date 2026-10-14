@@ -261,7 +261,7 @@
 - 观察（不当缺陷，待定夺）：`(no project)` 按字节序排最前而 `(no pane)` 固定最后、大小写按字节序；`agmux show` 只有 status 列，done / 已读都显示 idle；list-clients 失败的消息行以命令行开头，120 列下原因被截；底栏加 g 后约 167 列，165 列以下 `q quit` 看不到；有 attention 的 working 会话在 state 模式落 working 组。
 - 没覆盖：真 kitty / ghostty 观感与 q=2、?1049l 兜底、真 pi sheet、≥100 用户图集耗时、flash 叠在占位符上、--force 竞态、嵌套 ssh 两 tmux-* client、脚本从浮窗 detach 时 hidden 靠轮询、fl-toggle.sh 真脚本未跑。
 
-### T46 看板启动时把头像图片数据当文字刷屏（缺陷，阻塞验收；dev @ba59d3b 已装用户复测中；补丁 @c3e964b 送复审）
+### T46 看板启动时把头像图片数据当文字刷屏（缺陷；dev @ba59d3b 已装用户复测中；补丁 @c3e964b 复审通过，等整套回归 + 用户复测）
 - 用户 2026-10-14：直接跑 `~/go/bin/agmux board`（7cefc08），看板没画出来，屏幕被几十行 base64 文本刷满（截图 images/20.png）。环境待用户补：终端、在不在 tmux 里、`$TERM $TERM_PROGRAM $TMUX`。
 - 交 dev 先找根因（真 kitty 三条路复现：tmux 外 / 普通 pane / 常驻 session + popup），怀疑点：ToTerminal 路径的转义序列完整性、上传与 bubbletea 并发写同一 fd、TERM 是 kitty 而真终端不是、自定义图集某张异常。修法等拍板。
 - 用户补充：kitty；popup 浮窗和普通 pane 都出，即直写 client tty（ToTTY）这条路。
@@ -282,3 +282,4 @@
 - `quit`（q / esc）：有 popup client 时照旧只 detach；没有 popup client（普通 pane）时等于 `exit`，真退出。底栏按实际情况写：有 popup → `q hide · Q quit`，无 popup → `q quit`（`Q` 仍可用）。
 - hidden / 已读计时：普通 pane 下看板一直可见，不进 hidden，dwell 照常计（接受）。不在 tmux 里时 --stay 仍退化成普通行为（没有 pane 可跳）。
 - 验收：单测 stay + 无 popup client：jump 发 switch-client 且不 Quit、不发 detach；quit 发 Quit；底栏文案两种；stay + 有 popup 行为不变；非 stay 不变。黑盒 真 tmux 普通 pane 里 --stay：enter 后 client 到目标 pane、进程仍在、切回看板 pane 焦点仍在原卡；q 退出。原 T44 退化用例改掉。
+- reviewer 复审 c3e964b 通过：TIOCOUTQ→FIONREAD 变异被新测试杀，-count=30 稳定，交叉 vet 过；仅存等价变异（ioctl 出错吞错）。
