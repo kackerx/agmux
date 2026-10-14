@@ -283,3 +283,4 @@
 - hidden / 已读计时：普通 pane 下看板一直可见，不进 hidden，dwell 照常计（接受）。不在 tmux 里时 --stay 仍退化成普通行为（没有 pane 可跳）。
 - 验收：单测 stay + 无 popup client：jump 发 switch-client 且不 Quit、不发 detach；quit 发 Quit；底栏文案两种；stay + 有 popup 行为不变；非 stay 不变。黑盒 真 tmux 普通 pane 里 --stay：enter 后 client 到目标 pane、进程仍在、切回看板 pane 焦点仍在原卡；q 退出。原 T44 退化用例改掉。
 - reviewer 复审 c3e964b 通过：TIOCOUTQ→FIONREAD 变异被新测试杀，-count=30 稳定，交叉 vet 过；仅存等价变异（ioctl 出错吞错）。
+- 用户 2026-10-14 复测 ba59d3b：不刷屏了，头像正常。等整套回归结论后关闭。
