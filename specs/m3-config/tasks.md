@@ -345,7 +345,7 @@
 - 定稿：选择框行数 = ceil(集数 / 5)，全部显示（25 套 → 5 行）；只有当卡片下方放不下全部行时才滚动，且滚动时在框底一行显示 `↓ n more`（上方被滚掉时首行显示 `↑ n more`），用 muted 色；不滚动时不显示。框的上边仍贴着卡片；卡片下方空间不够时允许框向上盖过卡片下面的其它卡（现状如何就保持）。列数仍 5、格宽 10 不变。
 - 验收：单测 10 套 2 行、25 套 5 行、26 套 6 行；空间够时无 more 行；空间不够时 more 行文案与计数、滚到底后换成 ↑；黑盒 80×24 与 80×40 两种高度下 25 套的截图。
 
-### T53 同组内卡片置顶（dev @9a7a3bb，改按名字记后送审）
+### T53 同组内卡片置顶（dev @9a7a3bb + 0f3c9d9 审查退回 2 必改 + 缺席宽限，修复中）
 - 用户 2026-10-14：经常要把某个 session 放到分组前排；想要一键置顶，后置顶的排在先置顶的后面，再按一次取消回落默认排序，像 nvim bufferline 的 pinned。
 - 定稿：新动作 `pin`，默认键 `t`（top）；按下切换焦点卡的置顶。置顶的卡在它所在的组里排最前，多个置顶按置顶时间先后排（先顶的在前）；取消后回到组内默认（名字序）。置顶按 session id 记，和分组方式无关（切到 project / session / state 分组仍在各自组内最前）；记录写 `$XDG_STATE_HOME/agmux/pins.json`（复用 seen.json 的 FileBindings 机制，会话消失时清掉）。卡片名字前加一个 `▲`（focus 色；焦点在卡上时随焦点色），表示置顶。搜索过滤、flash、折叠不受影响；`agmux show` 不改。`agmux config` 键位表加 `pin = ["t"]  # default: t — pin the focused card to the top of its group`。
 - 验收：单测 置顶后组内最前、两张按先后、取消回落、切分组仍最前、重启仍在、会话消失条目清掉、文件坏了当空且底栏一行；黑盒 真 tmux 夹具 t 置顶 / 再 t 取消 / 两张顺序 / g 切分组后仍最前 / 重启看板仍置顶。
@@ -353,3 +353,4 @@
 - dev 9a7a3bb：动作 pin 默认 t；Poller.Pins（pins.json，值 = 置顶时间）、TogglePin、消失清掉、文件坏了当空 + 底栏；groups() 置顶在前按时间再名字序；名字前 `▲ `（focus 色）、flash 命中偏 2 列；底栏 `pinned x` / `unpinned x`；变异 4 杀。定夺：按 session id 记会在 r 重启 / handoff 后掉 → 改按名字（AvatarKey）记，Prune = 无会话用该名字；底栏不加 t pin。
 - reviewer（aa0b9be）：穷举探针 34390 个状态证明框高恒定 / 方向 / 计数守恒 / 光标可见；退回 3 必改：带提示要 7 行使 5–6 行空间时退化到屏顶盖住自己的卡（测试阈值 5→7 掩盖了回退）、最后一行不满的 ↓ 计数无测试、README 过时。定夺：采纳建议 1 把 more 写进上下边框线不占行（删 +2 / hints），矮屏也有提示；阈值回 5；采纳建议 2；居中测试缺口不补。design.md 选择框段已同步；e2e 过时清单转 tester。
 - dev 1647154：more 进上下边框（muted），删 +2 / hints，框高 2+3*rows，一行放得下不再退到屏顶；阈值回 5、Scrolls 表恢复；RowsAndMore 表驱动（25 / 23 个、h=12 矮屏一行有提示），顺带修了最后一行不满时 ↓ 出负数的真 bug；README 改；探针 34390 例全过。本轮 T52+T53 目标 hash 1647154。
+- reviewer（0f3c9d9）：四种分组 × 两种 flow 排序正确、t 在搜索 / 选择框 / 直通 / flash 里仍是输入、三个状态文件互不干扰、坏文件不覆盖。退回 2 必改：快速连按 t t 第二下再置顶（按键快照）→ TogglePin 在锁内 Reload 后看文件当前状态并返回新状态；flash 对截断名字不标 label、▲ focus 色两处无测试。spec 定夺：r 重启空档（ccmux SessionEnd 删 marker 后 removeSession，1.5–4 s 看不到会话）和 daemon 刚起空列表会让 Prune 清掉 pin → 按名字记连续缺席起始，超过 60 s 才清；无 summary 会话按 project 一起置顶照现状接受。采纳：unpinNoReload / onlyThisID 用例、注释。
