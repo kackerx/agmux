@@ -276,7 +276,7 @@
 - 定稿：Linux 不在本次范围——Linux pty 的 TIOCOUTQ 恒 0、队列 8–12 KB，room 恒真，只剩小块降低概率（reviewer 实测修后仍 1–65 个被截，比修前好无退化）；design.md 遗留补一句。备忘：Linux 走阻塞写（实测原子）+ 超时兜底，以后单开。
 - dev 补丁 c3e964b：images_darwin_test.go 真 pty 验 outQueue（写 500 → 500；再写 4000 只收 524、队列 1024、room(1) 假；读空后 room(1024) 真），变异 TIOCOUTQ→FIONREAD 被杀；design.md 补 Linux 不在范围。送 reviewer 复审；tester 整套回归按 ba59d3b 跑完后在 c3e964b 补跑定点。
 
-### T47 `--stay` 在普通 pane 里也常驻：enter 跳转后进程不退出（dev @b3285b7 审查退回 1 必改，修复中）
+### T47 `--stay` 在普通 pane 里也常驻：enter 跳转后进程不退出（修复 @a43c00e 送复审 + 测）
 - 用户 2026-10-14：在普通 pane 里跑 `agmux board --stay`，enter 跳转后进程退出回到 shell（截图 images/21.png）。想要不管在普通 pane 还是 display-popup 里，enter 跳转都只是切过去，看板进程留在原 pane 继续跑；不要只针对 popup。
 - 定稿：`--stay` 下 `jump`（enter / 再点卡片）一律不退出：照旧 switch-client / select-window / select-pane 把 client 切到目标 pane；own session 上有 popup client 就 detach 它（现状），没有就什么都不 detach，看板留在自己 pane 里继续轮询。去掉「--stay needs the board in its own tmux session」的退化与提示。
 - `quit`（q / esc）：有 popup client 时照旧只 detach；没有 popup client（普通 pane）时等于 `exit`，真退出。底栏按实际情况写：有 popup → `q hide · Q quit`，无 popup → `q quit`（`Q` 仍可用）。
@@ -288,3 +288,4 @@
 - reviewer（b3285b7）退回 1 必改：底栏「有无浮窗」看 own session 上任意 tmux-* client，而 q 走 chooseClient + popupClients（排除选中的），用户终端本身是 tmux-* 只有它 / 只有一个浮窗无外层 client 时底栏写 `q hide` 按 q 却退出 → askPopup 复用 q 的判断。采纳建议：list-clients 失败时保留原底栏（nil）+ tmuxFail 用例；「frame 1 not asked」加断言。不做：Run 初值与提示文案无测试。
 - 定稿：嵌套 / ssh 的用户 client（termname tmux-*）挂在 own session 上、又有别的 client 在其他 session 时，enter 切错 client 并把用户终端当浮窗 detach——T44 起就有，这次不修；README 改成「本身不是 tmux 的 client 从不 detach；你的终端本身是 tmux 时若还有别的 client 在其他 session 上可能被当成浮窗」。
 - 备忘：区分浮窗与嵌套用户 client 的可用特征——display-popup 里 attach 的 client 其 client_pid 的父进程是 server 的 #{pid}（reviewer 真 tmux 实测），嵌套 / ssh 的不是；以后单开任务加进 popupClients。
+- dev a43c00e：askPopup = chooseClient + popupClients（errNoClient → false，其它错误 → nil 底栏不变）；TestStayFooterFollowsPopup 重写四种情况与 q 一致 + 第 1 帧不问 + 失败不变；README 措辞；TestSeenNotWhileHidden 改成只数 session_attached。每秒 2–4 次 tmux 调用，未省。
