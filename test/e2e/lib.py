@@ -307,9 +307,8 @@ class Row:
 
 
 def parse_screen(raw):
-    rows = []
+    rows = []; st = dict(fg=None, bg=None, dim=False, bold=False, rev=False)  # one state for the whole capture: tmux only writes an SGR where a cell differs from the one before it, a line break included (T52: a picker border right under a card of the same colour has none)
     for line in raw.split("\n"):
-        st = dict(fg=None, bg=None, dim=False, bold=False, rev=False)
         cells = []
         for tok in _TOK.split(line):
             m = _TOK.fullmatch(tok)
@@ -520,9 +519,9 @@ def layout(W):
 
 def parse_attr(raw):
     """Like parse_screen but keeps the attributes parse_screen folds away: rows of cells (char, reversed, underlined, fg). A wide character is followed by a filler cell ('', same attributes)."""
-    rows = []
+    rows = []; st = dict(rev=False, ul=False, fg=None)  # carried over lines, as in parse_screen
     for line in raw.split("\n"):
-        st = dict(rev=False, ul=False, fg=None); cells = []
+        cells = []
         for tok in _TOK.split(line):
             m = _TOK.fullmatch(tok)
             if m:
@@ -904,6 +903,14 @@ def sample_series(fn, secs, step=0.05):
     while time.time() - t0 < secs:
         out.append((time.time() - t0, fn())); time.sleep(step)
     return out
+
+
+def sample_steady(fn, secs, step=0.05, gap=0.3, tries=3):
+    """sample_series, but a run in which the sampler itself stalled (two samples more than `gap` s apart: a frame that lasts 500 ms can slip between them) is thrown away and taken again, up to `tries` times; the last run is returned either way"""
+    for _ in range(tries):
+        seen = sample_series(fn, secs, step)
+        if all(b[0] - a[0] <= gap for a, b in zip(seen, seen[1:])): break
+    return seen
 
 
 FALLBACK = {"read": "think", "write": "think", "tool": "think", "think": "idle", "hi": "idle", "success": "idle"}  # T30: a state without frames shows the next one on its chain

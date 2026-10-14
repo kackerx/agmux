@@ -107,7 +107,8 @@ class Stay(Real):
 
     def test_a_client_of_another_session_is_not_detached(self):
         """another float / terminal on a different session (`tgt`, a tmux-* client too): not the board's popup, so it stays after the jump"""
-        self.start_board(); uc = self.terminal(); other = self.terminal("u2", "tgt"); time.sleep(0.3); self.assertEqual(self.user_session(other), "tgt")
+        # without AGMUX_CLIENT the board moves the most recently active client (tmux counts whole seconds, and a key typed into a popup does not bump the user's client): the user's terminal is attached 1.3 s after the other one so it is the newer, not a tie that goes either way
+        self.start_board(); other = self.terminal("u2", "tgt"); time.sleep(1.3); uc = self.terminal(); time.sleep(0.3); self.assertEqual(self.user_session(other), "tgt")
         p = self.popup(uc); self.press("Enter"); self.assertTrue(self.closed(p)); self.assertEqual(self.user_session(other), "tgt", "the other client is still attached, where it was")
         self.assertEqual(self.user_session(uc), "tgt", "and the jump moved the client the user types on, not the other one"); self.assertTrue(self.alive())
 

@@ -1,5 +1,5 @@
 """T49 ten more built-in image sets (developer / researcher / operator / tester / designer, naruto / sasuke / sakura / kakashi / itachi): `agmux avatars` lists 20 sets then the 5 sprites in a fixed order, each new set with all
-seven states; a set of the user's with a built-in id replaces it in place; the picker (4 rows of 5, scrolling) shows the same order; the board uploads 281 frames (141 + 10 x 14) through the client tty without a cut APC; the default
+seven states; a set of the user's with a built-in id replaces it in place; the picker (all 5 rows of 5 on a tall screen, scrolling on a short one) shows the same order; the board uploads 281 frames (141 + 10 x 14) through the client tty without a cut APC; the default
 hash picks among all 20 sets. Spec: specs/m3-config/tasks.md T49. The order is written out here from the spec, not read from the product."""
 import json, re, subprocess, time, unittest
 from lib import *
@@ -47,13 +47,14 @@ class Listing(unittest.TestCase):
 
 
 class Picker(B32):
-    def test_the_picker_walks_the_twenty_then_the_sprites_in_four_scrolling_rows(self):
-        t = self.board(tmux=False); self.to_a2(t); ov = self.open(t); self.assertEqual(ov["shown"], 4, "25 cells, 4 rows at most")
+    def test_the_picker_walks_the_twenty_then_the_sprites_in_five_rows_or_scrolling_on_a_short_screen(self):
+        t = self.board(tmux=False); self.to_a2(t); ov = self.open(t); self.assertEqual(ov["shown"], 5, "25 cells, all 5 rows (T52)")
         cells = sweep(t); self.assertEqual([r["id"] for r in cells], SETS20 + IDS); self.assertEqual([r["name"] for r in cells][20:], SPRITE_NAMES)
-        order = SETS20 + IDS; total = (len(order) + 4) // 5
+        order = SETS20 + IDS; total = (len(order) + 4) // 5; t.close()
+        t = self.board(tmux=False, w=80, h=24, loose=True); self.to_a2(t); ov = self.open(t); rows = ov["shown"]; self.assertLess(rows, total, "80x24 has no room for all five")
         for target in (13, 14, 15, 19, 20, 24, 17, 0):
-            self.move_to(t, order[target], order); ov = overlay(t.snap()); first = min(max(target // 5 - 4 // 2, 0), total - 4)
-            self.assertEqual([r["id"] for r in ov["rows"]], order[first * 5:(first + 4) * 5][:len(ov["rows"])], f"cursor on {order[target]}: rows {first}..{first + 3}"); self.assertEqual(self.cursor(t), order[target])
+            self.move_to(t, order[target], order); ov = overlay(t.snap()); first = min(max(target // 5 - rows // 2, 0), total - rows)
+            self.assertEqual([r["id"] for r in ov["rows"]], order[first * 5:(first + rows) * 5][:len(ov["rows"])], f"cursor on {order[target]}: rows {first}..{first + rows - 1}"); self.assertEqual(self.cursor(t), order[target])
 
     def test_enter_on_a_new_set_binds_it(self):
         t = self.board(tmux=False); self.to_a2(t); self.open(t); self.move_to(t, "kakashi", SETS20 + IDS); t.keys("Enter"); time.sleep(0.8)

@@ -20,11 +20,14 @@ class Base(t28.Base):
         self.assertTrue(wait(lambda: len(find_cards(t.snap())) == len(self.expect), 8), t.text()); return t
 
     def ids_by_card(self, t):
-        raw = t.raw(); out = {}
-        for c in find_cards(parse_screen(raw)):
-            m = NAME.search(c.line(1))
-            if m:
-                cells = card_avatar(raw, c); out[m.group(0)] = cells[0][2] if len(cells) == 12 and len({x[2] for x in cells}) == 1 else None
+        for _ in range(4):  # a capture taken in the middle of a repaint shows a card with half of its avatar new: look again; a picture that is really lost stays None
+            raw = t.raw(); out = {}
+            for c in find_cards(parse_screen(raw)):
+                m = NAME.search(c.line(1))
+                if m:
+                    cells = card_avatar(raw, c); out[m.group(0)] = cells[0][2] if len(cells) == 12 and len({x[2] for x in cells}) == 1 else None
+            if None not in out.values(): break
+            time.sleep(0.02)
         return out
 
     def set_ids(self, d):
@@ -34,7 +37,7 @@ class Base(t28.Base):
 
     def check_states(self, frames, default="mine", secs=2.6):
         """Every card shows, over `secs` seconds, only frames of the state it must show (through the fallback chain), and a multi-frame state steps through them in order, one per tick."""
-        t = self.states_board(default); seen = sample_series(lambda: self.ids_by_card(t), secs, 0.05)
+        t = self.states_board(default); seen = sample_steady(lambda: self.ids_by_card(t), secs, 0.05)
         for name, state in self.expect.items():
             want, shown = frames_for(frames, state)
             seq = [s[name] for _, s in seen]; self.assertNotIn(None, seq, f"{name}: a card lost its picture")
@@ -130,7 +133,7 @@ class Blink(Base):
     def blinks(self, secs):
         self.expect = build_states_fixture(self.env, {f"s-idle{c}": ("idle", "idle", None, None, None, []) for c in "abcdefgh"})  # eight idle cards: eight different keys
         ids = upload_ids(self.env, self.cfg); calm = ids[(SETS / "idle" / "idle.png").read_bytes()]; blink = ids[(SETS / "idle" / "idle_blink.png").read_bytes()]
-        t = self.states_board(default="aza_choi"); seen = sample_series(lambda: self.ids_by_card(t), secs, 0.04)
+        t = self.states_board(default="aza_choi"); seen = sample_steady(lambda: self.ids_by_card(t), secs, 0.04)
         return calm, blink, seen
 
     _memo = None

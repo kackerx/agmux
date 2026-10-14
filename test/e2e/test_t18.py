@@ -42,18 +42,18 @@ LABEL = {**{i: i for i in LISTING}, **dict(zip(SPRITE_NAMES, IDS))}  # a cell's 
 
 
 def find_grid(snap):
-    """The picker grid: (x0, y0, rows, cell_w) of the focus-coloured rounded box, or None. The box is 5 * cell_w + 2 wide (cell_w 9 at T32, 10 since T33) and 3 * rows + 2 high."""
+    """The picker grid: (x0, y0, rows, cell_w) of the focus-coloured rounded box, or None. The box is 5 * cell_w + 2 wide (cell_w 9 at T32, 10 since T33) and 3 * rows + 2 high (T52: every row of the listing, fewer only on a short screen; the borders may carry `↑ n more` / `↓ n more`)."""
     for y, row in enumerate(snap):
         cells = row.cells
         for x, c in enumerate(cells):
             if c[0] == "╭" and c[1] == C_FOCUS:
-                e = x + 1
-                while e < len(cells) and cells[e][0] == "─" and cells[e][1] == C_FOCUS: e += 1
+                e = x + 1  # T52: the top border may carry a muted "↑ n more" label between the rule's dashes
+                while e < len(cells) and cells[e][0] in "─ ↑↓0123456789more" and (cells[e][1] == C_FOCUS or cells[e][0] != "─"): e += 1
                 if e < len(cells) and cells[e][0] == "╮" and cells[e][1] == C_FOCUS and (e - x - 1) % GRID_COLS == 0 and e - x - 1 >= 5 * 9:
                     w = e - x + 1
                     for y1 in range(y + 1, len(snap)):
                         r1 = snap[y1].cells
-                        if len(r1) > e and r1[x][0] == "╰" and r1[e][0] == "╯":
+                        if len(r1) > e and r1[x][0] == "╰" and r1[e][0] == "╯" and r1[x][1] == C_FOCUS and r1[e][1] == C_FOCUS:  # the focus colour: a plain card's bottom edge (╰──╯, the same width in a two column layout) in a capture torn by a repaint is not the box's
                             return x, y, (y1 - y - 1) // CELL_H, (w - 2) // GRID_COLS
     return None
 
@@ -85,7 +85,7 @@ def to_start(t, n=30):
 
 
 def sweep(t, n=None, visit=None, step=0.1):
-    """T49: more cells than the 4 rows the grid shows (20 sets + 5 sprites): walk the cursor from the first cell to the last with `l` and collect every cell once, in order: [cell dict] (the dict of its first sight).
+    """T49: more cells than fit in one screen of the grid (20 sets + 5 sprites): walk the cursor from the first cell to the last with `l` and collect every cell once, in order: [cell dict] (the dict of its first sight).
     visit(ov) is called at every step (a place to read t.raw() for the pictures in the cells)."""
     to_start(t); n = n or len(LISTING) + 2; out, seen = [], set()
     for _ in range(n):
@@ -158,13 +158,13 @@ class Picker(Base):
     def test_a_opens_a_grid_under_the_card_sets_first_then_the_five_sprites(self):
         t = self.board(); self.to_a2(t); cur = self.id_of(t, "a2"); card = [c for c in find_cards(t.snap()) if border_colours(c) == {C_FOCUS}][0]
         ov = self.open_picker(t); x0, y0, w, h = ov["box"]
-        rows = min(4, (len(LISTING) + 4) // 5); self.assertEqual((w, h), (5 * ov["cell_w"] + 2, 2 + 3 * rows), "5 columns of cells + border; as many rows of 3 as the listing needs, 4 at most")
+        rows = (len(LISTING) + 4) // 5; self.assertEqual((w, h), (5 * ov["cell_w"] + 2, 2 + 3 * rows), "5 columns of cells + border; as many rows of 3 as the listing needs (T52: all of them on this tall screen)")
         self.assertIn(ov["cell_w"], (9, 10)); self.assertEqual((x0, y0), (card.c, card.r + 5), "straight below the focused card, at its left edge")
         self.assertEqual(len([r for r in ov["rows"] if r["current"] or r["marker"]]), 1, "the cursor starts on the worn one: one highlighted cell"); self.assertIn(self.cursor(t), cur)
         cells = sweep(t); self.assertEqual([r["id"] for r in cells], LISTING); self.assertEqual([r["name"] for r in cells], [None] * N_SETS + SPRITE_NAMES, "a set is labelled with its id, a sprite with its name")
         self.assertEqual([r["sprite"] for r in cells][N_SETS:], [self.blocks[i] for i in IDS], "each sprite cell shows the sprite `agmux avatars` prints for that id")
         self.assertEqual(cells[0]["sprite"], self.blocks[HASHED_SPRITE], "pixel mode: the set cell is drawn with the sprite its id hashes to (fnv32a('aza_choi') % 5)")
-        to_start(t); top = overlay(t.snap()); self.assertEqual([(r["gr"], r["gc"]) for r in top["rows"]], [(i // 5, i % 5) for i in range(len(top["rows"]))], "reading order, 5 per row"); self.assertEqual(len(top["rows"]), min(20, len(LISTING)), "4 rows shown")
+        to_start(t); top = overlay(t.snap()); self.assertEqual([(r["gr"], r["gc"]) for r in top["rows"]], [(i // 5, i % 5) for i in range(len(top["rows"]))], "reading order, 5 per row"); self.assertEqual(len(top["rows"]), len(LISTING), "every row shown")
         foot = last_text_row(t.snap()); self.assertIn("h/j/k/l move", foot); self.assertIn("enter bind", foot); self.assertIn("q cancel", foot)
         msg = [r.text for r in t.snap()[-3:-1]]; self.assertTrue(any(self.cursor(t) in m for m in msg), f"the message row names the cursor's id: {msg}")
 
@@ -358,8 +358,8 @@ class Review(Base):
         for w in range(96, 106):
             t = Term(self.env, w=w, h=30, extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t.close)
             self.assertTrue(wait(lambda: len(find_cards(t.snap())) >= 2, 8), t.text())
-            before = t.snap(); t.keys("a"); ov = wait(lambda: overlay(t.snap()), 3); self.assertTrue(ov, t.text())
-            after = t.snap(); bx, by, bw, bh = ov["box"]; x0, x1 = max(bx - 2, 0), bx + bw + 2  # a wide character cut by the picker's edge may turn into a space: allow one cell of slack
+            before = t.snap(); t.keys("a"); after = wait(lambda: (lambda s: s if overlay(s) else None)(t.snap()), 3); self.assertTrue(after, t.text()); ov = overlay(after)  # (one capture for both: the box is read off the very frame that is compared)
+            bx, by, bw, bh = ov["box"]; x0, x1 = max(bx - 2, 0), bx + bw + 2  # a wide character cut by the picker's edge may turn into a space: allow one cell of slack
             strip = lambda cells: "".join(c[0] for c in cells if c[0] not in "▀▄█")
             for i, (b, a) in enumerate(zip(before, after)):
                 if len(a.cells) > w:

@@ -1,4 +1,4 @@
-"""T32 the `a` picker is a grid under the focused card (T33: cells 10 wide): 5 columns, up to 4 rows (more scroll), avatars (6 x 2) with their name under them; image sets first (built-in,
+"""T32 the `a` picker is a grid under the focused card (T33: cells 10 wide): 5 columns, every row of the listing (T52: fewer only where the screen has no room, then they scroll), avatars (6 x 2) with their name under them; image sets first (built-in,
 then the user's by name), the sprites last; h/j/k/l and arrows move, enter binds, esc / q cancel; the message row names the cursor's avatar. Spec: specs/m3-config/design.md
 「头像图片：状态、宽度、选择框」5-6, tasks.md T32. Geometry is read off the screen (test_t18.find_grid): the cell width and the listing are not hard-coded."""
 import json, re, subprocess, unittest
@@ -9,10 +9,10 @@ import test_t28 as t28
 from test_t28 import cards_of, named, card_avatar
 
 
-def grid_place(card_top, card_h, h, total_rows, want=4):
-    """The design's placement: straight below the card, else above it, with fewer rows if need be, else the top of the board with one row. -> (y, rows drawn)."""
+def grid_place(card_top, card_h, h, total_rows):
+    """The design's placement (T52: all the rows first): straight below the card, else above it, with fewer rows if need be, else the top of the board with one row. -> (y, rows drawn)."""
     below, above = h - 2 - (card_top + card_h), card_top - 1
-    for rows in range(want, 0, -1):
+    for rows in range(total_rows, 0, -1):
         need = 2 + CELL_H * rows
         if below >= need: return card_top + card_h, min(rows, total_rows)
         if above >= need: return card_top - need, min(rows, total_rows)
@@ -57,7 +57,7 @@ class Layout(Base):
     def test_cells_in_order_with_names_under_the_avatars(self):
         t = self.board(tmux=False); self.to_a2(t); ov = self.open(t); cells = sweep(t)
         self.assertEqual([r["id"] for r in cells], LISTING); self.assertEqual([r["name"] for r in cells], [None] * N_SETS + SPRITE_NAMES, "a set shows its id, a sprite its name")
-        to_start(t); top = overlay(t.snap()); self.assertEqual([(r["gr"], r["gc"]) for r in top["rows"]], [(i // 5, i % 5) for i in range(len(top["rows"]))]); self.assertEqual([r["id"] for r in top["rows"]], LISTING[:20], "4 rows of 5 from the start")
+        to_start(t); top = overlay(t.snap()); self.assertEqual([(r["gr"], r["gc"]) for r in top["rows"]], [(i // 5, i % 5) for i in range(len(top["rows"]))]); self.assertEqual([r["id"] for r in top["rows"]], LISTING, "every row of 5 from the start (T52)")
         self.assertEqual(LISTING[:1], ["aza_choi"], "the built-in sets come first, aza_choi among them"); self.assertEqual(LISTING[N_SETS:], IDS, "the last row(s): the sprites")
         self.assertEqual(len(LISTING), N_SETS + 5)
         blocks = {b[0].split("  ")[0]: tuple(b[1:]) for b in t28.__dict__.get("sprite_blocks", lambda o: [])("")} if False else None
@@ -74,7 +74,7 @@ class Layout(Base):
 
     def test_the_box_sits_under_the_focused_card_at_its_left_edge(self):
         t = self.board(tmux=False); self.to_a2(t); card = self.focused(t); ov = self.open(t); x0, y0, w, h = ov["box"]
-        self.assertEqual((x0, y0), (card.c, card.r + 5)); self.assertEqual(w, 5 * ov["cell_w"] + 2); self.assertEqual(h, 2 + 3 * ov["shown"]); self.assertEqual(ov["shown"], min(4, (len(LISTING) + 4) // 5))
+        self.assertEqual((x0, y0), (card.c, card.r + 5)); self.assertEqual(w, 5 * ov["cell_w"] + 2); self.assertEqual(h, 2 + 3 * ov["shown"]); self.assertEqual(ov["shown"], (len(LISTING) + 4) // 5)
 
     def test_placement_follows_the_design_for_every_card_and_several_screens(self):
         bad, checked, modes = [], 0, set()
@@ -212,13 +212,13 @@ class Scrolling(Base):
         for nm in names: write_avatar_set(self.cfg, nm, {"idle": 1})
         return names, self.listing(names)
 
-    def test_more_than_four_rows_scroll_with_the_cursor_row_in_the_middle(self):
-        names, order = self.many(); t = self.board(tmux=False, w=200, h=50, loose=True); t.keys("j"); time.sleep(0.3); ov = self.open(t); total = (len(order) + 4) // 5
-        self.assertEqual(ov["shown"], 4); self.move_to(t, order[0], order)
+    def test_more_rows_than_the_screen_has_room_for_scroll_with_the_cursor_row_in_the_middle(self):
+        names, order = self.many(); t = self.board(tmux=False, w=200, h=30, loose=True); t.keys("j"); time.sleep(0.3); fc = self.focused(t); ov = self.open(t); total = (len(order) + 4) // 5  # 45 cells = 9 rows, the screen has room for fewer
+        rows = ov["shown"]; self.assertEqual(rows, grid_place(fc.r, 5, 30, total)[1]); self.assertLess(rows, total); self.move_to(t, order[0], order)
         for target in (7, 12, 17, 22, 27, len(order) - 1, 3, 0):
-            self.move_to(t, order[target], order); ov = overlay(t.snap()); first = min(max(target // 5 - 4 // 2, 0), total - 4)
-            self.assertEqual(ov["shown"], 4); ids = [r["id"] for r in ov["rows"]]
-            self.assertEqual(ids, order[first * 5:(first + 4) * 5][:len(ids)], f"cursor on {order[target]} (grid row {target // 5}): rows {first}..{first + 3} are shown (cursor row second from the top)")
+            self.move_to(t, order[target], order); ov = overlay(t.snap()); first = min(max(target // 5 - rows // 2, 0), total - rows)
+            self.assertEqual(ov["shown"], rows); ids = [r["id"] for r in ov["rows"]]
+            self.assertEqual(ids, order[first * 5:(first + rows) * 5][:len(ids)], f"cursor on {order[target]} (grid row {target // 5}): rows {first}..{first + rows - 1} are shown (the cursor row in the middle)")
             self.assertEqual(self.cursor(t), order[target])
 
     def test_scrolling_in_a_short_terminal_keeps_the_cursor_visible_to_the_last_one_and_binds_bot_05(self):
