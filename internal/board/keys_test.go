@@ -4501,3 +4501,59 @@ func TestStayTmuxFails(t *testing.T) {
 		}
 	}
 }
+
+// group_<mode> goes straight to that grouping, as g does to the next: every group open, the focus on
+// its card, the scrolling ended; already there it changes nothing (a fold stays); unbound (the
+// default) the key does nothing.
+func TestGroupDirectKeys(t *testing.T) {
+	cfg, err := config.Parse("cfg", []byte("[keys]\ngroup_cwd = [\"C\"]\ngroup_project = [\"P\"]\ngroup_session = [\"S\"]\ngroup_state = [\"G\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withKeys := func() Model {
+		m := psized(groupedSessions(), 120, 40)
+		m.cfg, m.keymap = cfg, cfg.KeyMap()
+		m, _ = press(t, m, "j")
+		return m
+	}
+	for _, c := range []struct{ key, mode, titles string }{
+		{"P", "project", "▾ other (1) | ▾ proj (2)"},
+		{"S", "session", "▾ dev (2) | ▾ (no pane) (1)"},
+		{"G", "state", "▾ working (1) | ▾ waiting (1) | ▾ idle (1)"},
+	} {
+		m := withKeys()
+		focus := m.focus
+		m, _ = press(t, m, "f") // a fold, which the switch clears
+		m.focus = focus
+		m.top, m.scrolled = 1, true
+		m, _ = press(t, m, c.key)
+		if got := titles(m); got != c.titles || m.groupMode() != c.mode || m.focus != focus || len(m.folded) != 0 || m.scrolled {
+			t.Errorf("%s: titles %q (want %q), mode %s, focus %q (was %q), folded %v, scrolled %v", c.key, got, c.titles, m.groupMode(), m.focus, focus, m.folded, m.scrolled)
+		}
+		m, _ = press(t, m, "C") // and back to cwd from wherever it was
+		if m.groupMode() != "cwd" || titles(m) != "▾ /w/one (1) | ▾ /w/two (2)" {
+			t.Errorf("%s then C: %s %q", c.key, m.groupMode(), titles(m))
+		}
+	}
+	// already there: nothing changes, a fold stays, the scrolling goes on
+	m := withKeys()
+	m, _ = press(t, m, "f")
+	m.top, m.scrolled = 1, true
+	folded := titles(m)
+	m, _ = press(t, m, "C")
+	if titles(m) != folded || len(m.folded) == 0 || !m.scrolled {
+		t.Errorf("C in cwd changed things: %q %v scrolled %v", titles(m), m.folded, m.scrolled)
+	}
+	// g still cycles from wherever a direct key put it
+	m, _ = press(t, withKeys(), "G", "g")
+	if m.groupMode() != "cwd" {
+		t.Errorf("g after state: %s", m.groupMode())
+	}
+	// unbound by default: G, P, S do nothing
+	m = psized(groupedSessions(), 120, 40)
+	before := titles(m)
+	m, _ = press(t, m, "G", "P", "S", "C")
+	if m.groupMode() != "cwd" || titles(m) != before {
+		t.Errorf("default keys changed the grouping: %s %q", m.groupMode(), titles(m))
+	}
+}

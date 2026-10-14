@@ -514,3 +514,36 @@ func TestStringMatchesTheExample(t *testing.T) {
 		}
 	}
 }
+
+// The group_<mode> actions are unbound by default; [] leaves them so (any other action needs a key),
+// a key binds one, and a key still serves a single action.
+func TestGroupDirectActions(t *testing.T) {
+	for _, a := range groupActions {
+		if len(Default().Keys[a]) != 0 || len(Default().KeyMap()) == 0 {
+			t.Errorf("%s has keys by default: %v", a, Default().Keys[a])
+		}
+		if c, err := Parse("cfg", []byte("[keys]\n"+a+" = []\n")); err != nil || len(c.Keys[a]) != 0 {
+			t.Errorf("%s = []: %v %v", a, err, c)
+		}
+	}
+	if _, err := Parse("cfg", []byte("[keys]\ngroup = []\n")); err == nil || !strings.Contains(err.Error(), "needs at least one key") {
+		t.Errorf("group = [] must still be refused: %v", err)
+	}
+	c, err := Parse("cfg", []byte("[keys]\ngroup_state = [\"G\"]\ngroup_cwd = [\"C\", \"alt+c\"]\n"))
+	if err != nil || c.KeyMap()["G"] != "group_state" || c.KeyMap()["C"] != "group_cwd" || c.KeyMap()["alt+c"] != "group_cwd" {
+		t.Fatalf("bound: %v %v", err, c.KeyMap())
+	}
+	if _, err := Parse("cfg", []byte("[keys]\ngroup_state = [\"G\"]\ngroup_cwd = [\"G\"]\n")); err == nil || !strings.Contains(err.Error(), "already bound to group_cwd") && !strings.Contains(err.Error(), "already bound to group_state") {
+		t.Errorf("a key for two actions: %v", err)
+	}
+	if c, err := Parse("cfg", []byte("[keys]\ngroup_state = [\"g\"]\n")); err != nil || c.KeyMap()["g"] != "group_state" || len(c.Keys["group"]) != 0 {
+		t.Errorf("a key the file binds is taken from the default's owner: %v %v", err, c.KeyMap())
+	}
+	if back, err := Parse("cfg", []byte(c.String())); err != nil || !reflect.DeepEqual(back, c) {
+		t.Errorf("round trip: %v\n%s", err, c.String())
+	}
+	if out := Default().String(); !strings.Contains(out, "group_state = []") || !strings.Contains(out, "# default: none — switch straight to the state grouping") ||
+		strings.Index(out, "\ngroup = ") > strings.Index(out, "\ngroup_cwd = ") || strings.Index(out, "\ngroup_state = ") > strings.Index(out, "\nrestart = ") {
+		t.Errorf("printed:\n%s", out)
+	}
+}

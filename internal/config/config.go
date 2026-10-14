@@ -23,7 +23,7 @@ import (
 // Actions, in the order `agmux config` prints them.
 var Actions = []string{
 	"up", "down", "left", "right", "page_down", "page_up", "jump", "fold", "preview", "focus_preview", "leave_preview",
-	"reply", "handoff", "search", "next_match", "prev_match", "flash", "group", "restart", "kill", "review", "avatar", "quit", "exit", "confirm",
+	"reply", "handoff", "search", "next_match", "prev_match", "flash", "group", "group_cwd", "group_project", "group_session", "group_state", "restart", "kill", "review", "avatar", "quit", "exit", "confirm",
 }
 
 var defaultKeys = map[string][]string{
@@ -32,6 +32,7 @@ var defaultKeys = map[string][]string{
 	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"tab"},
 	// search / flash are T19 / T20
 	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "flash": {"s"}, "group": {"g"},
+	"group_cwd": {}, "group_project": {}, "group_session": {}, "group_state": {},
 	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"},
 	"quit": {"q", "esc"}, "exit": {"Q"}, "confirm": {"y"},
 }
@@ -102,6 +103,9 @@ func Load() (*Config, error) {
 	return Parse(path, data)
 }
 
+// groupActions switch straight to a grouping (group_<mode>); they have no default key, and may be left unbound with [].
+var groupActions = []string{"group_cwd", "group_project", "group_session", "group_state"}
+
 // GroupModes are the ways to group cards, in the order the group key goes through them.
 var GroupModes = []string{"cwd", "project", "session", "state"}
 
@@ -160,7 +164,7 @@ func Parse(path string, data []byte) (*Config, error) {
 		if _, ok := defaultKeys[action]; !ok {
 			return nil, fmt.Errorf("%s: keys.%s: unknown action (one of %s)", path, action, strings.Join(Actions, ", "))
 		}
-		if len(keys) == 0 {
+		if len(keys) == 0 && !slices.Contains(groupActions, action) {
 			return nil, fmt.Errorf("%s: keys.%s: needs at least one key", path, action)
 		}
 		for _, k := range keys {
@@ -300,7 +304,9 @@ var actionUse = map[string]string{
 	"leave_preview": "back to the board", "reply": "type a reply into the focused session",
 	"handoff": "send /handoff to the focused session", "search": "filter the cards by fuzzy search",
 	"next_match": "next search hit", "prev_match": "previous search hit", "flash": "move the focus to a card by its label",
-	"group": "cycle the grouping (see [layout] group_by)", "restart": "restart the focused session", "kill": "kill the focused session (asks first)",
+	"group": "cycle the grouping (see [layout] group_by)", "group_cwd": "switch straight to the cwd grouping",
+	"group_project": "switch straight to the project grouping", "group_session": "switch straight to the session grouping",
+	"group_state": "switch straight to the state grouping", "restart": "restart the focused session", "kill": "kill the focused session (asks first)",
 	"review": "run `ccmux review` on the focused session", "avatar": "open the avatar picker under the focused card",
 	"quit": "with `board --stay` inside a popup: hide instead", "exit": "always quit, even with --stay", "confirm": "answer yes to a prompt",
 }
@@ -339,7 +345,10 @@ func (c *Config) String() string {
 `)
 	for _, a := range Actions {
 		def := strings.Join(defaultKeys[a], ", ")
-		if len(c.Keys[a]) == 0 { // "a = []" would not load back
+		if def == "" {
+			def = "none"
+		}
+		if len(c.Keys[a]) == 0 && len(defaultKeys[a]) > 0 { // "a = []" would not load back
 			fmt.Fprintf(&b, "# %s: no key (another action took its default)    # %s\n", a, with(def, actionUse[a]))
 			continue
 		}
