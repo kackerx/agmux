@@ -256,14 +256,18 @@ func gridModel(p *store.Poller, w, h int) Model {
 }
 
 // gridAt finds the picker box on the screen: its top and bottom row and its left column (-1: none).
+// Its borders may carry a "↑ n more" / "↓ n more", so it is found by its corners gridW cells apart.
 func gridAt(lines []string) (top, bottom, col int) {
 	top, bottom, col = -1, -1, -1
 	for y, l := range lines {
-		if i := strings.Index(l, "╭"+strings.Repeat("─", gridCols*cellW)+"╮"); i >= 0 && top < 0 {
-			top, col = y, len([]rune(l[:i]))
-		}
-		if strings.Contains(l, "╰"+strings.Repeat("─", gridCols*cellW)+"╯") {
-			bottom = y
+		r := []rune(l)
+		for i := 0; i+gridW <= len(r); i++ {
+			if r[i] == '╭' && r[i+gridW-1] == '╮' && top < 0 {
+				top, col = y, i
+			}
+			if r[i] == '╰' && r[i+gridW-1] == '╯' && i == col {
+				bottom = y
+			}
 		}
 	}
 	return
@@ -402,7 +406,7 @@ func TestAvatarGridScrolls(t *testing.T) {
 	if len(all) != 23 {
 		t.Fatalf("%d avatars", len(all))
 	}
-	for _, c := range []struct{ h, boxH int }{{40, 17}, {20, 10}, {18, 7}, {16, 7}, {12, 5}} { // 5 (all), 2, 1, 1 rows with the two lines of "n more", and on 12 one row without them over the card
+	for _, c := range []struct{ h, boxH int }{{40, 17}, {20, 11}, {18, 8}, {16, 5}, {12, 5}} { // 5 (all), 3, 2, 1, 1 rows: what fits under the 7 rows above (on 12 it covers the card)
 		m := gridModel(p, 120, c.h)
 		m, _ = press(t, m, "a")
 		for i, id := range all {
@@ -438,9 +442,9 @@ func TestAvatarGridScrolls(t *testing.T) {
 }
 
 // A grid has as many rows as its sets need: 10 avatars two, 25 five, 26 six (ceil(n/5)), and with
-// room for all of them nothing says "more". Where the screen is short only some rows show, a muted
-// "↓ n more" under them, and "↑ n more" over them once rows have scrolled out (n counts avatars);
-// the box keeps its height all the way.
+// room for all of them nothing says "more". Where the screen is short only some rows show, and the
+// top border says "↑ n more", the bottom "↓ n more" (muted; n counts avatars, a short last row too),
+// each only where there is something that way. The box keeps its height all the way.
 func TestAvatarGridRowsAndMore(t *testing.T) {
 	for _, c := range []struct{ sets, rows int }{{5, 2}, {20, 5}, {21, 6}} {
 		p, _ := gridFixture(t, c.sets, "s01", "one")
@@ -451,30 +455,37 @@ func TestAvatarGridRowsAndMore(t *testing.T) {
 			t.Errorf("%d avatars: %d rows, want %d:\n%s", c.sets+5, got, c.rows, strings.Join(lines, "\n"))
 		}
 	}
-	p, _ := gridFixture(t, 20, "s01", "one") // 25 avatars, 5 rows; h=20 leaves room for 2 of them
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	defer lipgloss.SetColorProfile(old)
-	m, _ := press(t, gridModel(p, 120, 20), "a")
-	box := func() (up, down string, h int) {
+	for _, c := range []struct {
+		sets, h int
+		keys    []string
+		up, dn  string // the notes in the borders; "" = a plain border
+	}{
+		{20, 20, nil, "", "↓ 10 more"},                          // 25 avatars, 3 rows shown, the cursor on the first
+		{20, 20, []string{"j", "j"}, "↑ 5 more", "↓ 5 more"},    // on the third row: one row out above, one below
+		{20, 20, []string{"j", "j", "j", "j"}, "↑ 10 more", ""}, // the last row
+		{18, 20, nil, "", "↓ 8 more"},                           // 23 avatars: the last row has 3, and they count (not 10)
+		{18, 20, []string{"j", "j", "j", "j"}, "↑ 10 more", ""}, // and from the bottom: the rows out above are full
+		{18, 12, []string{"j", "j"}, "↑ 10 more", "↓ 8 more"},   // a short screen: one row shown; the notes still say the rest
+	} {
+		p, _ := gridFixture(t, c.sets, "s01", "one")
+		m, _ := press(t, gridModel(p, 120, c.h), "a")
+		m, _ = press(t, m, c.keys...)
 		raw := strings.Split(m.View(), "\n")
-		top, bottom, _ := gridAt(strings.Split(ansi.Strip(m.View()), "\n"))
-		cell := func(i int) string { return strings.Trim(ansi.Strip(raw[i]), "│ ") }
-		if muted := strings.SplitN(fg(cMuted, "x"), "x", 2)[0]; strings.Contains(raw[bottom-1], muted) != (cell(bottom-1) != "") { // muted on the line when it has text
-			t.Errorf("the more line is not colored: %q", raw[bottom-1])
+		top, bottom, col := gridAt(strings.Split(ansi.Strip(m.View()), "\n"))
+		muted := strings.SplitN(fg(cMuted, "x"), "x", 2)[0]
+		for _, e := range []struct{ row, want string }{{ansi.Strip(raw[top]), c.up}, {ansi.Strip(raw[bottom]), c.dn}} {
+			e.row = string([]rune(e.row)[col : col+gridW])
+			note := strings.Trim(strings.Trim(e.row, "╭╮╰╯─"), " ")
+			if note != e.want {
+				t.Errorf("sets=%d h=%d keys=%v: border %q has note %q, want %q", c.sets, c.h, c.keys, e.row, note, e.want)
+			}
 		}
-		return cell(top + 1), cell(bottom - 1), bottom - top + 1
-	}
-	if up, down, h := box(); up != "" || down != "↓ 15 more" || h != 10 {
-		t.Errorf("top: up %q down %q height %d", up, down, h)
-	}
-	m, _ = press(t, m, "j", "j") // the cursor is on the third row: one row out above, two below
-	if up, down, h := box(); up != "↑ 5 more" || down != "↓ 10 more" || h != 10 {
-		t.Errorf("middle: up %q down %q height %d", up, down, h)
-	}
-	m, _ = press(t, m, "j", "j", "j") // the last row
-	if up, down, h := box(); up != "↑ 15 more" || down != "" || h != 10 {
-		t.Errorf("bottom: up %q down %q height %d", up, down, h)
+		if got := strings.Count(strings.Join(raw[top:bottom+1], ""), muted) > 0; got != (c.up != "" || c.dn != "") {
+			t.Errorf("sets=%d h=%d keys=%v: muted note colored: %v", c.sets, c.h, c.keys, got)
+		}
 	}
 }
 
@@ -599,7 +610,7 @@ func TestAvatarGridEverywhere(t *testing.T) {
 					if bottom > h-3 && h >= 8 {
 						t.Errorf("%s: grid rows %d..%d cover the message line / footer", where, top, bottom)
 					}
-					roomBelow, roomAbove := h-3-cb >= 7, ct-1 >= 7 // one row and the two lines that say what scrolled out
+					roomBelow, roomAbove := h-3-cb >= 5, ct-1 >= 5
 					if (roomBelow || roomAbove) && top <= cb && bottom >= ct {
 						t.Errorf("%s: grid %d..%d covers its card although there was room", where, top, bottom)
 					}

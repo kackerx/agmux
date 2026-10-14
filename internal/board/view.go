@@ -661,27 +661,16 @@ const (
 func gridTotal() int { return (len(avatar.Listing()) + gridCols - 1) / gridCols }
 
 // avatarGrid draws the picker for s showing rows rows of the grid, the ones around the cursor pick.
-// When it shows fewer than all and hints, a line above and one below (muted, blank when there is
-// nothing that way) say how many sets are scrolled out: "↑ 5 more", "↓ 10 more".
+// When it shows fewer than all, the top and bottom border say how many avatars are scrolled out
+// that way, in muted: "╭─ ↑ 5 more ───╮", "╰─ ↓ 10 more ──╯".
 // Under the cursor the name is in the focus color's inverse; the avatar s wears now has its name in
 // the focus color.
-func avatarGrid(s store.Session, pick, rows int, hints bool) []string {
+func avatarGrid(s store.Session, pick, rows int) []string {
 	ids := avatar.Listing()
 	total := gridTotal()
 	rows = min(rows, total)
 	first := min(max(pick/gridCols-rows/2, 0), total-rows)
 	var lines []string
-	more := func(arrow string, n int) {
-		if !hints || rows == total {
-			return
-		}
-		if n > 0 {
-			lines = append(lines, pad(fg(cMuted, fmt.Sprintf(" %s %d more", arrow, n)), gridW-2))
-		} else {
-			lines = append(lines, strings.Repeat(" ", gridW-2))
-		}
-	}
-	more("↑", first*gridCols)
 	for r := first; r < first+rows; r++ {
 		cells := [cellH][]string{}
 		for c := range gridCols {
@@ -710,29 +699,35 @@ func avatarGrid(s store.Session, pick, rows int, hints bool) []string {
 			lines = append(lines, strings.Join(cells[l], ""))
 		}
 	}
-	more("↓", len(ids)-(first+rows)*gridCols)
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cFocus).Render(strings.Join(lines, "\n"))
-	return strings.Split(box, "\n")
+	box := strings.Split(lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cFocus).Render(strings.Join(lines, "\n")), "\n")
+	if rows < total { // the borders carry the count, a rule of the same width as the plain one
+		note := func(l, r, arrow string, n int) string {
+			if n == 0 {
+				return fg(cFocus, l+strings.Repeat("─", gridW-2)+r)
+			}
+			label := fmt.Sprintf(" %s %d more ", arrow, n)
+			return fg(cFocus, l+"─") + fg(cMuted, label) + fg(cFocus, strings.Repeat("─", gridW-3-ansi.StringWidth(label))+r)
+		}
+		box[0] = note("╭", "╮", "↑", first*gridCols)
+		box[len(box)-1] = note("╰", "╯", "↓", max(len(ids)-(first+rows)*gridCols, 0))
+	}
+	return box
 }
 
 // gridPlace picks where the grid goes for a card whose top is at screen row cardTop and which is
 // cardH tall, on a screen h rows high (the top bar above row 1, the message line and footer from
-// h-2 on): straight below the card, else above it, with fewer rows if need be (then the two lines
-// that say what scrolled out come too). rows is how many it shows; want is all of them.
-func gridPlace(cardTop, cardH, h, want int) (y, rows int, hints bool) {
+// h-2 on): straight below the card, else above it, with fewer rows if need be. rows is how many it
+// shows; want is all of them.
+func gridPlace(cardTop, cardH, h, want int) (y, rows int) {
 	below, above := h-2-(cardTop+cardH), cardTop-1
 	for rows = want; rows >= 1; rows-- {
-		need := 2 + cellH*rows
-		if rows < want {
-			need += 2
-		}
-		if below >= need {
-			return cardTop + cardH, rows, true
+		if need := 2 + cellH*rows; below >= need {
+			return cardTop + cardH, rows
 		} else if above >= need {
-			return cardTop - need, rows, true
+			return cardTop - need, rows
 		}
 	}
-	return 1, 1, false // no room at all: the top of the board, the cursor's row alone
+	return 1, 1 // no room at all: the top of the board
 }
 
 // overlayAt puts box on screen with its top left corner at column x, row y.

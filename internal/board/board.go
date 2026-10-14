@@ -1289,14 +1289,14 @@ func (m Model) View() string {
 				hint = append(hint, k(a[0])+a[1])
 			}
 		}
-		x, y, rows, hints := 0, 1, 1, false // the grid under the card it is for (above if it doesn't fit)
+		x, y, rows := 0, 1, 1 // the grid under the card it is for (above if it doesn't fit)
 		for _, r := range rects {
 			if r.id == m.target.ID {
 				x = min(r.x, max(m.w-gridW, 0))
-				y, rows, hints = gridPlace(1+r.y-off, r.h, m.h, gridTotal())
+				y, rows = gridPlace(1+r.y-off, r.h, m.h, gridTotal())
 			}
 		}
-		out = overlayAt(out, avatarGrid(m.target, m.pick, rows, hints), x, y, m.w)
+		out = overlayAt(out, avatarGrid(m.target, m.pick, rows), x, y, m.w)
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+strings.Join(hint, " · "))
 	case m.passThrough():
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · "+m.cfg.First("leave_preview")+" back to the cards")
