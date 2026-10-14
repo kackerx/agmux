@@ -1,37 +1,38 @@
-# agmux configuration — ~/.config/agmux/config.toml
+# agmux configuration — ~/.config/agmux/config.toml ($XDG_CONFIG_HOME/agmux/config.toml)
 # Every setting is optional; a missing one keeps its default. `agmux config` prints the
 # effective values. Defaults are shown in the comments; lines left at their default are harmless.
 
 [keys]
 # Each action takes a list of key names (bubbletea names): letters and digits, "enter", "esc",
-# "tab", "shift+tab", "space", "up"/"down"/"left"/"right", "f1".."f12", "ctrl+<letter>".
-# An uppercase letter means shift+letter. ctrl+c cannot be bound (it always quits).
-# A key may be bound to only one action.
+# "tab", "shift+tab", "space", "backspace", "up"/"down"/"left"/"right", "home"/"end", "pgup"/"pgdown",
+# "f1".."f20", "ctrl+<letter>", "alt+<key>". An uppercase letter means shift+letter.
+# ctrl+c cannot be bound (it always quits); ctrl+i and ctrl+m are tab and enter.
+# A key may be bound to only one action, but confirm and leave_preview may share keys with others.
 up = ["k", "up"]              # default: k, up
 down = ["j", "down"]          # default: j, down
 left = ["h", "left"]          # default: h, left
 right = ["l", "right"]        # default: l, right
 page_down = ["ctrl+d"]        # default: ctrl+d — scroll the board a page down
-page_up = ["ctrl+u"]          # default: ctrl+u
+page_up = ["ctrl+u"]          # default: ctrl+u — scroll the board a page up
 jump = ["enter"]              # default: enter — switch tmux to the focused pane
 fold = ["f"]                  # default: f — fold / unfold the focused group
 preview = ["p"]               # default: p — open / close the pane preview
 focus_preview = ["tab"]       # default: tab — pass keys through to the previewed pane
 leave_preview = ["tab"]       # default: tab — back to the board
 reply = ["i"]                 # default: i — type a reply into the focused session
-handoff = ["H"]               # default: H
-search = ["/"]                # default: /
-next_match = ["n"]            # default: n
-prev_match = ["N"]            # default: N
-flash = ["s"]                 # default: s
+handoff = ["H"]               # default: H — send /handoff to the focused session
+search = ["/"]                # default: / — filter the cards by fuzzy search
+next_match = ["n"]            # default: n — next search hit
+prev_match = ["N"]            # default: N — previous search hit
+flash = ["s"]                 # default: s — jump to a card by a typed label
 group = ["g"]                 # default: g — cycle the grouping (see [layout] group_by)
-restart = ["r"]               # default: r
-kill = ["x"]                  # default: x
-review = ["d"]                # default: d
+restart = ["r"]               # default: r — restart the focused session
+kill = ["x"]                  # default: x — kill the focused session (asks first)
+review = ["d"]                # default: d — run `ccmux review` on the focused session
 avatar = ["a"]                # default: a — open the avatar picker under the focused card
 quit = ["q", "esc"]           # default: q, esc — with `board --stay` inside a popup: hide instead
 exit = ["Q"]                  # default: Q — always quit, even with --stay
-confirm = ["y"]               # default: y
+confirm = ["y"]               # default: y — answer yes to a prompt
 
 [colors]
 # A color is "#rrggbb" or an ANSI palette index "0".."255" (as a string).
@@ -41,7 +42,7 @@ done = "#50fa7b"              # default: #50fa7b
 attention = "#ff6188"         # default: #ff6188 — waiting for you / alerts
 focus = "#ff8ebe"             # default: #ff8ebe — the focused card
 match = "#f2d06b"             # default: #f2d06b — search hits
-border = ""                     # default: "" (terminal default) — borders of unfocused cards
+border = ""                   # default: "" (terminal default) — borders of unfocused cards ("" = follow the status)
 name = "5"                    # default: 5 — session name
 branch = "12"                 # default: 12
 model = "14"                  # default: 14
@@ -65,10 +66,12 @@ group_by = "cwd"              # default: "cwd" — grouping at start: "cwd", "pr
 [avatars]
 renderer = "auto"             # default: "auto" — "auto": pictures in kitty / ghostty, pixel art
                               #   elsewhere; "image": always pictures; "pixel": always pixel art
-default = "hash"              # default: "hash" — "hash": pick a built-in avatar from the session
-                              #   name; or an avatar id (see `agmux avatars`) for every unbound session
+default = "hash"              # default: "hash" — "hash": pick one from the session name (a picture set
+                              #   in picture mode, a pixel avatar otherwise); or an avatar id (see `agmux avatars`)
+                              #   for every unbound session
 
 [avatars.bind]
-# session name = avatar id, e.g.  agmux = "nova"   — the picker (a) writes these for you.
+# session name = avatar id, e.g.  "agmux" = "nova"
+# The picker (a) saves its choices in $XDG_STATE_HOME/agmux/avatars.json instead; they win over these.
 # Your own sets go in ~/.config/agmux/avatars/<id>/<state>/*.png (states: idle, think, read,
 # write, tool, hi, success) or `agmux avatars import <sheet.png> --name <id>`.
