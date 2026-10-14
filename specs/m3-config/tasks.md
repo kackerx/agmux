@@ -270,3 +270,5 @@
 - 遗留不阻塞：查队列到写之间 tmux 恰好写大块仍可能部分写（概率低几个量级）；tmux 自己 >1KB 的写被我们的序列插进去（原来就有，refresh-client 重画）；TIOCOUTQ 真 pty 只手工验过，单测用假队列。
 - 备忘：每次启动全量上传 2.7MB 是隐患，可改成只传当前会话用到的集、选头像时补传；这次不做。
 - 验收：单测 每次 write 是完整序列且 ≤1024、非末块负载 4 的倍数、拼起来解得出 PNG、放不下就等、满队列 stall；reviewer 变异探针；tester 跑图片相关 e2e + go test -race + 整套回归。
+- tester 第一步（ba59d3b）：vet / race 全绿；图片相关 e2e 116 条只有 1 条旧断言（tty 路径与外路径序列逐块一致）按新机制改；新增 test_t46.py 5 条（假 pty 慢读 + 每 2 ms 插 BEL：修前 292/321 个 APC 被打断，修后 0，BEL 拉到每 0.1 ms 仍 0；序列 <1024、载荷 768 对齐、外路径仍 4096）。据此先装给用户复测（09:21，产品代码 ba59d3b）。
+- tester 真 kitty 验证：kitty --config NONE + script 录 tty + tmux -L set-titles on 每 30 ms rename-window，15 套图集。修前 764 个 APC 截 55–59 个（全是 BEL/ST），修后 3 × 3676 个 0 截断；上传 ~3 s → ~1 s（含启动与静默判定）。没做：真 kitty 肉眼看渲染、常驻 session + popup 路径、Linux pty。
