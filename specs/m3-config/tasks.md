@@ -290,7 +290,7 @@
 - 备忘：区分浮窗与嵌套用户 client 的可用特征——display-popup 里 attach 的 client 其 client_pid 的父进程是 server 的 #{pid}（reviewer 真 tmux 实测），嵌套 / ssh 的不是；以后单开任务加进 popupClients。
 - dev a43c00e：askPopup = chooseClient + popupClients（errNoClient → false，其它错误 → nil 底栏不变）；TestStayFooterFollowsPopup 重写四种情况与 q 一致 + 第 1 帧不问 + 失败不变；README 措辞；TestSeenNotWhileHidden 改成只数 session_attached。每秒 2–4 次 tmux 调用，未省。
 
-### T48 done 已读只认预览 / 跳转，不再按停留计时（排入，dev 做）
+### T48 done 已读只认预览 / 跳转，不再按停留计时（dev @7f7a205 送审 + 测）
 - 用户 2026-10-14：焦点在 done 的卡上停一下就被取消 done，但并没有打开预览；要改成只有预览过或跳过去 focus 了 pane 才算看过结果。
 - 定稿：T45 的「焦点停 2 tick 即已读」去掉；已读只在三种动作时记：在这张卡上开预览、进直通、enter 跳转（已有）。j/k 路过和停留都不算。hidden 标志若只为 dwell 而存在就一并删，T47 收起期间不问浮窗的逻辑还用它则保留。design.md T45 那段同步。
 - 验收：单测 焦点停 10 tick 仍 done、seen.json 无条目；预览 / 直通 / enter 立即已读（原用例保留）。黑盒 真 tmux 夹具 done 卡 focus 3 s 仍 done，开预览后变 idle。原 T45 dwell 用例改掉。
@@ -303,3 +303,4 @@
 - 用户目录同 id 覆盖内置（用户之前把 5 套拷进了 ~/.config/agmux/avatars/，内置后那份多余，告诉用户可删，不替他删）。
 - 版权备注：火影角色是集英社 / Pierrot 的版权形象，GPT 生成的同人图嵌进开源发布的二进制有风险；用户已知情并决定加入，发布时 oss-maintainer 再提一次。
 - 验收：单测 内置集数 = 20、每套 7 个状态都有帧、帧高 ≤128 且 3:2、id 顺序；用户目录同 id 覆盖；`agmux avatars`（或等价列表）列出 20 套。黑盒 `a` 选择框 5 行滚动、新套头像在真 kitty 可显示（tester 字节流 + 截图）。
+- dev 7f7a205：dwell、hidden、asking、attachedMsg、doneMsg.hid、seenFrames 整套删（hidden 只为 dwell 存在；T47 收起期间不问浮窗也随之去掉，代价是收起期间每秒照常问、再 attach 后底栏最多晚 1 s，照准）；焦点停 10 帧 + j/k 仍 done；T47 两条小建议测试并入；README 去掉「停 1 秒」。
