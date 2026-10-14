@@ -4396,74 +4396,78 @@ func TestStayWithoutAPopup(t *testing.T) {
 	}
 }
 
-// The footer follows the popup: q hides while a tmux client is attached to the board's session, q
-// quits in an ordinary pane (asked at the start and every second).
+// The footer follows q: "q hide" exactly when q has a popup to detach (popupClients of the chosen
+// client), "q quit" otherwise — asked at the start and every second; a tmux that fails to answer
+// leaves it as it was.
 func TestStayFooterFollowsPopup(t *testing.T) {
 	t.Cleanup(func() { stayFooter = false; useConfig(config.Default()) })
 	useConfig(config.Default())
-	const ask = "list-clients #{client_termname}"
-	m, r := stayModel(stayClients)
-	r.tmuxOut[ask] = "tmux-256color\n"
+	hides := func() bool {
+		f := ansi.Strip(footer(false, 400, "cwd"))
+		if stayFooter != strings.HasSuffix(f, "q hide · Q quit") || !stayFooter && !strings.HasSuffix(f, "q quit") {
+			t.Errorf("stayFooter %v, footer %q", stayFooter, f)
+		}
+		return stayFooter
+	}
+	user := "5\t/dev/outer\tmain\txterm-kitty\t/dev/outer\n"
+	popup := "9\t/dev/popup\tfl-1\ttmux-256color\t/dev/popup\n"
+	m, r := stayModel(user + popup)
 	run(&m, m.Init())
-	if f := ansi.Strip(footer(false, 400, "cwd")); !stayFooter || !strings.HasSuffix(f, "q hide · Q quit") {
-		t.Errorf("popup attached: %q", f)
+	if !hides() {
+		t.Error("a popup on the board's session: q hides")
 	}
-	r.tmuxOut[ask] = "xterm-kitty\n" // the popup is gone, the board's pane has the user's terminal
-	m = frame(t, m)                  // frame 1: not asked yet
-	m = frame(t, m)                  // frame 2: asked
-	if f := ansi.Strip(footer(false, 400, "cwd")); stayFooter || !strings.HasSuffix(f, "q quit") || strings.Contains(f, "hide") {
-		t.Errorf("no popup: %q", f)
+	listCalls := func() int { return len(tmuxCalls(r, "list-clients")) }
+	r.tmuxOut["list-clients"] = user // the popup is gone
+	r.reset()
+	m = frame(t, m) // frame 1: not asked yet (once a second)
+	if n := listCalls(); n != 0 || !hides() {
+		t.Errorf("after one frame: %d list-clients calls", n)
 	}
-	r.tmuxOut[ask] = "tmux-256color\n" // a popup attaches again
-	frame(t, frame(t, m))
-	if !stayFooter {
+	m = frame(t, m)
+	if listCalls() == 0 || hides() {
+		t.Errorf("popup gone, asked %d times: q quits", listCalls())
+	}
+	r.tmuxOut["list-clients"] = user + popup // the popup attaches again
+	m = frame(t, frame(t, m))
+	if !hides() {
 		t.Error("popup attached again: footer still says quit")
 	}
+	r.tmuxFail = map[string]error{"list-clients": errors.New("no server")}
+	m = frame(t, frame(t, m)) // tmux can't say: the footer stays as it was
+	if !hides() {
+		t.Error("a failed question changed the footer")
+	}
+	r.tmuxFail = nil
+	// q's own rule: a popup client that is the only one is what a jump would switch, and a user's
+	// terminal that is itself a tmux is the only client: q quits, so the footer must say so
+	for name, clients := range map[string]string{"only a popup": popup, "a tmux terminal alone": "9\t/dev/term\tfl-1\ttmux-256color\t/dev/term\n", "no client": ""} {
+		stayFooter = true
+		m, r = stayModel(clients)
+		run(&m, m.Init())
+		if hides() {
+			t.Errorf("%s: footer says q hides, q would quit", name)
+		}
+		if _, quit := press(t, m, "q"); !quit {
+			t.Errorf("%s: q did not quit", name)
+		}
+	}
 	// hidden, nobody sees the footer: only "is the popup back" is asked
-	m, r = stayModel(stayClients)
+	m, r = stayModel(user + popup)
 	m, _ = press(t, m, "q")
 	r.reset()
 	for range 4 {
 		m = frame(t, m)
 	}
-	for _, c := range r.calls {
-		if c[len(c)-1] == "#{client_termname}" {
-			t.Errorf("asked for the footer while hidden: %q", c)
-		}
+	if n := len(tmuxCalls(r, "list-clients")); n != 0 {
+		t.Errorf("asked for the footer while hidden: %d list-clients calls", n)
 	}
 	// no --stay, no asking
-	m, r = stayModel(stayClients)
+	m, r = stayModel(user + popup)
 	m.stay = false
 	run(&m, m.Init())
 	m = frame(t, frame(t, m))
-	for _, c := range r.calls {
-		if c[len(c)-1] == "#{client_termname}" {
-			t.Errorf("asked without --stay: %q", c)
-		}
-	}
-}
-
-// Without --stay, q and enter are what they were.
-func TestNoStayUnchanged(t *testing.T) {
-	m, r := stayModel(stayClients)
-	m.stay = false
-	if _, quit := press(t, m, "q"); !quit || len(tmuxCalls(r, "detach-client")) != 0 {
-		t.Errorf("q: quit %v, detach %q", quit, tmuxCalls(r, "detach-client"))
-	}
-}
-
-// The footer: q hides, the exit key quits.
-func TestStayFooter(t *testing.T) {
-	t.Cleanup(func() { stayFooter = false; useConfig(config.Default()) })
-	stayFooter = true
-	useConfig(config.Default())
-	if f := ansi.Strip(footer(false, 400, "cwd")); !strings.HasSuffix(f, "q hide · Q quit") {
-		t.Errorf("stay footer: %q", f)
-	}
-	stayFooter = false
-	useConfig(config.Default())
-	if f := ansi.Strip(footer(false, 400, "cwd")); !strings.HasSuffix(f, "q quit") || strings.Contains(f, "hide") {
-		t.Errorf("footer: %q", f)
+	if n := len(tmuxCalls(r, "list-clients")); n != 0 {
+		t.Errorf("asked without --stay: %d calls", n)
 	}
 }
 

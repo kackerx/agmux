@@ -186,17 +186,23 @@ func nextFrame() tea.Cmd { return tea.Tick(frameEvery, func(time.Time) tea.Msg {
 
 func (m Model) Init() tea.Cmd { return tea.Batch(nextFrame(), m.askPopup()) }
 
-// askPopup, under --stay, asks tmux whether the board is shown through a popup: the footer says
-// "q hide" then, and "q quit" for a board in an ordinary pane (where q has nothing to hide).
+// askPopup, under --stay, asks tmux whether q has a popup to hide, by the very rule q uses
+// (popupClients of the chosen client): the footer says "q hide" then, "q quit" otherwise. A tmux
+// that does not answer leaves the footer as it was.
 func (m Model) askPopup() tea.Cmd {
-	pane := m.getenv("TMUX_PANE")
-	if !m.stay || pane == "" {
+	if !m.stay || m.getenv("TMUX_PANE") == "" {
 		return nil
 	}
-	r := m.run
+	r, getenv := m.run, m.getenv
 	return func() tea.Msg {
-		out, err := r.Tmux("list-clients", "-t", pane, "-F", "#{client_termname}")
-		return popupMsg{err == nil && slices.ContainsFunc(strings.Fields(out), nestedTerm)}
+		pc, err := chooseClient(r, getenv)
+		switch {
+		case errors.Is(err, errNoClient): // q ends the board then, as it does without a popup
+			return popupMsg{false}
+		case err != nil:
+			return nil
+		}
+		return popupMsg{len(popupClients(pc)) > 0}
 	}
 }
 

@@ -194,7 +194,15 @@ func TestSeenNotWhileHidden(t *testing.T) {
 		if len(src.marked) != 0 || !m.hidden {
 			t.Fatalf("%s: marked while hidden: %v (hidden %v)", wake, src.marked, m.hidden)
 		}
-		asked := len(tmuxCalls(r, "display-message")) // the question is asked, one at a time
+		attachedCalls := func() (n int) { // "who is attached": the footer's own question about the popup is another
+			for _, c := range tmuxCalls(r, "display-message") {
+				if c[len(c)-1] == "#{session_attached}" {
+					n++
+				}
+			}
+			return
+		}
+		asked := attachedCalls() // the question is asked, one at a time
 		switch wake {
 		case "resize":
 			tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -219,7 +227,7 @@ func TestSeenNotWhileHidden(t *testing.T) {
 		if asked < 10 {
 			t.Errorf("%s: asked tmux %d times in 10 frames", wake, asked)
 		}
-		if n := len(tmuxCalls(r, "display-message")); wake != "attach" && n != asked {
+		if n := attachedCalls(); wake != "attach" && n != asked {
 			t.Errorf("%s: asked tmux again after waking (%d → %d)", wake, asked, n)
 		}
 	}

@@ -86,8 +86,8 @@ tmux has-session -t =fl-agmux 2>/dev/null || tmux new-session -d -s fl-agmux agm
 tmux display-popup -E "tmux attach-session -t =fl-agmux"
 ```
 
-- 被 detach 的只是「看板自己 session 上、本身是 tmux 的 client」（浮窗里 `tmux attach` 出来的那个）；普通 pane 里自己 session 上的 client 是你的终端，从不 detach。不在 tmux 里 `--stay` 不起作用（没有 pane 可跳），底栏提示 `--stay only works inside tmux`。
-- 底栏每秒问一次 tmux 有没有浮窗：有则 `q hide · Q quit`，没有 `q quit`；退出键可以用 `[keys] exit` 改。
+- 被 detach 的只是「看板自己 session 上、本身是 tmux 的 client」（浮窗里 `tmux attach` 出来的那个）；本身不是 tmux 的 client（你的终端）从不 detach；你的终端本身是 tmux（嵌套 / ssh）时，若还有别的 client 在其他 session 上，它可能被当成浮窗。不在 tmux 里 `--stay` 不起作用（没有 pane 可跳），底栏提示 `--stay only works inside tmux`。
+- 底栏每秒按 `q` 实际会用的规则问一次 tmux 有没有浮窗可收：有则 `q hide · Q quit`，没有 `q quit`；退出键可以用 `[keys] exit` 改。
 
 ### 上下文百分比
 
