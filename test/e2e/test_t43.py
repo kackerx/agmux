@@ -75,7 +75,10 @@ class Base(unittest.TestCase):
 
     def expect(self, t, mode, S=None, folded=(), timeout=8):
         want = want_outline(oracle(S or self.sessions(), mode, self.home), folded)
-        ok = wait(lambda: outline_of(t.snap()) == want, timeout)
+        def same():
+            try: return outline_of(t.snap()) == want
+            except IndexError: return False  # a capture torn by a repaint in progress (a card cut short): look again
+        ok = wait(same, timeout)
         self.assertTrue(ok, f"mode {mode}:\nwant {want}\ngot  {outline_of(t.snap())}\n{t.text()}")
 
     def bar(self, t): return last_text_row(t.snap())
