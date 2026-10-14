@@ -745,7 +745,7 @@ func pinPoller(t *testing.T, raw *[]ccmux.Session) (*Poller, string) {
 	return p, path
 }
 
-// TogglePin pins and unpins by session ID: at once on the sessions the board holds, in pins.json
+// TogglePin pins and unpins by name (here the ID: these sessions have none): at once on the sessions the board holds, in pins.json
 // (read back by another poller, a restart), and a session that is gone loses its pin.
 func TestTogglePin(t *testing.T) {
 	raw := []ccmux.Session{{ID: "a", Status: "idle"}, {ID: "b", Status: "idle"}, {ID: "c", Status: "idle"}}
@@ -754,7 +754,7 @@ func TestTogglePin(t *testing.T) {
 		t.Fatal("pinned from the start")
 	}
 	for _, id := range []string{"b", "a"} {
-		if err := p.TogglePin(byID(t, p.Sessions(), id)); err != nil {
+		if _, err := p.TogglePin(byID(t, p.Sessions(), id)); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(2 * time.Millisecond) // two pins never share a time
@@ -775,7 +775,7 @@ func TestTogglePin(t *testing.T) {
 		t.Errorf("a restart forgets the pins: %+v", p2.Sessions())
 	}
 	// unpin
-	if err := p.TogglePin(byID(t, p.Sessions(), "b")); err != nil {
+	if _, err := p.TogglePin(byID(t, p.Sessions(), "b")); err != nil {
 		t.Fatal(err)
 	}
 	if byID(t, p.Sessions(), "b").Pinned || !byID(t, p.Sessions(), "a").Pinned {
@@ -784,8 +784,15 @@ func TestTogglePin(t *testing.T) {
 	if got := seenFile(t, path); !strings.HasPrefix(got, `{"a":"`) || strings.Contains(got, `"b"`) {
 		t.Errorf("pins.json %s", got)
 	}
-	// a's session is gone: its pin goes
+	// a's session is gone: its pin goes, after pinGrace
+	now := time.Now()
+	p.Now = func() time.Time { return now }
 	raw = raw[1:]
+	p.Refresh()
+	if got := seenFile(t, path); got == "{}" {
+		t.Error("the pin went at the first poll without the session")
+	}
+	now = now.Add(pinGrace + time.Second)
 	p.Refresh()
 	if got := seenFile(t, path); got != "{}" {
 		t.Errorf("pins.json %s, want the gone session dropped", got)
@@ -816,7 +823,7 @@ func TestPinsCorruptFile(t *testing.T) {
 	if p.Sessions()[0].Pinned {
 		t.Error("nothing is pinned")
 	}
-	if err := p.TogglePin(p.Sessions()[0]); err == nil || !strings.Contains(err.Error(), "pins.json") {
+	if _, err := p.TogglePin(p.Sessions()[0]); err == nil || !strings.Contains(err.Error(), "pins.json") {
 		t.Errorf("TogglePin: %v", err)
 	}
 	if b, _ := os.ReadFile(path); string(b) != "{oops" {
@@ -835,7 +842,7 @@ func TestPinsCorruptFile(t *testing.T) {
 func TestPinSurvivesNewID(t *testing.T) {
 	raw := []ccmux.Session{{ID: "a1", Summary: "agmux-dev", Status: "idle"}, {ID: "b1", Summary: "other", Status: "idle"}}
 	p, path := pinPoller(t, &raw)
-	if err := p.TogglePin(byID(t, p.Sessions(), "a1")); err != nil {
+	if _, err := p.TogglePin(byID(t, p.Sessions(), "a1")); err != nil {
 		t.Fatal(err)
 	}
 	if got := seenFile(t, path); !strings.HasPrefix(got, `{"agmux-dev":"`) {
@@ -849,13 +856,92 @@ func TestPinSurvivesNewID(t *testing.T) {
 	if !strings.Contains(seenFile(t, path), `"agmux-dev"`) {
 		t.Error("the restart dropped the pin")
 	}
-	if err := p.TogglePin(byID(t, p.Sessions(), "a2")); err != nil || byID(t, p.Sessions(), "a2").Pinned {
+	if _, err := p.TogglePin(byID(t, p.Sessions(), "a2")); err != nil || byID(t, p.Sessions(), "a2").Pinned {
 		t.Errorf("unpin from the new ID: %v %+v", err, p.Sessions())
 	}
 	p.TogglePin(byID(t, p.Sessions(), "a2"))
+	now := time.Now()
+	p.Now = func() time.Time { return now }
 	raw[0].Summary = "renamed" // no session has the name now
+	p.Refresh()
+	now = now.Add(pinGrace + time.Second)
 	p.Refresh()
 	if got := seenFile(t, path); got != "{}" {
 		t.Errorf("pins.json %s, want the name dropped", got)
+	}
+}
+
+// A session restarted by ccmux is out of its list for a few seconds, and a daemon just started
+// answers with none: a pin survives that, and goes only when no session has had the name for pinGrace.
+func TestPinGrace(t *testing.T) {
+	raw := []ccmux.Session{{ID: "a1", Summary: "agmux-dev", Status: "idle"}, {ID: "b1", Summary: "other", Status: "idle"}}
+	p, path := pinPoller(t, &raw)
+	now := time.Now()
+	p.Now = func() time.Time { return now }
+	p.TogglePin(byID(t, p.Sessions(), "a1"))
+	p.TogglePin(byID(t, p.Sessions(), "b1"))
+	// the restart gap: one poll without the session, then it is back with a new ID
+	saved := raw
+	raw = raw[1:]
+	p.Refresh()
+	now = now.Add(5 * time.Second)
+	raw = append([]ccmux.Session{{ID: "a2", Summary: "agmux-dev", Status: "idle"}}, saved[1:]...)
+	p.Refresh()
+	if !byID(t, p.Sessions(), "a2").Pinned || !byID(t, p.Sessions(), "b1").Pinned {
+		t.Errorf("after the gap: %+v", p.Sessions())
+	}
+	// it came back, so the clock is reset: a gap of 50 s, back, and another of 50 s is not 100 s
+	for range 2 {
+		raw = raw[1:]
+		p.Refresh()
+		now = now.Add(50 * time.Second)
+		p.Refresh()
+		raw = append([]ccmux.Session{{ID: "a2", Summary: "agmux-dev", Status: "idle"}}, raw...)
+		p.Refresh()
+	}
+	if !byID(t, p.Sessions(), "a2").Pinned {
+		t.Errorf("two short gaps lost the pin: %s", seenFile(t, path))
+	}
+	// an empty list (a daemon just started): every pin stays until pinGrace is up
+	raw = nil
+	p.Refresh()
+	now = now.Add(pinGrace - time.Second)
+	p.Refresh()
+	if got := seenFile(t, path); !strings.Contains(got, "agmux-dev") || !strings.Contains(got, "other") {
+		t.Errorf("an empty list for %v dropped pins: %s", pinGrace-time.Second, got)
+	}
+	now = now.Add(2 * time.Second)
+	p.Refresh()
+	if got := seenFile(t, path); got != "{}" {
+		t.Errorf("pins.json %s after more than pinGrace without them", got)
+	}
+}
+
+// What is pinned is what pins.json says now, not what the caller saw: two presses of t on one
+// snapshot pin and unpin; a pin made by another board is seen, and undone, without a poll between.
+func TestTogglePinReadsTheFile(t *testing.T) {
+	raw := []ccmux.Session{{ID: "a1", Summary: "x", Status: "idle"}}
+	p, path := pinPoller(t, &raw)
+	snap := byID(t, p.Sessions(), "a1") // what the board read for both key presses
+	on1, err1 := p.TogglePin(snap)
+	on2, err2 := p.TogglePin(snap)
+	if err1 != nil || err2 != nil || !on1 || on2 || byID(t, p.Sessions(), "a1").Pinned || seenFile(t, path) != "{}" {
+		t.Errorf("t t: %v %v, then %v %v, pinned %v, pins.json %s", on1, err1, on2, err2, byID(t, p.Sessions(), "a1").Pinned, seenFile(t, path))
+	}
+	// another board pins x; this one has not polled since
+	other, _ := avatar.LoadBindings(path)
+	other.Set("x", time.Now().UTC().Format(time.RFC3339Nano))
+	if on, err := p.TogglePin(snap); err != nil || on || strings.Contains(seenFile(t, path), "x") { // snap says "not pinned": the file says it is
+		t.Errorf("on a pin another board made: pinned %v err %v pins.json %s", on, err, seenFile(t, path))
+	}
+}
+
+// Pinning one name leaves the others alone, and sessions of one name go together.
+func TestTogglePinByName(t *testing.T) {
+	raw := []ccmux.Session{{ID: "a1", Summary: "x", Status: "idle"}, {ID: "a2", Summary: "x", Status: "idle"}, {ID: "b1", Summary: "y", Status: "idle"}}
+	p, _ := pinPoller(t, &raw)
+	p.TogglePin(byID(t, p.Sessions(), "a1"))
+	if !byID(t, p.Sessions(), "a1").Pinned || !byID(t, p.Sessions(), "a2").Pinned || byID(t, p.Sessions(), "b1").Pinned {
+		t.Errorf("same name pinned together, the other left alone: %+v", p.Sessions())
 	}
 }

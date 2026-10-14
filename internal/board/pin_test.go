@@ -2,15 +2,19 @@ package board
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -22,18 +26,20 @@ type pinSrc struct {
 }
 
 func (s *pinSrc) Sessions() []store.Session { return s.staticSrc }
-func (s *pinSrc) TogglePin(x store.Session) error {
+func (s *pinSrc) TogglePin(x store.Session) (bool, error) {
 	if s.err != nil {
-		return s.err
+		return false, s.err
 	}
 	s.n++
+	on := false
 	for i := range s.staticSrc {
 		if s.staticSrc[i].ID == x.ID {
-			s.staticSrc[i].Pinned = !x.Pinned
+			on = !s.staticSrc[i].Pinned
+			s.staticSrc[i].Pinned = on
 			s.staticSrc[i].PinnedAt = time.Unix(int64(s.n), 0)
 		}
 	}
-	return nil
+	return on, nil
 }
 
 func pinModel() (Model, *pinSrc) {
@@ -126,5 +132,60 @@ func TestPinMarkMovesFlashHit(t *testing.T) {
 	row := string([]rune(lines[1+hit.y]))
 	if !strings.Contains(row, "▲ ch") { // the hit is drawn over the name, not over the mark
 		t.Errorf("hit at column %d: %q", hit.x, row)
+	}
+}
+
+// Two presses of t read in one go: both Cmds are built from the same snapshot (not pinned), and
+// run after both keys. The second must undo the first, as it would with a pause between them.
+func TestPinBurst(t *testing.T) {
+	p, _ := gridFixture(t, 0, "", "one", "two")
+	p.Pins, _ = avatar.LoadBindings(filepath.Join(t.TempDir(), "pins.json"))
+	m := gridModel(p, 120, 40)
+	tm, c1 := m.Update(key("t"))
+	tm, c2 := tm.Update(key("t"))
+	m1, m2 := c1(), c2()
+	if m1.(doneMsg).ok != "pinned one" || m2.(doneMsg).ok != "unpinned one" {
+		t.Errorf("messages %q, %q", m1.(doneMsg).ok, m2.(doneMsg).ok)
+	}
+	tm, _ = tm.Update(m1)
+	tm, _ = tm.Update(m2)
+	if v := ansi.Strip(tm.(Model).View()); strings.Contains(v, "▲") || !strings.Contains(v, "unpinned one") {
+		t.Errorf("two presses of t left the card pinned:\n%s", v)
+	}
+}
+
+// The mark is in the focus color.
+func TestPinMarkColor(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	m, _ := pinModel()
+	m, _ = press(t, m, "t")
+	if v := m.View(); !strings.Contains(v, fg(cFocus, pinGlyph)) {
+		t.Errorf("no ▲ in the focus color:\n%q", v)
+	}
+}
+
+// A pinned name that has to be cut is cut two cells earlier, and flash gives no label to what
+// the cut took off.
+func TestPinFlashCutName(t *testing.T) {
+	m, src := pinModel()
+	_, rects := layout(groups(src.staticSrc), m.cardsW(), "", 0, m.now(), nil, nil)
+	tw := rects[0].w - 2 - avatar.Width - 2 // the room right of the avatar
+	name := strings.Repeat("n", tw-2) + "Q" // Q is the (tw-1)th cell: shown unpinned, cut with the mark
+	src.staticSrc[0].Name = name
+	m.focus = "a"
+	m, _ = press(t, m, "t")
+	if !src.staticSrc[0].Pinned {
+		t.Fatal("not pinned")
+	}
+	m, _ = press(t, m, "s", "q")
+	for _, f := range m.flash.ms {
+		if f.id == "a" && !f.title {
+			t.Errorf("a hit on the cut-off part of the name: %+v", f)
+		}
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "▲ nnn") || !strings.Contains(v, "n…┃") {
+		t.Errorf("the name is not cut with an ellipsis after the mark:\n%s", v)
 	}
 }

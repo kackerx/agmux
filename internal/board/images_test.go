@@ -446,18 +446,25 @@ func TestAvatarGridScrolls(t *testing.T) {
 // top border says "↑ n more", the bottom "↓ n more" (muted; n counts avatars, a short last row too),
 // each only where there is something that way. The box keeps its height all the way.
 func TestAvatarGridRowsAndMore(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	muted := strings.SplitN(fg(cMuted, "x"), "x", 2)[0]
+	// inBox is what the box shows of screen line l: cut to its columns, so the cards around it count for nothing
+	inBox := func(l string, col int) string { return ansi.Cut(l, col, col+gridW) }
 	for _, c := range []struct{ sets, rows int }{{5, 2}, {20, 5}, {21, 6}} {
 		p, _ := gridFixture(t, c.sets, "s01", "one")
 		m, _ := press(t, gridModel(p, 120, 60), "a")
 		lines := strings.Split(ansi.Strip(m.View()), "\n")
-		top, bottom, _ := gridAt(lines)
+		top, bottom, col := gridAt(lines)
+		raw := strings.Split(m.View(), "\n")
+		if strings.Contains(inBox(raw[top], col), muted) || strings.Contains(inBox(raw[bottom], col), muted) { // a plain border
+			t.Errorf("%d avatars: a muted note on a border with nothing scrolled out", c.sets+5)
+		}
 		if got := (bottom - top - 1) / cellH; got != c.rows || strings.Contains(strings.Join(lines, "\n"), "more") {
 			t.Errorf("%d avatars: %d rows, want %d:\n%s", c.sets+5, got, c.rows, strings.Join(lines, "\n"))
 		}
 	}
-	old := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(old)
 	for _, c := range []struct {
 		sets, h int
 		keys    []string
@@ -475,16 +482,12 @@ func TestAvatarGridRowsAndMore(t *testing.T) {
 		m, _ = press(t, m, c.keys...)
 		raw := strings.Split(m.View(), "\n")
 		top, bottom, col := gridAt(strings.Split(ansi.Strip(m.View()), "\n"))
-		muted := strings.SplitN(fg(cMuted, "x"), "x", 2)[0]
-		for _, e := range []struct{ row, want string }{{ansi.Strip(raw[top]), c.up}, {ansi.Strip(raw[bottom]), c.dn}} {
-			e.row = string([]rune(e.row)[col : col+gridW])
-			note := strings.Trim(strings.Trim(e.row, "╭╮╰╯─"), " ")
-			if note != e.want {
-				t.Errorf("sets=%d h=%d keys=%v: border %q has note %q, want %q", c.sets, c.h, c.keys, e.row, note, e.want)
+		for _, e := range []struct{ line, want string }{{raw[top], c.up}, {raw[bottom], c.dn}} {
+			cut := inBox(e.line, col)
+			note := strings.Trim(strings.Trim(ansi.Strip(cut), "╭╮╰╯─"), " ")
+			if note != e.want || strings.Contains(cut, muted) != (e.want != "") { // the note, and in muted; nothing muted on a plain border
+				t.Errorf("sets=%d h=%d keys=%v: border %q has note %q (muted: %v), want %q", c.sets, c.h, c.keys, ansi.Strip(cut), note, strings.Contains(cut, muted), e.want)
 			}
-		}
-		if got := strings.Count(strings.Join(raw[top:bottom+1], ""), muted) > 0; got != (c.up != "" || c.dn != "") {
-			t.Errorf("sets=%d h=%d keys=%v: muted note colored: %v", c.sets, c.h, c.keys, got)
 		}
 	}
 }
