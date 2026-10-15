@@ -158,8 +158,9 @@ func previewBox(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focus
 			l = ansi.Truncate(paintCursor(l, pv.cur, curCol, focused), inner, "")
 			drawn = true
 		}
-		// the reset keeps the pane's own colors from bleeding into the border
-		out = append(out, " "+fg(border, "│")+" "+pad(l, inner)+"\x1b[0m "+fg(border, "│"))
+		// the reset right after the text keeps a color still on at its end from filling the padding
+		// and the border
+		out = append(out, " "+fg(border, "│")+" "+pad(l+"\x1b[0m", inner)+"\x1b[0m "+fg(border, "│"))
 	}
 	out = append(out, " "+fg(border, "╰"+strings.Repeat("─", inner+2)+"╯"))
 	if !drawn {

@@ -195,3 +195,15 @@ func previewBoxLines(text string, w int) []string {
 	s := store.Session{ID: "a", Name: "n", TmuxPane: "%1", Status: "idle", ContextPct: -1}
 	return previewLines(s, true, previewMsg{pane: "%1", text: text + "\n"}, w, 12, 0, false)
 }
+
+// A line that ends with a background still on does not fill the padding after it, nor the border;
+// the next line starts with it again.
+func TestPreviewWrapBackgroundStopsAtTheText(t *testing.T) {
+	box := wrapBox("\x1b[41mred\nnext\n", nil, 12, 0)
+	if !strings.Contains(box[2], "red\x1b[0m    ") {
+		t.Errorf("the padding is under the background: %q", box[2])
+	}
+	if !strings.Contains(box[3], "\x1b[41mnext") {
+		t.Errorf("the next line lost it: %q", box[3])
+	}
+}
