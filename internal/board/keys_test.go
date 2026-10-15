@@ -1729,6 +1729,38 @@ func TestAvatarPicker(t *testing.T) {
 	}
 }
 
+// The key that opens the picker closes it too (as esc): nothing bound, no cursor kept. It is the
+// configured key, not the letter a: with avatar = ["A"], a does nothing inside the picker.
+func TestAvatarKeyToggles(t *testing.T) {
+	for _, c := range []struct{ toml, open, other string }{{"", "a", "x"}, {"[keys]\navatar = [\"A\"]\n", "A", "a"}} {
+		src := &avatarSrc{staticSrc: staticSrc{{ID: "a1", Name: "one", GroupKey: "/a", TmuxPane: "%1", Status: "idle", ContextPct: -1}}}
+		m := withConfig(t, c.toml)
+		m.src = src
+		m, _ = press(t, m, c.open, "l", "l")
+		if m.mode != pickAvatar || m.pick != 2 {
+			t.Fatalf("%q: not open on the third: mode %v pick %d", c.open, m.mode, m.pick)
+		}
+		if m, _ = press(t, m, c.other); m.mode != pickAvatar || m.pick != 2 {
+			t.Errorf("%q does something in the picker: mode %v pick %d", c.other, m.mode, m.pick)
+		}
+		m, _ = press(t, m, c.open)
+		if m.mode != browsing || src.set != 0 {
+			t.Errorf("%q closes without binding: mode %v, SetAvatar called %d times", c.open, m.mode, src.set)
+		}
+		if m, _ = press(t, m, c.open); m.pick != 0 {
+			t.Errorf("opens on the cursor it was closed on: %d", m.pick)
+		}
+	}
+}
+
+type avatarSrc struct {
+	staticSrc
+	set int
+}
+
+func (s *avatarSrc) Sessions() []store.Session             { return s.staticSrc }
+func (s *avatarSrc) SetAvatar(store.Session, string) error { s.set++; return nil }
+
 // The box sits centered, the screen still showing left and right of it.
 func TestOverlay(t *testing.T) {
 	got := ansi.Strip(overlay("abcdefghij\n0123456789\nklmnopqrst", []string{"XX", "YY"}, 10))

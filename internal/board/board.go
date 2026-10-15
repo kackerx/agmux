@@ -527,7 +527,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.pick/gridCols < (n-1)/gridCols { // the row below is shorter: its last one
 				m.pick = n - 1
 			}
-		case "quit":
+		case "quit", "avatar": // the key that opened the list closes it too
 			m.mode = browsing
 		case "jump": // off the UI goroutine: it writes a file and may wait for a poll
 			m.mode = browsing

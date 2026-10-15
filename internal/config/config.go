@@ -307,7 +307,7 @@ var actionUse = map[string]string{
 	"group": "cycle the grouping (see [layout] group_by)", "group_cwd": "switch straight to the cwd grouping",
 	"group_project": "switch straight to the project grouping", "group_session": "switch straight to the session grouping",
 	"group_state": "switch straight to the state grouping", "restart": "restart the focused session", "kill": "kill the focused session (asks first)",
-	"review": "run `ccmux review` on the focused session", "avatar": "open the avatar picker under the focused card",
+	"review": "run `ccmux review` on the focused session", "avatar": "open or close the avatar picker under the focused card",
 	"pin":  "pin the focused card to the top of its group",
 	"quit": "with `board --stay` inside a popup: hide instead", "exit": "always quit, even with --stay", "confirm": "answer yes to a prompt",
 }
