@@ -819,7 +819,8 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		if !s.Done {
 			return m, nil
 		}
-		return m.say(cMuted, "read "+s.Name), m.markSeen(s)
+		src := m.src // the message comes with the write, so the footer and the card change in one frame
+		return m, func() tea.Msg { return doneMsg{ok: "read " + s.Name, err: src.MarkSeen(s)} }
 	case "pin": // off the UI goroutine: it writes a file
 		src := m.src
 		return m, func() tea.Msg {

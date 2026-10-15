@@ -133,8 +133,8 @@ func TestMarkReadKey(t *testing.T) {
 	if !reflect.DeepEqual(src.marked, []string{"d1"}) || src.staticSrc[0].Done || m.preview || len(r.calls) != 0 {
 		t.Errorf("marked %v, d1 done %v, preview %v, calls %q", src.marked, src.staticSrc[0].Done, m.preview, r.calls)
 	}
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "read one") {
-		t.Errorf("no read message:\n%s", v)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "read one") || m.msg != fg(cMuted, " read one") {
+		t.Errorf("no read message, or not muted: %q\n%s", m.msg, v)
 	}
 	for name, keys := range map[string][]string{
 		"idle card":    {"m", "m"}, // the second one: d1 is idle by then
@@ -179,5 +179,15 @@ func TestMarkReadRebound(t *testing.T) {
 		if len(src.marked) != 0 {
 			t.Errorf("%s: m marked %v", name, src.marked)
 		}
+	}
+}
+
+// A write that fails is said in red instead of "read x", and the card stays done.
+func TestMarkReadFails(t *testing.T) {
+	m, src, _ := seenModel()
+	src.err = errors.New("seen.json: not valid JSON")
+	m, _ = press(t, m, "m")
+	if m.msg != fg(cRed, " seen.json: not valid JSON") {
+		t.Errorf("msg %q", m.msg)
 	}
 }
