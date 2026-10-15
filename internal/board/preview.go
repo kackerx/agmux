@@ -98,7 +98,7 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 	inner := w - 1 - 4 // one column of gap from the cards, then "│ " … " │"
 	title := ""
 	var content []string
-	curRow := -1 // the row of the box the pane's cursor is on, if it is drawn
+	curRow, curCol := -1, 0 // the row and column of the box the pane's cursor is on, if it is drawn
 	switch {
 	case !ok || s.TmuxPane == "":
 		content = []string{fg(cMuted, "no pane")}
@@ -118,11 +118,15 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 			if pv.cur != nil && scroll == 0 { // a scrolled-back view isn't where the cursor is
 				keep = pv.cur.row + 1 // the blank rows down to the cursor's are part of the screen
 			}
-			lines := trimTail(pv.text, keep)
-			content = lines[min(max(len(lines)-(n+scroll), 0), len(lines)):] // scroll lines back: drop that many from the bottom
-			content = content[:max(len(content)-scroll, min(len(content), n))]
+			var cur *cursor
 			if keep > 0 {
-				curRow = pv.cur.row - (len(lines) - len(content))
+				cur = pv.cur
+			}
+			rows, row, col := wrapRows(trimTail(pv.text, keep), inner, cur)
+			content = rows[min(max(len(rows)-(n+scroll), 0), len(rows)):] // scroll rows back: drop that many from the bottom
+			content = content[:max(len(content)-scroll, min(len(content), n))]
+			if cur != nil {
+				curRow, curCol = row-(len(rows)-len(content)), col
 			}
 		}
 	}
@@ -137,8 +141,8 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 		if i < len(content) {
 			l = ansi.Truncate(content[i], inner, "")
 		}
-		if i == curRow && pv.cur.col >= 0 && pv.cur.col < inner {
-			l = ansi.Truncate(paintCursor(l, pv.cur), inner, "")
+		if i == curRow && curCol >= 0 && curCol < inner {
+			l = ansi.Truncate(paintCursor(l, pv.cur, curCol), inner, "")
 		}
 		// the reset keeps the pane's own colors from bleeding into the border
 		out = append(out, " "+fg(border, "│")+" "+pad(l, inner)+"\x1b[0m "+fg(border, "│"))
@@ -149,10 +153,10 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 
 // paintCursor draws the pane's cursor on its line l: a block is the cell in reverse video, a bar or
 // underline (a terminal can't draw a thin line here) the cell underlined in the focus color.
-func paintCursor(l string, c *cursor) string {
+func paintCursor(l string, c *cursor, col int) string {
 	cell := " " // past the end of the text, an empty cell
 	for _, g := range clustersOf(ansi.Strip(l)) {
-		if g.x == c.col { // a wide character is one cell of the cursor, two columns wide
+		if g.x == col { // a wide character is one cell of the cursor, two columns wide
 			cell = g.s
 		}
 	}
@@ -160,7 +164,53 @@ func paintCursor(l string, c *cursor) string {
 	if c.bar {
 		style = lipgloss.NewStyle().Foreground(cFocus).Underline(true)
 	}
-	return put(l, c.col, style.Render(cell))
+	return put(l, col, style.Render(cell))
+}
+
+// wrapRows hard-wraps each line of the capture to inner columns, the pane's colors carried onto the
+// rows that continue a line. cur (nil: none) is the pane's cursor in lines; row and col are where it
+// lands among the rows (the cell after the end of its line may need a row of its own).
+func wrapRows(lines []string, inner int, cur *cursor) (rows []string, row, col int) {
+	row = -1 // the cursor is not among them
+	for i, l := range lines {
+		parts := strings.Split(ansi.Hardwrap(l, inner, true), "\n")
+		sgr := ""
+		for j, p := range parts {
+			parts[j] = sgr + p
+			sgr = activeSGR(parts[j])
+		}
+		if cur != nil && i == cur.row {
+			j, acc := 0, 0 // the row the cursor is on, and the column that row starts on
+			for ; j < len(parts)-1 && cur.col >= acc+ansi.StringWidth(parts[j]); j++ {
+				acc += ansi.StringWidth(parts[j])
+			}
+			for ; cur.col-acc >= inner; acc += inner { // past the end of the line: rows of blanks
+				parts, j = append(parts, ""), j+1
+			}
+			row, col = len(rows)+j, cur.col-acc
+		}
+		rows = append(rows, parts...)
+	}
+	return rows, row, col
+}
+
+// activeSGR is the color / style sequence in force at the end of l, to start the next row with.
+func activeSGR(l string) string {
+	state := ""
+	for len(l) > 0 {
+		seq, _, n, _ := ansi.DecodeSequence(l, ansi.NormalState, nil)
+		if strings.HasPrefix(seq, "\x1b[") && strings.HasSuffix(seq, "m") {
+			if p := seq[2 : len(seq)-1]; p == "" || p == "0" {
+				state = ""
+			} else if strings.HasPrefix(p, "0;") {
+				state = seq // it resets first, so it is the whole state
+			} else {
+				state += seq
+			}
+		}
+		l = l[n:]
+	}
+	return state
 }
 
 // trimTail is the lines of a capture without the blank rows at its end, but at least keep lines

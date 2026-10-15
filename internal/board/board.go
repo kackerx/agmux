@@ -237,7 +237,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.sendErr { // the key didn't reach the pane: say so where errors go
 			m.msg = fg(cRed, " "+firstLine(msg.err.Error()))
 		} else if msg.err == nil {
-			m.pvLines = len(tail(msg.text, 1<<30))
+			rows, _, _ := wrapRows(tail(msg.text, 1<<30), previewW(m.w)-5, nil)
+			m.pvLines = len(rows)
 		}
 		// the focus moved while this capture was in flight: get the pane it is on now
 		if _, _, s, ok := m.current(); ok && s.TmuxPane != "" && s.TmuxPane != msg.pane {
