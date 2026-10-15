@@ -376,12 +376,12 @@
 - tester（ad287e8，套件 31d19d8）：整套 930 条 2428 s，1 error 是 t18 sweep 读到重绘截断（用例问题，改重读后 38 条三遍绿，改后未再整套跑）。T54 10 条：a 关框不写 avatars.json / 不改头像 / 不发命令、光标回到穿戴的、a a a、esc q 仍关其它键无反应、滚动态也关、改键 A / q、config 注释；反向 9 红。T55 26 条：卡变 idle 与底栏 read x 同一 capture（几十 ms）、muted、seen.json 同一条、只动焦点卡、二次 m 无反应、working / waiting / idle / 折叠无反应、重启仍 idle、statusChangedAt 变了重新 done、坏文件不覆盖不假报、只读目录报错、搜索 / flash / 选择框 / kill 确认 / 直通 / 真 tmux --stay 弹窗、config 行 / 改键 / [] / 占键 / pin=["m"]；反向 87a809e 14 红、7e22c45 仅「同一帧」1 红（证实建议 1 有效）。备忘：无 statusChangedAt 的 done 卡按 m 底栏写 read x 但不变 idle。没覆盖：真 kitty、Linux、用户真实 config、真 claude 会话。
 - 2026-10-15 15:45 已装 ad287e8（干净 clone，vcs.modified=false）。T46–T55 待用户验收。
 
-### T56 预览窗口长行自动换行（164ce6f 送审）
+### T56 预览窗口长行自动换行（通过 @24a88f4 / 22 条）
 - 用户 2026-10-15（截图 images/24.png）：预览里内容不换行，pane 比预览宽时行尾看不到。现状：previewLines 把每行 ansi.Truncate 到框内宽度，是 M2 的设计取舍，不是 bug，但要改。
 - 定稿：预览框内每一行按框内宽度硬换行（x/ansi v0.10.1 的 Hardwrap，保留 pane 自己的颜色），显示的是换行后的最后 N 行；滚动（滚轮）按换行后的行数算；光标（T24）映射到换行后的行列：行 = 该逻辑行换行后的起始行 + col / inner，列 = col % inner；光标所在逻辑行以及之后的空行逻辑（trimTail / keep）照旧按逻辑行算再换行。宽字符不能被切成半个（Hardwrap 本身处理）。tab 仍先按 8 列展开再换行。不加配置项。
 - 验收：单测 一行 2×inner+3 列的内容在框里占 3 行、尾部可见；颜色跨换行行延续不漏到边框；光标在第 2 段时反色落在第 2 行正确列；宽字符行尾不被切半；滚动按换行后的行数；黑盒 真 tmux 夹具 pane 150 列、预览 60 列，长行尾部文字在框里看得见；截图。
 
-### T57 直通态把真光标放到预览里的光标格（输入法候选框跟着走）（451a2c9 送审）
+### T57 直通态把真光标放到预览里的光标格（输入法候选框跟着走）（通过 @24a88f4 / 17 条；整套 969 条）
 - 用户 2026-10-15（截图 images/24.png）：输入法候选框固定出现在左下角，不跟预览里的输入焦点走；底栏开头还被输入法的预编辑文字（d'fys）盖住。根因（我读 bubbletea v1.3.10 standard_renderer.go flush 得出）：每帧画完后渲染器固定 `CursorPosition(0, len(newLines))` 把终端光标放到最后一行开头，kitty 的输入法候选框和预编辑文字跟终端光标走，所以落在底栏左下角；View 里塞 CUP 序列会被这句覆盖，v1 没有设光标位置的 API。
 - 定稿：直通态（pass-through 有效，预览画着 pane 光标）时，把终端真光标放到预览里光标那一格，并显示（tea.ShowCursor）；离开直通、光标不可画（flag=0 / 滚动 / 超宽）、预览关闭时隐藏（tea.HideCursor）回现状。做法：给 tea.NewProgram 传 tea.WithOutput(w)，w 是嵌入 *os.File（stdout）的包装（必须仍满足 term.File：io.ReadWriter + Fd()，否则 bubbletea 不查窗口尺寸、不收 resize），Write 原样写出后若有待放位置就追加 `\x1b[row;colH`（1 起）；位置由 View 时算出（预览框内光标行列 → 屏幕绝对行列）存进包装（原子 / 锁），渲染器只在画面变化时 flush，光标变了画面也变（反色块在动），所以每次位置变化都会被写出。直通态有真光标时不再画反色块 / 下划线（真光标顶上），非直通态照旧画。实测要求：dev 在真 kitty + tmux（popup 和普通 pane 各一次）开中文输入法在直通里打字，候选框贴着预览里的光标；用 `tmux display-message -p -t <看板 pane> '#{cursor_x} #{cursor_y}'` 核对看板 pane 的光标就是预览里那一格。design.md（m2-preview 光标段）补一句。
 - 验收：单测 直通态 View 后包装收到的位置 = 预览光标格的绝对行列（含卡片区宽度偏移、标题行、边框）；离开直通 → HideCursor 且不再追加；光标不可画 → 不追加；包装 Write 对无位置时字节原样；黑盒 真 tmux 夹具里看板 pane 的 cursor_x/y 等于预览格，tab 回卡片后 cursor_flag=0。
@@ -391,3 +391,4 @@
 - dev a74e6c1（T56/T57 退回 5 条）：review() 显式 c.Stdout = os.Stdout + TestReviewChildStdoutIsTheTerminal；死条件删；previewInner(w) 单一来源 + 91/92 列用例；cursorOut 注释 + TestQuitInPassThroughLeavesNoPosition（真 Program 直通后 Quit，退出 alt screen 后无 CUP）；SGR 从整段 capture 首行延续（TestPreviewWrapColorCarriesAcrossLines：行末 41m 续行红底、reset 清掉、被截掉的前 10 行里开的 44m 到首个显示行）；ponytail 限制：从不 reset 的几千行 capture 前缀会变长，无上限。没重跑真 kitty（光标计算未动）；真 hunk 未在真终端复验。本轮目标 a74e6c1，送复审。
 - reviewer 复审 a74e6c1 通过无必改：bb 黑盒 review 的 stdout 回到 TTY；carry2 场景真 tmux 里预览与 pane 一致；ponytail 限制在用户 22 个真 claude pane 的 capture 上实测前缀最长 618 B、换行后总量不膨胀，接受；变异 25 全杀。备注采纳（老问题，ad287e8 也有）：行尾带底色未 reset 的行，预览补齐空格会把底色一直铺到边框 → box 行里 content 之后先 `\x1b[0m` 再 pad（每行开头重新带 sgr 前缀，不影响跨行延续），dev 补一个 commit。
 - dev 24a88f4（T56 备注）：box 行 `pad(l+"\x1b[0m", inner)`，底色止于文字；TestPreviewWrapBackgroundStopsAtTheText。本轮 T56+T57 目标 24a88f4，送 tester。
+- tester（24a88f4，套件 ee28934）：整套 969 条 2566 s 零红零重跑。T56 22 条：232 列框内 87 文字格、150 列长行占 2 行拼回原行、100 列看板 3 行、整宽不多空行、宽字符不切半、tab 展开、最后 N 行逐行比对、颜色跨行 / 未 reset 红底续行 / 底色止于文字 / 截掉行里的蓝底延续、光标第 2 段 +13 / 下划线 / 满行后下一行首 / 宽字符挤行 / 超宽改画在换行行、滚轮 ±3 行到顶不动；反向 ad287e8 16 红、164ce6f 2 红。T57 17 条：进直通即在格上、打字 / 宽字符 +4 / 换行 / 折行 +13 / 超宽跟走、块不画、Tab 回卡 / p 关 / 99 列 / session is gone / pane 隐藏 / 滚轮上滚 → flag 0、退出后无 CUP 末序列 ?25h（q / Q）、d 起的 review 子进程 stdin / stdout 都是 TTY 且往返后直通仍工作；反向 451a2c9 2 红、ad287e8 14 红。t24 两条旧用例改。备忘：滚轮一格 = 3 个换行后的行（board 一直 ±3，不是需求变更）；滚动后窗口末行少一行（光标空行不显示）。没覆盖：输入法候选框、真 kitty 渲染、popup 路径光标（dev 自测过）、Linux、ghostty、DECSCUSR、真 hunk 排版。
