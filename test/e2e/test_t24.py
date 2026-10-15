@@ -92,13 +92,17 @@ class Shapes(CursorBase):
         self.open_preview_on(); r, c = self.text_col("abc")
         self.assertEqual(self.marked("rev"), [(r, c + 6)], "the cursor sits on a blank cell after trailing spaces: still drawn as a block")
 
-    def test_the_cursor_is_drawn_in_the_passthrough_and_follows_the_typing(self):
+    def real(self):
+        o = tm("display-message", "-p", "-t", self.t.name, "#{cursor_x} #{cursor_y} #{cursor_flag}").stdout.split(); return tuple(int(v) for v in o)
+
+    def test_the_cursor_in_the_passthrough_is_the_real_one_and_follows_the_typing(self):
+        # T57: with the keys on the pane the board's own terminal cursor sits on that cell (and is shown); the cell is not drawn as a block any more (test_t57 has the rest)
         tm("respawn-pane", "-k", "-t", self.panes["a1"], CAT_CMD); time.sleep(0.8)
-        self.open_preview_on(); self.press("Tab"); time.sleep(0.5)
+        self.open_preview_on(); self.assertEqual(len(self.marked("rev")), 1, "not in the pass-through: the block"); self.press("Tab"); time.sleep(0.5)
         self.t.lit("xyz"); time.sleep(0.9)
-        r, c = self.text_col("xyz"); self.assertEqual(self.marked("rev"), [(r, c + 3)], "right after what was typed")
+        r, c = self.text_col("xyz"); self.assertEqual(self.marked("rev"), [], "the real cursor is there instead"); self.assertEqual(self.real(), (c + 3, r, 1), "right after what was typed")
         self.t.lit("!"); time.sleep(0.9)
-        r, c = self.text_col("xyz!"); self.assertEqual(self.marked("rev"), [(r, c + 4)], "and it moved with the next character (refreshed with every capture)")
+        r, c = self.text_col("xyz!"); self.assertEqual(self.marked("rev"), []); self.assertEqual(self.real(), (c + 4, r, 1), "and it moved with the next character (refreshed with every capture)")
 
     def test_nothing_is_drawn_without_a_preview(self):
         self.assertIsNone(self.pv()); self.assertNotIn("\x1b[7m \x1b[0m", self.t.raw().split("\n")[0])
@@ -128,9 +132,9 @@ class Geometry(CursorBase):
         self.assertEqual(rev[0][1], x + 2, "in the first text column")
         above = "".join(c[0] for c in rows[-2][1][x + 1:]).split("│")[0].strip(); self.assertEqual(above, "200")
 
-    def test_a_cursor_column_outside_the_preview_is_not_drawn(self):
-        tm("respawn-pane", "-k", "-t", self.panes["a1"], sh("printf \"%95s\" x")); time.sleep(0.8)  # the pane is 100 wide: cursor_x = 95, the preview inner width is 92
-        self.open_preview_on(); self.assertEqual(self.marked("rev"), []); self.assertEqual(self.marked("ul"), [])
+    def test_a_cursor_column_past_the_box_width_is_drawn_on_the_wrapped_row(self):
+        tm("respawn-pane", "-k", "-t", self.panes["a1"], sh("printf \"%95s\" x")); time.sleep(0.8)  # the pane is 100 wide: cursor_x = 95; the box takes 87 a row (T56: the line wraps, the cursor goes with it; before T56 it was left out)
+        self.open_preview_on(); r, c = self.text_col("x"); self.assertEqual(self.marked("rev"), [(r, c + 1)], "right after the x, on the 2nd row of the wrapped line"); self.assertEqual(self.marked("ul"), [])
 
     def test_scrolling_back_hides_it_and_returning_to_the_bottom_brings_it_back(self):
         tm("respawn-pane", "-k", "-t", self.panes["a1"], sh("seq 1 200")); time.sleep(1.2)
