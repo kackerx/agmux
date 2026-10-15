@@ -14,6 +14,14 @@ import (
 // written too: where the pane's cursor is, in the preview.
 //
 // It embeds *os.File so that it is still a term.File: bubbletea reads the window size from it.
+//
+// Only Write appends the position. The renderer's own sequences (alt screen, show / hide cursor)
+// go out through io.WriteString, which finds the promoted (*os.File).WriteString and so never
+// comes here: nothing is appended after the one that leaves the alt screen, where the position
+// would land on the main screen. Giving cursorOut a WriteString would break that.
+//
+// Nor is it an *os.File: a child run with tea.ExecProcess whose Stdout is nil gets the program's
+// output, and as a pipe it is no terminal (see Model.review).
 type cursorOut struct {
 	*os.File
 	mu  sync.Mutex

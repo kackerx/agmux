@@ -166,3 +166,43 @@ func TestPassThroughCursorMoveChangesFrame(t *testing.T) {
 		t.Error("a block is drawn under the terminal's cursor")
 	}
 }
+
+// The program quits in pass-through: nothing is written after the alt screen is left, or the
+// position would land on the main screen. (The renderer's escapes go through WriteString, which
+// cursorOut does not override.)
+func TestQuitInPassThroughLeavesNoPosition(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := cursorModel("abc\n", &cursor{row: 0, col: 1})
+	m.curOut = &cursorOut{File: w}
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(m.curOut), tea.WithInput(nil), tea.WithoutSignalHandler())
+	done := make(chan []byte)
+	go func() { b, _ := io.ReadAll(r); done <- b }()
+	go func() { time.Sleep(300 * time.Millisecond); p.Quit() }()
+	if _, err := p.Run(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	out := string(<-done)
+	if !strings.Contains(out, "\x1b[5;") && !strings.Contains(out, "\x1b[4;") { // it did place the cursor while it ran
+		t.Errorf("no position written while running: %q", out)
+	}
+	i := strings.LastIndex(out, "\x1b[?1049l")
+	if i < 0 {
+		t.Fatalf("no alt-screen exit in %q", out)
+	}
+	if strings.Contains(out[i:], "H") {
+		t.Errorf("written after the alt screen was left: %q", out[i:])
+	}
+}
+
+// ccmux review runs with the terminal itself as stdout: left nil, bubbletea would hand the child
+// the program's output, which is cursorOut and so a pipe, and hunk would lay out for 80 columns.
+func TestReviewChildStdoutIsTheTerminal(t *testing.T) {
+	m := wide(&fakeRunner{}, 232, 50)
+	if cmd, _ := m.review(sessions[0]); cmd.Stdout != os.Stdout {
+		t.Errorf("Stdout is %v, want os.Stdout", cmd.Stdout)
+	}
+}

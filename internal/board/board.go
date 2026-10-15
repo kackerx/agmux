@@ -241,7 +241,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.sendErr { // the key didn't reach the pane: say so where errors go
 			m.msg = fg(cRed, " "+firstLine(msg.err.Error()))
 		} else if msg.err == nil {
-			rows, _, _ := wrapRows(tail(msg.text, 1<<30), previewW(m.w)-5, nil)
+			rows, _, _ := wrapRows(tail(msg.text, 1<<30), previewInner(previewW(m.w)), nil)
 			m.pvLines = len(rows)
 		}
 		// the focus moved while this capture was in flight: get the pane it is on now
@@ -911,6 +911,7 @@ func (m Model) say(c lipgloss.Color, text string) Model {
 // copy is kept so a failure shows ccmux's last word instead of a bare "exit status 1".
 func (m Model) review(s store.Session) (*exec.Cmd, tea.ExecCallback) {
 	c := m.run.Interactive("review", s.ID)
+	c.Stdout = os.Stdout // left nil, bubbletea gives it the program's output: cursorOut is not a file, so the child would get a pipe
 	var buf bytes.Buffer
 	c.Stderr = io.MultiWriter(os.Stderr, &buf)
 	return c, func(err error) tea.Msg {

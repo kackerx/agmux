@@ -17,6 +17,9 @@ const (
 	previewMinW    = 60
 )
 
+// previewInner is the columns of text in a w-wide preview: one of gap from the cards, then "│ " … " │".
+func previewInner(w int) int { return w - 1 - 4 }
+
 // previewW is the preview's share of a w-wide terminal: 40%, at least previewMinW.
 func previewW(w int) int { return max(previewMinW, w*40/100) }
 
@@ -104,7 +107,7 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 // goes there: the cell is left as it is, but for a sequence that changes nothing, so that the
 // frame changes when the cursor moves and the cursor is put where it now is.
 func previewBox(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focused bool) ([]string, int, int) {
-	inner := w - 1 - 4 // one column of gap from the cards, then "│ " … " │"
+	inner := previewInner(w)
 	title := ""
 	var content []string
 	curRow, curCol := -1, 0 // the row and column of the box the pane's cursor is on, if it is drawn
@@ -159,7 +162,7 @@ func previewBox(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focus
 		out = append(out, " "+fg(border, "│")+" "+pad(l, inner)+"\x1b[0m "+fg(border, "│"))
 	}
 	out = append(out, " "+fg(border, "╰"+strings.Repeat("─", inner+2)+"╯"))
-	if !drawn || 2+curRow >= h { // below the region, on a terminal too short for the box
+	if !drawn {
 		return out[:h], -1, -1
 	}
 	return out[:h], 2 + curRow, 3 + curCol // below the title and the top border; in from the gap, the border and its space
@@ -190,9 +193,14 @@ func paintCursor(l string, c *cursor, col int, real bool) string {
 // lands among the rows (the cell after the end of its line may need a row of its own).
 func wrapRows(lines []string, inner int, cur *cursor) (rows []string, row, col int) {
 	row = -1 // the cursor is not among them
+	// tmux ends a line without a reset when its last cell is colored, and does not repeat the color
+	// on the next: so what is in force goes on across lines, from the first line of the capture
+	// (the lines above the rows shown may be where it was set).
+	// ponytail: the state is every sequence since the last reset: a long capture that never resets
+	// makes every row's prefix as long.
+	sgr := ""
 	for i, l := range lines {
 		parts := strings.Split(ansi.Hardwrap(l, inner, true), "\n")
-		sgr := ""
 		for j, p := range parts {
 			parts[j] = sgr + p
 			sgr = activeSGR(parts[j])

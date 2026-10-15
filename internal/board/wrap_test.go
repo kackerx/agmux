@@ -1,6 +1,7 @@
 package board
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -150,4 +151,47 @@ func TestPreviewWrapCursorAfterWrappedLines(t *testing.T) {
 	if !strings.Contains(noResets(box[2+3]), "h"+noResets(lipgloss.NewStyle().Reverse(true).Render("e"))+"llo") {
 		t.Errorf("%q", box[2+3])
 	}
+}
+
+// tmux ends a line without a reset when its last cell is colored and does not repeat the color on
+// the next line: the color goes on, also from lines above the rows that show.
+func TestPreviewWrapColorCarriesAcrossLines(t *testing.T) {
+	box := wrapBox("first \x1b[41mred\nsecond\n\x1b[0mthird\n", nil, 12, 0)
+	if !strings.Contains(box[3], "\x1b[41m") || !strings.Contains(box[4], "\x1b[0mthird") { // a reset right after the carried red
+		t.Errorf("the next line is still red, and the one after a reset is not: %q %q", box[3], box[4])
+	}
+	var b strings.Builder
+	b.WriteString("\x1b[44mblue starts here\n")
+	for i := range 19 {
+		fmt.Fprintf(&b, "line%02d\n", i)
+	}
+	box = wrapBox(b.String(), nil, 12, 0) // the last 9 rows show; the blue was set far above them
+	if got := inside(box); got[0] != "line10" || !strings.Contains(box[2], "\x1b[44m") {
+		t.Errorf("first row %q: %q", got[0], box[2])
+	}
+}
+
+// The text of a box is previewInner wide, in every place that counts it: a capture of exactly
+// that many columns is one row, one more is two.
+func TestPreviewInnerWidth(t *testing.T) {
+	w := previewW(240) // 96
+	if n := previewInner(w); n != 91 {
+		t.Fatalf("inner %d", n)
+	}
+	for text, want := range map[string]int{strings.Repeat("x", 91): 1, strings.Repeat("x", 92): 2} {
+		m := wide(&fakeRunner{}, 240, 50)
+		m, _ = press(t, m, "p")
+		tm, _ := m.Update(previewMsg{pane: "%1", text: text + "\n"})
+		if n := tm.(Model).pvLines; n != want {
+			t.Errorf("%d columns: pvLines %d, want %d", len(text), n, want)
+		}
+		if rows := inside(previewBoxLines(text, w)); len(rows) < want || (want == 2 && rows[1] != "x") || (want == 1 && rows[1] != "") {
+			t.Errorf("%d columns: rows %q", len(text), rows[:2])
+		}
+	}
+}
+
+func previewBoxLines(text string, w int) []string {
+	s := store.Session{ID: "a", Name: "n", TmuxPane: "%1", Status: "idle", ContextPct: -1}
+	return previewLines(s, true, previewMsg{pane: "%1", text: text + "\n"}, w, 12, 0, false)
 }
