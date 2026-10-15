@@ -375,3 +375,13 @@
 - dev ad287e8（T55 建议）：mark_read 改 Cmd 里 MarkSeen 后返回 doneMsg{ok: "read "+name, err}；msg 颜色 muted 断言；新增 TestMarkReadFails（失败底栏红、不写 read x）；探针 1 杀。本轮 T54+T55 目标 ad287e8，送 tester。
 - tester（ad287e8，套件 31d19d8）：整套 930 条 2428 s，1 error 是 t18 sweep 读到重绘截断（用例问题，改重读后 38 条三遍绿，改后未再整套跑）。T54 10 条：a 关框不写 avatars.json / 不改头像 / 不发命令、光标回到穿戴的、a a a、esc q 仍关其它键无反应、滚动态也关、改键 A / q、config 注释；反向 9 红。T55 26 条：卡变 idle 与底栏 read x 同一 capture（几十 ms）、muted、seen.json 同一条、只动焦点卡、二次 m 无反应、working / waiting / idle / 折叠无反应、重启仍 idle、statusChangedAt 变了重新 done、坏文件不覆盖不假报、只读目录报错、搜索 / flash / 选择框 / kill 确认 / 直通 / 真 tmux --stay 弹窗、config 行 / 改键 / [] / 占键 / pin=["m"]；反向 87a809e 14 红、7e22c45 仅「同一帧」1 红（证实建议 1 有效）。备忘：无 statusChangedAt 的 done 卡按 m 底栏写 read x 但不变 idle。没覆盖：真 kitty、Linux、用户真实 config、真 claude 会话。
 - 2026-10-15 15:45 已装 ad287e8（干净 clone，vcs.modified=false）。T46–T55 待用户验收。
+
+### T56 预览窗口长行自动换行（待做）
+- 用户 2026-10-15（截图 images/24.png）：预览里内容不换行，pane 比预览宽时行尾看不到。现状：previewLines 把每行 ansi.Truncate 到框内宽度，是 M2 的设计取舍，不是 bug，但要改。
+- 定稿：预览框内每一行按框内宽度硬换行（x/ansi v0.10.1 的 Hardwrap，保留 pane 自己的颜色），显示的是换行后的最后 N 行；滚动（滚轮）按换行后的行数算；光标（T24）映射到换行后的行列：行 = 该逻辑行换行后的起始行 + col / inner，列 = col % inner；光标所在逻辑行以及之后的空行逻辑（trimTail / keep）照旧按逻辑行算再换行。宽字符不能被切成半个（Hardwrap 本身处理）。tab 仍先按 8 列展开再换行。不加配置项。
+- 验收：单测 一行 2×inner+3 列的内容在框里占 3 行、尾部可见；颜色跨换行行延续不漏到边框；光标在第 2 段时反色落在第 2 行正确列；宽字符行尾不被切半；滚动按换行后的行数；黑盒 真 tmux 夹具 pane 150 列、预览 60 列，长行尾部文字在框里看得见；截图。
+
+### T57 直通态把真光标放到预览里的光标格（输入法候选框跟着走）（待做）
+- 用户 2026-10-15（截图 images/24.png）：输入法候选框固定出现在左下角，不跟预览里的输入焦点走；底栏开头还被输入法的预编辑文字（d'fys）盖住。根因（我读 bubbletea v1.3.10 standard_renderer.go flush 得出）：每帧画完后渲染器固定 `CursorPosition(0, len(newLines))` 把终端光标放到最后一行开头，kitty 的输入法候选框和预编辑文字跟终端光标走，所以落在底栏左下角；View 里塞 CUP 序列会被这句覆盖，v1 没有设光标位置的 API。
+- 定稿：直通态（pass-through 有效，预览画着 pane 光标）时，把终端真光标放到预览里光标那一格，并显示（tea.ShowCursor）；离开直通、光标不可画（flag=0 / 滚动 / 超宽）、预览关闭时隐藏（tea.HideCursor）回现状。做法：给 tea.NewProgram 传 tea.WithOutput(w)，w 是嵌入 *os.File（stdout）的包装（必须仍满足 term.File：io.ReadWriter + Fd()，否则 bubbletea 不查窗口尺寸、不收 resize），Write 原样写出后若有待放位置就追加 `\x1b[row;colH`（1 起）；位置由 View 时算出（预览框内光标行列 → 屏幕绝对行列）存进包装（原子 / 锁），渲染器只在画面变化时 flush，光标变了画面也变（反色块在动），所以每次位置变化都会被写出。直通态有真光标时不再画反色块 / 下划线（真光标顶上），非直通态照旧画。实测要求：dev 在真 kitty + tmux（popup 和普通 pane 各一次）开中文输入法在直通里打字，候选框贴着预览里的光标；用 `tmux display-message -p -t <看板 pane> '#{cursor_x} #{cursor_y}'` 核对看板 pane 的光标就是预览里那一格。design.md（m2-preview 光标段）补一句。
+- 验收：单测 直通态 View 后包装收到的位置 = 预览光标格的绝对行列（含卡片区宽度偏移、标题行、边框）；离开直通 → HideCursor 且不再追加；光标不可画 → 不追加；包装 Write 对无位置时字节原样；黑盒 真 tmux 夹具里看板 pane 的 cursor_x/y 等于预览格，tab 回卡片后 cursor_flag=0。
