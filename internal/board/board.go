@@ -113,6 +113,9 @@ type Model struct {
 	scrolled  bool       // the cards were scrolled by the wheel or page keys, not by the focus: top is the offset
 	top       int        // lines scrolled off the top of the cards while scrolled; the focus leaving the view ends it
 
+	curOut *cursorOut // where the terminal cursor is put (nil: nowhere, as in the tests)
+	curOn  bool       // the terminal cursor is shown
+
 	cfg    *config.Config
 	keymap map[string]string // key (as KeyMsg.String() spells it) → action
 }
@@ -155,7 +158,8 @@ func Run(p *store.Poller, cfg *config.Config, img ImageMode, stay bool) error {
 	if len(lines) > 0 {
 		m = m.say(cRed, strings.Join(lines, "; "))
 	}
-	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	m.curOut = &cursorOut{File: os.Stdout}
+	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithOutput(m.curOut)).Run()
 	if err != nil && img.On && os.Getenv("TMUX") == "" { // the upload switched screens: bubbletea may not have switched back
 		io.WriteString(os.Stdout, "\x1b[?1049l")
 	}
@@ -199,7 +203,7 @@ func (m Model) askPopup() tea.Cmd {
 	}
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -1238,8 +1242,12 @@ func (m Model) View() string {
 	}
 	_, _, focused, ok := m.current()
 	var right []string
+	cx, cy := -1, -1
 	if m.previewOn() {
-		right = previewLines(focused, ok, m.pv, m.w-m.cardsW(), max(m.h-3, 1), m.scroll, m.passThrough())
+		right, cx, cy = m.pvBox()
+	}
+	if m.curOut != nil {
+		m.curOut.place(cx, cy)
 	}
 	ss, hits := m.shown()
 	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits, m.pin(), m.groupMode())

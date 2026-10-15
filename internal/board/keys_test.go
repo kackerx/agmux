@@ -3168,8 +3168,8 @@ func TestBoardShowsPaneCursor(t *testing.T) {
 		t.Fatalf("browsing: no cursor\n%s", ansi.Strip(m.View()))
 	}
 	m.pvFocus, m.pvID, m.pvPane = true, "a1", "%1"
-	if !strings.Contains(noResets(m.View()), want) {
-		t.Error("pass-through: no cursor")
+	if v := m.View(); !strings.Contains(noResets(v), noResets("abc\x1b[27md")+"ef") || strings.Contains(v, "\x1b[7m") {
+		t.Error("pass-through: the terminal's own cursor is on that cell, no block is drawn") // see T57
 	}
 	m.scroll = 3
 	if strings.Contains(m.View(), "\x1b[7m") {

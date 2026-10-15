@@ -95,6 +95,15 @@ func (m *Model) capture() tea.Cmd {
 //	│ …the pane's last lines…      │
 //	╰──────────────────────────────╯
 func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focused bool) []string {
+	out, _, _ := previewBox(s, ok, pv, w, h, scroll, focused)
+	return out
+}
+
+// previewBox is previewLines and the row and column of the pane's cursor in those lines: -1 when it
+// isn't drawn. Keys going to the pane (focused) with the cursor drawn, the terminal's own cursor
+// goes there: the cell is left as it is, but for a sequence that changes nothing, so that the
+// frame changes when the cursor moves and the cursor is put where it now is.
+func previewBox(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focused bool) ([]string, int, int) {
 	inner := w - 1 - 4 // one column of gap from the cards, then "│ " … " │"
 	title := ""
 	var content []string
@@ -136,29 +145,38 @@ func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, foc
 		border = cFocus
 	}
 	out = append(out, " "+fg(border, "╭"+strings.Repeat("─", inner+2)+"╮"))
+	drawn := false // the cursor is on a row of the box
 	for i := range max(h-3, 0) {
 		l := ""
 		if i < len(content) {
 			l = ansi.Truncate(content[i], inner, "")
 		}
 		if i == curRow && curCol >= 0 && curCol < inner {
-			l = ansi.Truncate(paintCursor(l, pv.cur, curCol), inner, "")
+			l = ansi.Truncate(paintCursor(l, pv.cur, curCol, focused), inner, "")
+			drawn = true
 		}
 		// the reset keeps the pane's own colors from bleeding into the border
 		out = append(out, " "+fg(border, "│")+" "+pad(l, inner)+"\x1b[0m "+fg(border, "│"))
 	}
 	out = append(out, " "+fg(border, "╰"+strings.Repeat("─", inner+2)+"╯"))
-	return out[:h]
+	if !drawn || 2+curRow >= h { // below the region, on a terminal too short for the box
+		return out[:h], -1, -1
+	}
+	return out[:h], 2 + curRow, 3 + curCol // below the title and the top border; in from the gap, the border and its space
 }
 
 // paintCursor draws the pane's cursor on its line l: a block is the cell in reverse video, a bar or
-// underline (a terminal can't draw a thin line here) the cell underlined in the focus color.
-func paintCursor(l string, c *cursor, col int) string {
+// underline (a terminal can't draw a thin line here) the cell underlined in the focus color. With
+// the terminal's own cursor on it (real), the cell is only marked by a sequence that changes nothing.
+func paintCursor(l string, c *cursor, col int, real bool) string {
 	cell := " " // past the end of the text, an empty cell
 	for _, g := range clustersOf(ansi.Strip(l)) {
 		if g.x == col { // a wide character is one cell of the cursor, two columns wide
 			cell = g.s
 		}
+	}
+	if real {
+		return put(l, col, "\x1b[27m"+cell)
 	}
 	style := lipgloss.NewStyle().Reverse(true)
 	if c.bar {
