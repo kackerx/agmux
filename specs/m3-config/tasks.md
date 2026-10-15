@@ -360,12 +360,12 @@
 - tester（87a809e，套件 05bd73f）：整套 894 条跑一次 6 红全查清（t17/t50 键位表加 pin；t18/t30/t44 是用例或采样毛病），改后受影响 9 文件 211 条只剩 t30 一条重绘半截帧，再读后两遍绿（两处改动合起来未再整套跑）。T52 新 10 条：80×40 画 5 行无提示、25/26/30/31 套行数、80×24 边框 `↑/↓ n more` muted 且计数按屏上格子反推、16 种高度 × 卡位与 gridPlace 一致且不盖自己的卡、一行放得下贴卡、截图 scratchpad/shot52.txt；反向 fb91e04 8/10 红。T53 新 29 条：t 置顶 `▲ ` focus 色 + `pinned x`、多张按先后、`t t` 终态未置顶、四种分组仍最前、重启不变、改 id 模拟 r 仍置顶、空列表 / 缺席 4 s 不丢、30 s 在 60 s 后清（实测 55–85 s，单跑 70 s+）、同名一起、另一看板几秒同步、折叠 / 搜索 / flash 不受影响、坏文件当空不覆盖、超长中文名、config pin 行 / 改键 / 占键 / `[]` 报错；反向 25/29 红。没做：真 claude 会话按 r（tester 禁区，留用户验收）、两看板同时按 t 竞态、真 kitty 截图、真 tmux popup 选择框、Linux。观察（备忘）：无 AGMUX_CLIENT 时板子按 client_activity（秒级）挑 client，往 popup 敲键不刷新用户 client 的 activity，两个 client 同秒活跃可能挑错；真实使用 launcher 设 AGMUX_CLIENT，不致命。harness 修了 parse_screen 颜色跨行延续（tmux capture -e 颜色不变不重写 SGR）。
 - 2026-10-14 17:42 已装 87a809e（干净 clone，vcs.modified=false）。T46–T53 待用户验收。备忘：`agmux --version` 不存在，只能 `go version -m ~/go/bin/agmux` 看；以后单开。
 
-### T54 选择框里 `avatar` 键（默认 a）也关闭选择框（dbc068f 送审）
+### T54 选择框里 `avatar` 键（默认 a）也关闭选择框（通过 @ad287e8 / 10 条）
 - 用户 2026-10-15：头像选框里除了 esc 外，a 也能关，即 a 是开关键。
 - 定稿：选择框打开时，按 `avatar` 动作绑定的键（默认 a）关闭选择框，等同 esc / quit：不改头像、不写文件、光标位置不保留（下次打开仍停在当前穿戴的那个）。其它键行为不变。README 键位一句 / `agmux config` 的 avatar 注释改成 "open or close the avatar picker"。
 - 验收：单测 a 开再 a 关回到 browsing 且 SetAvatar 未被调用；改键（avatar = ["A"]）后 A 开 A 关、a 在选择框里无反应；黑盒 真 tmux 夹具 a a 框消失、绑定文件不变。
 
-### T55 一键已读：动作 `mark_read`，默认键 `m`（7e22c45 送审）
+### T55 一键已读：动作 `mark_read`，默认键 `m`（通过 @ad287e8 / 26 条；整套 930 条）
 - 用户 2026-10-15：除了现有的 tab / 预览打开 / enter 会变已读，加一个 m 直接把 done 变 idle，不用打开预览。
 - 定稿：新动作 `mark_read`，默认键 `m`。焦点卡是 done 时按下，走和预览 / enter 完全相同的已读路径（MarkSeen，同一个 seen.json），卡立即变 idle，底栏一行 `read x`（muted）。焦点卡不是 done、或焦点在折叠的组标题上：无反应、无提示。搜索框 / 直通 / flash / 选择框里 m 仍是输入或无反应。底栏不加提示（同 pin）。`agmux config` 键位表加 `mark_read = ["m"]  # default: m — mark the focused card's done as seen (it turns idle)`，golden 同步；README 键位一句。
 - 验收：单测 done 卡按 m → MarkSeen 被调一次、卡 Done=false、底栏 read x；非 done 按 m 无调用无提示；折叠标题无调用；改键 / `[]` 报错（普通动作，同 pin；只有 group_* 允许空）/ 占键报错；黑盒 真 tmux 夹具 done 卡按 m 立即 idle、重启看板仍 idle、状态再变后重新 done。
@@ -373,3 +373,4 @@
 - dev 7e22c45（T55）：Actions 加 mark_read 默认 m；case 先判 !s.Done 返回，再 say read x + markSeen；TestMarkReadKey / TestMarkReadRebound / config TestMarkReadKeys；探针 4 杀。定夺：`[]` 报错不禁用（同 pin）。本轮目标 7e22c45。
 - reviewer（7e22c45）通过无必改：真 Poller 探针证实按 m 后 Done=false、seen.json 写入、重启仍 idle、状态变更后重新 done；m 在搜索 / 直通 / 选择框 / flash / kill 确认里都不触发；avatar 与 quit 不可能同键，avatar=["q"] 开关不退出；变异 12 杀 11。采纳建议 1 后半：markSeen 的 Cmd 返回 nil 不触发重绘，按 m 后卡要等下一帧（≤500 ms）才变 idle → mark_read 改成 Cmd 里 MarkSeen 后返回 doneMsg{ok: "read "+name}，底栏与 idle 同帧出现。采纳建议 2：断言 msg 颜色 muted。不做：ccmux 没给 statusChangedAt 的 done 卡按 m 仍写 read x 而不变 idle（用户 10 张 done 卡都带时间，备忘）。
 - dev ad287e8（T55 建议）：mark_read 改 Cmd 里 MarkSeen 后返回 doneMsg{ok: "read "+name, err}；msg 颜色 muted 断言；新增 TestMarkReadFails（失败底栏红、不写 read x）；探针 1 杀。本轮 T54+T55 目标 ad287e8，送 tester。
+- tester（ad287e8，套件 31d19d8）：整套 930 条 2428 s，1 error 是 t18 sweep 读到重绘截断（用例问题，改重读后 38 条三遍绿，改后未再整套跑）。T54 10 条：a 关框不写 avatars.json / 不改头像 / 不发命令、光标回到穿戴的、a a a、esc q 仍关其它键无反应、滚动态也关、改键 A / q、config 注释；反向 9 红。T55 26 条：卡变 idle 与底栏 read x 同一 capture（几十 ms）、muted、seen.json 同一条、只动焦点卡、二次 m 无反应、working / waiting / idle / 折叠无反应、重启仍 idle、statusChangedAt 变了重新 done、坏文件不覆盖不假报、只读目录报错、搜索 / flash / 选择框 / kill 确认 / 直通 / 真 tmux --stay 弹窗、config 行 / 改键 / [] / 占键 / pin=["m"]；反向 87a809e 14 红、7e22c45 仅「同一帧」1 红（证实建议 1 有效）。备忘：无 statusChangedAt 的 done 卡按 m 底栏写 read x 但不变 idle。没覆盖：真 kitty、Linux、用户真实 config、真 claude 会话。
