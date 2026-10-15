@@ -89,7 +89,8 @@ def sweep(t, n=None, visit=None, step=0.1):
     visit(ov) is called at every step (a place to read t.raw() for the pictures in the cells)."""
     to_start(t); n = n or len(LISTING) + 2; out, seen = [], set()
     for _ in range(n):
-        ov = overlay(t.snap())
+        ov = wait(lambda: overlay(t.snap()), 2, 0.05)  # a capture torn by a repaint has no grid: read again
+        assert ov, t.text()
         if visit: visit(ov)
         for r in ov["rows"]:
             if r["id"] not in seen: seen.add(r["id"]); out.append(r)
