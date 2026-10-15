@@ -547,3 +547,23 @@ func TestGroupDirectActions(t *testing.T) {
 		t.Errorf("printed:\n%s", out)
 	}
 }
+
+// mark_read is m by default; rebound it is the new key only; like the other actions it must keep a
+// key, and two actions may not both ask for one.
+func TestMarkReadKeys(t *testing.T) {
+	if Default().KeyMap()["m"] != "mark_read" {
+		t.Errorf("default: %v", Default().KeyMap())
+	}
+	if c, err := Parse("cfg", []byte("[keys]\nmark_read = [\"M\"]\n")); err != nil || c.KeyMap()["M"] != "mark_read" || c.KeyMap()["m"] != "" {
+		t.Errorf("rebound: %v %v", err, c.KeyMap())
+	}
+	if _, err := Parse("cfg", []byte("[keys]\nmark_read = []\n")); err == nil || !strings.Contains(err.Error(), "keys.mark_read: needs at least one key") {
+		t.Errorf("mark_read = []: %v", err)
+	}
+	if _, err := Parse("cfg", []byte("[keys]\nmark_read = [\"x\"]\nkill = [\"x\"]\n")); err == nil || !strings.Contains(err.Error(), "already bound to") {
+		t.Errorf("a key for two actions: %v", err)
+	}
+	if c, err := Parse("cfg", []byte("[keys]\npin = [\"m\"]\n")); err != nil || c.KeyMap()["m"] != "pin" || len(c.Keys["mark_read"]) != 0 {
+		t.Errorf("m taken from the default's owner: %v %v", err, c.Keys["mark_read"])
+	}
+}

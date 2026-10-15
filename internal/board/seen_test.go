@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -121,5 +122,62 @@ func TestSeenFailure(t *testing.T) {
 	m, _ = press(t, m, "p")
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "seen.json: not valid JSON") {
 		t.Errorf("no error on the board:\n%s", v)
+	}
+}
+
+// m marks the focused done card as seen, as the preview does, without opening anything: it turns
+// idle at once and the footer says so. Not on a done card, or on a folded title: nothing.
+func TestMarkReadKey(t *testing.T) {
+	m, src, r := seenModel()
+	m, _ = press(t, m, "m")
+	if !reflect.DeepEqual(src.marked, []string{"d1"}) || src.staticSrc[0].Done || m.preview || len(r.calls) != 0 {
+		t.Errorf("marked %v, d1 done %v, preview %v, calls %q", src.marked, src.staticSrc[0].Done, m.preview, r.calls)
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "read one") {
+		t.Errorf("no read message:\n%s", v)
+	}
+	for name, keys := range map[string][]string{
+		"idle card":    {"m", "m"}, // the second one: d1 is idle by then
+		"working card": {"l", "m"},
+		"folded title": {"f", "m"}, // f folds the card's group and leaves the focus on its title
+	} {
+		m, src, _ := seenModel()
+		m, _ = press(t, m, keys...)
+		want := 0
+		if name == "idle card" {
+			want = 1 // only the first m
+		}
+		if len(src.marked) != want || strings.Contains(ansi.Strip(m.View()), "read three") {
+			t.Errorf("%s: marked %v", name, src.marked)
+		}
+	}
+	// no message when there was nothing to mark
+	m, _, _ = seenModel()
+	if m, _ = press(t, m, "l", "m"); m.msg != "" {
+		t.Errorf("m on a working card said %q", m.msg)
+	}
+}
+
+// m is the key of mark_read, and only while it is: rebound, M works and m does not. In the search
+// box, the pass-through and the picker m is not the action.
+func TestMarkReadRebound(t *testing.T) {
+	cfg, err := config.Parse("cfg", []byte("[keys]\nmark_read = [\"M\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, src, _ := seenModel()
+	m.cfg, m.keymap = cfg, cfg.KeyMap()
+	if m, _ = press(t, m, "m"); len(src.marked) != 0 {
+		t.Errorf("m after rebinding: marked %v", src.marked)
+	}
+	if m, _ = press(t, m, "M"); !reflect.DeepEqual(src.marked, []string{"d1"}) {
+		t.Errorf("M: marked %v", src.marked)
+	}
+	for name, keys := range map[string][]string{"search": {"/", "m"}, "pass-through": {"l", "i", "m"}, "picker": {"a", "m"}} {
+		m, src, _ := seenModel() // the pass-through is on the working card: i on a done one marks it
+		m, _ = press(t, m, keys...)
+		if len(src.marked) != 0 {
+			t.Errorf("%s: m marked %v", name, src.marked)
+		}
 	}
 }

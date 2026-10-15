@@ -23,7 +23,7 @@ import (
 // Actions, in the order `agmux config` prints them.
 var Actions = []string{
 	"up", "down", "left", "right", "page_down", "page_up", "jump", "fold", "preview", "focus_preview", "leave_preview",
-	"reply", "handoff", "search", "next_match", "prev_match", "flash", "group", "group_cwd", "group_project", "group_session", "group_state", "restart", "kill", "review", "avatar", "pin", "quit", "exit", "confirm",
+	"reply", "handoff", "search", "next_match", "prev_match", "flash", "group", "group_cwd", "group_project", "group_session", "group_state", "restart", "kill", "review", "avatar", "pin", "mark_read", "quit", "exit", "confirm",
 }
 
 var defaultKeys = map[string][]string{
@@ -33,7 +33,7 @@ var defaultKeys = map[string][]string{
 	// search / flash are T19 / T20
 	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "flash": {"s"}, "group": {"g"},
 	"group_cwd": {}, "group_project": {}, "group_session": {}, "group_state": {},
-	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"}, "pin": {"t"},
+	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"}, "pin": {"t"}, "mark_read": {"m"},
 	"quit": {"q", "esc"}, "exit": {"Q"}, "confirm": {"y"},
 }
 
@@ -308,7 +308,7 @@ var actionUse = map[string]string{
 	"group_project": "switch straight to the project grouping", "group_session": "switch straight to the session grouping",
 	"group_state": "switch straight to the state grouping", "restart": "restart the focused session", "kill": "kill the focused session (asks first)",
 	"review": "run `ccmux review` on the focused session", "avatar": "open or close the avatar picker under the focused card",
-	"pin":  "pin the focused card to the top of its group",
+	"pin": "pin the focused card to the top of its group", "mark_read": "mark the focused card's done as seen (it turns idle)",
 	"quit": "with `board --stay` inside a popup: hide instead", "exit": "always quit, even with --stay", "confirm": "answer yes to a prompt",
 }
 

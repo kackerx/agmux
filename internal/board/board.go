@@ -815,6 +815,11 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "mark_read": // what the preview and enter do to a done card, without the jump
+		if !s.Done {
+			return m, nil
+		}
+		return m.say(cMuted, "read "+s.Name), m.markSeen(s)
 	case "pin": // off the UI goroutine: it writes a file
 		src := m.src
 		return m, func() tea.Msg {
