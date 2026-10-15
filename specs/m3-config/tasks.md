@@ -371,3 +371,4 @@
 - 验收：单测 done 卡按 m → MarkSeen 被调一次、卡 Done=false、底栏 read x；非 done 按 m 无调用无提示；折叠标题无调用；改键 / `[]` 报错（普通动作，同 pin；只有 group_* 允许空）/ 占键报错；黑盒 真 tmux 夹具 done 卡按 m 立即 idle、重启看板仍 idle、状态再变后重新 done。
 - dev dbc068f（T54）：pickAvatar 的 quit case 加 "avatar"；README / config 描述 "open or close"；TestAvatarKeyToggles 默认与 ["A"] 两遍、改键后 a 无反应；探针 1 杀。
 - dev 7e22c45（T55）：Actions 加 mark_read 默认 m；case 先判 !s.Done 返回，再 say read x + markSeen；TestMarkReadKey / TestMarkReadRebound / config TestMarkReadKeys；探针 4 杀。定夺：`[]` 报错不禁用（同 pin）。本轮目标 7e22c45。
+- reviewer（7e22c45）通过无必改：真 Poller 探针证实按 m 后 Done=false、seen.json 写入、重启仍 idle、状态变更后重新 done；m 在搜索 / 直通 / 选择框 / flash / kill 确认里都不触发；avatar 与 quit 不可能同键，avatar=["q"] 开关不退出；变异 12 杀 11。采纳建议 1 后半：markSeen 的 Cmd 返回 nil 不触发重绘，按 m 后卡要等下一帧（≤500 ms）才变 idle → mark_read 改成 Cmd 里 MarkSeen 后返回 doneMsg{ok: "read "+name}，底栏与 idle 同帧出现。采纳建议 2：断言 msg 颜色 muted。不做：ccmux 没给 statusChangedAt 的 done 卡按 m 仍写 read x 而不变 idle（用户 10 张 done 卡都带时间，备忘）。
