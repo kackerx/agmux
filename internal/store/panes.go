@@ -11,26 +11,30 @@ import (
 // <id>` in a tmux window; which pane that is, is read off tmux on every poll (not kept in a file:
 // a restarted or a second board finds the same).
 
-// TmuxPanes lists every pane as "<pane id>\t<the command it was started with>" lines.
+// TmuxPanes lists every pane as "<pane id>\t<its session>\t<the command it was started with>" lines.
 func TmuxPanes() (string, error) {
-	out, err := execx.Run("tmux", "list-panes", "-a", "-F", "#{pane_id}\t#{pane_start_command}")
+	out, err := execx.Run("tmux", "list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{pane_start_command}")
 	return string(out), err
 }
 
+// attachedPane is where `claude attach <id>` runs: the pane and the tmux session it is in.
+type attachedPane struct{ pane, session string }
+
 // attachPanes maps a session ID to the first pane that was started with `claude attach <id>`.
-func attachPanes(listing string) map[string]string {
-	panes := map[string]string{}
+func attachPanes(listing string) map[string]attachedPane {
+	panes := map[string]attachedPane{}
 	unquote := strings.NewReplacer(`"`, "", `'`, "")
 	for _, line := range strings.Split(listing, "\n") {
-		pane, cmd, ok := strings.Cut(line, "\t")
-		if !ok || pane == "" {
+		pane, rest, ok := strings.Cut(line, "\t")
+		session, cmd, ok2 := strings.Cut(rest, "\t") // a session name has no tab; the command may
+		if !ok || !ok2 || pane == "" {
 			continue
 		}
 		f := strings.Fields(unquote.Replace(cmd))
 		for i := 1; i+1 < len(f); i++ {
 			if f[i] == "attach" && path.Base(f[i-1]) == "claude" {
 				if _, seen := panes[f[i+1]]; !seen {
-					panes[f[i+1]] = pane
+					panes[f[i+1]] = attachedPane{pane, session}
 				}
 			}
 		}
@@ -59,7 +63,7 @@ func (p *Poller) fillAttached(ss []Session) {
 	panes := attachPanes(out)
 	for i := range ss {
 		if ss[i].Background && ss[i].TmuxPane == "" {
-			ss[i].TmuxPane = panes[ss[i].ID]
+			ss[i].TmuxPane, ss[i].TmuxSession = panes[ss[i].ID].pane, panes[ss[i].ID].session
 		}
 	}
 }

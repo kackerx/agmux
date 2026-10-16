@@ -812,6 +812,9 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 	}
 	switch action {
 	case "handoff":
+		if s.TmuxPane == "" && s.Background { // a window first, as for enter, i and tab
+			return m, m.attach(s, action)
+		}
 		return m.send(s, "/handoff", "sent /handoff → "+s.Name)
 	case "focus_preview", "reply": // open the preview if needed and give it the keys; typing is the reply
 		if s.TmuxPane == "" {

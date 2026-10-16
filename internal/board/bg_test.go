@@ -92,7 +92,7 @@ func attachBoard(r *fakeRunner, extra ...store.Session) Model {
 
 // the session's windows: first one made with new-session, later ones with new-window
 func newSession(pane string) []string {
-	return []string{"tmux", "new-session", "-s", "agmux-bg", "-d", "-n", "bg-probe", "-c", "/w/x", "-P", "-F", "#{pane_id}", "--", "claude", "attach", "b1"}
+	return []string{"tmux", "new-session", "-s", "agmux-bg", "-x", "87", "-y", "44", "-d", "-n", "bg-probe", "-c", "/w/x", "-P", "-F", "#{pane_id}", "--", "claude", "attach", "b1"}
 }
 
 func newWindow() []string {
@@ -221,8 +221,11 @@ func TestAttachedSrcOverlay(t *testing.T) {
 	if pane() != "%9" || a.Sessions()[1].TmuxPane != "" {
 		t.Fatalf("laid over: %q", pane())
 	}
-	if inner.ss[0].TmuxPane != "" {
+	if inner.ss[0].TmuxPane != "" || inner.ss[0].TmuxSession != "" {
 		t.Error("the store's own slice was written to")
+	}
+	if a.Sessions()[0].TmuxSession != "agmux-bg" {
+		t.Errorf("the session of the pane: %q", a.Sessions()[0].TmuxSession)
 	}
 	now = now.Add(9 * time.Second)
 	if pane() != "%9" {
@@ -255,5 +258,38 @@ func TestAttachFooterKeys(t *testing.T) {
 	}
 	if j, _ := lit(bgSession(func(s *store.Session) { s.Background = false })); j {
 		t.Error("enter is lit on a card with no pane that is not a background one")
+	}
+}
+
+// H on a background card with no pane opens the window first, then sends /handoff to it, as it does
+// to any pane.
+func TestAttachOnHandoff(t *testing.T) {
+	r := attachRunner(true)
+	r.tmuxOut["capture-pane"] = "▐▛███▛█   Claude Code\n"
+	press(t, attachBoard(r), "H")
+	if got := callsNamed(r, "new-window"); len(got) != 1 {
+		t.Errorf("windows opened %q", got)
+	}
+	if got := callsNamed(r, "send-keys"); !reflect.DeepEqual(got, sent("%9", "/handoff")) {
+		t.Errorf("sent %q", got)
+	}
+	// nothing is typed before the pane has drawn anything
+	if all := callsNamed(r, "new-window", "capture-pane", "send-keys"); all[0][1] != "new-window" || all[1][1] != "capture-pane" || all[2][1] != "send-keys" {
+		t.Errorf("order: %q", all)
+	}
+	// it waits, and gives up after drawnWait (the keys go anyway: the window may just be a quiet one)
+	drawnWait, drawnPoll = 30*time.Millisecond, 10*time.Millisecond
+	defer func() { drawnWait, drawnPoll = 5*time.Second, 100*time.Millisecond }()
+	r = attachRunner(true) // capture-pane answers nothing
+	start := time.Now()
+	press(t, attachBoard(r), "H")
+	if n := len(callsNamed(r, "capture-pane")); n < 2 || time.Since(start) < 30*time.Millisecond || len(callsNamed(r, "send-keys")) != 2 {
+		t.Errorf("a blank pane: %d polls in %v, %d keys sent", n, time.Since(start), len(callsNamed(r, "send-keys")))
+	}
+	// the other keys do not wait
+	r = attachRunner(true)
+	press(t, attachBoard(r), "i")
+	if n := len(callsNamed(r, "capture-pane")); n != 0 { // (the preview's own capture is a display-message)
+		t.Errorf("i polled the pane %d times", n)
 	}
 }

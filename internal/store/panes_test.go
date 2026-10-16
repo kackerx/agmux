@@ -11,17 +11,18 @@ import (
 // The pane of a background session is the one `claude attach <id>` was started in; quotes and a
 // path before claude do not matter, the first one wins, and anything else is not it.
 func TestAttachPanes(t *testing.T) {
-	listing := "%0\t\n" +
-		"%3\tclaude attach a7a826e7\n" +
-		"%4\t\"claude\" \"attach\" \"b2\"\n" +
-		"%5\t/usr/local/bin/claude attach c3 --extra\n" +
-		"%6\tclaude attach a7a826e7\n" +
-		"%7\tclaude --resume a7a826e7\n" +
-		"%8\tvim attach d4\n" +
-		"%9\tclaude attach\n" +
+	listing := "%0\tmain\t\n" +
+		"%3\tagmux-bg\tclaude attach a7a826e7\n" +
+		"%4\tagmux-bg\t\"claude\" \"attach\" \"b2\"\n" +
+		"%5\tother session\t/usr/local/bin/claude attach c3 --extra\n" +
+		"%6\tagmux-bg\tclaude attach a7a826e7\n" +
+		"%7\tmain\tclaude --resume a7a826e7\n" +
+		"%8\tmain\tvim attach d4\n" +
+		"%9\tmain\tclaude attach\n" +
 		"no tab here\n" +
-		"\tclaude attach e5\n"
-	want := map[string]string{"a7a826e7": "%3", "b2": "%4", "c3": "%5"}
+		"%10\tclaude attach f6\n" +
+		"\tmain\tclaude attach e5\n"
+	want := map[string]attachedPane{"a7a826e7": {"%3", "agmux-bg"}, "b2": {"%4", "agmux-bg"}, "c3": {"%5", "other session"}}
 	if got := attachPanes(listing); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -44,7 +45,7 @@ func TestFillAttached(t *testing.T) {
 	p := &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir(),
 		Panes: func() (string, error) {
 			asked++
-			return "%3\tclaude attach a7\n%4\tclaude attach b2\n%5\tclaude attach c3\n", fail
+			return "%3\tagmux-bg\tclaude attach a7\n%4\tagmux-bg\tclaude attach b2\n%5\tagmux-bg\tclaude attach c3\n", fail
 		}}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
@@ -52,6 +53,9 @@ func TestFillAttached(t *testing.T) {
 	ss := p.Sessions()
 	if got := []string{ss[0].TmuxPane, ss[1].TmuxPane, ss[2].TmuxPane, ss[3].TmuxPane}; !reflect.DeepEqual(got, []string{"%3", "%1", "", ""}) {
 		t.Errorf("panes %q", got)
+	}
+	if ss[0].TmuxSession != "agmux-bg" || ss[1].TmuxSession != "" || ss[2].TmuxSession != "" {
+		t.Errorf("sessions %q %q %q: the attached card is in agmux-bg, the others as ccmux said", ss[0].TmuxSession, ss[1].TmuxSession, ss[2].TmuxSession)
 	}
 	if !ss[0].Background || asked != 1 {
 		t.Errorf("background %v, asked %d times", ss[0].Background, asked)

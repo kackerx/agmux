@@ -3,6 +3,7 @@ package board
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,21 +28,43 @@ type attachedMsg struct {
 
 // attach opens the window off the UI goroutine.
 func (m Model) attach(s store.Session, action string) tea.Cmd {
-	r := m.run
+	r, w, h := m.run, previewInner(previewW(m.w)), m.previewLinesN()
 	return func() tea.Msg {
-		pane, err := attachWindow(r, s)
+		pane, err := attachWindow(r, s, w, h)
+		if err == nil && action == "handoff" { // typed at once, claude is not reading yet: the Enter is lost
+			waitDrawn(r, pane)
+		}
 		return attachedMsg{id: s.ID, pane: pane, action: action, err: err}
 	}
 }
 
+// drawnWait is how long a new window may take to show anything (claude attach does in about 0.2 s),
+// polled every drawnPoll.
+var drawnWait, drawnPoll = 5 * time.Second, 100 * time.Millisecond
+
+// waitDrawn returns when the pane has something on its screen, or after drawnWait.
+func waitDrawn(r Runner, pane string) {
+	for end := time.Now().Add(drawnWait); ; time.Sleep(drawnPoll) {
+		if out, err := r.Tmux("capture-pane", "-p", "-t", pane); err == nil && strings.TrimSpace(out) != "" {
+			return
+		}
+		if !time.Now().Before(end) {
+			return
+		}
+	}
+}
+
 // attachWindow runs `claude attach <id>` in a new window of the agmux-bg session (made if it isn't
-// there) and returns its pane. -d: the user's client stays where it is.
-func attachWindow(r Runner, s store.Session) (string, error) {
+// there) and returns its pane. -d: the user's client stays where it is. A session with no client
+// has a window w × h cells (what the preview shows) to start with, and a window follows the client
+// that comes (not set by resize-window, which would keep it that size); new windows take the
+// session's.
+func attachWindow(r Runner, s store.Session, w, h int) (string, error) {
 	var args []string
 	if _, err := r.Tmux("has-session", "-t", "="+bgTmuxSession); err == nil {
 		args = []string{"new-window", "-t", "=" + bgTmuxSession + ":"}
 	} else {
-		args = []string{"new-session", "-s", bgTmuxSession}
+		args = []string{"new-session", "-s", bgTmuxSession, "-x", strconv.Itoa(w), "-y", strconv.Itoa(h)}
 	}
 	args = append(args, "-d")
 	if s.Name != "" {
@@ -115,7 +138,7 @@ func (a *attachedSrc) Sessions() []store.Session {
 		if out == nil {
 			out = slices.Clone(ss)
 		}
-		out[i].TmuxPane = e.pane
+		out[i].TmuxPane, out[i].TmuxSession = e.pane, bgTmuxSession
 	}
 	if out != nil {
 		return out
