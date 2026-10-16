@@ -214,7 +214,7 @@ func Parse(path string, data []byte) (*Config, error) {
 	}
 	if md.IsDefined("layout", "preview_width") {
 		if n := raw.Layout.PreviewWidth; n < minPreviewWidth || n > maxPreviewWidth {
-			return nil, fmt.Errorf("%s: layout.preview_width: must be %d–%d", path, minPreviewWidth, maxPreviewWidth)
+			return nil, fmt.Errorf("%s: layout.preview_width: %d is out of range (%d to %d percent)", path, n, minPreviewWidth, maxPreviewWidth)
 		}
 		c.PreviewWidth = raw.Layout.PreviewWidth
 	}

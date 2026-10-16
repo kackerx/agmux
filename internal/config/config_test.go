@@ -584,7 +584,7 @@ func TestPreviewWidth(t *testing.T) {
 		t.Errorf("not written: %v %v", err, c)
 	}
 	for _, n := range []int{29, 71, 0, -5, 100} {
-		if _, err := Parse("cfg", []byte(fmt.Sprintf("[layout]\npreview_width = %d\n", n))); err == nil || err.Error() != "cfg: layout.preview_width: must be 30–70" {
+		if _, err := Parse("cfg", []byte(fmt.Sprintf("[layout]\npreview_width = %d\n", n))); err == nil || err.Error() != fmt.Sprintf("cfg: layout.preview_width: %d is out of range (30 to 70 percent)", n) {
 			t.Errorf("%d: %v", n, err)
 		}
 	}
