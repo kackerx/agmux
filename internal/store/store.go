@@ -73,10 +73,13 @@ type Poller struct {
 	Now  func() time.Time     // nil = time.Now; tests set it
 	Pins *avatar.FileBindings // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
 
-	refreshMu sync.Mutex           // serializes Refresh; guards models
-	pinGone   map[string]time.Time // pinned name → when no session had it any more (see prunePins)
-	models    map[string]string    // session ID → last model found in its jsonl
-	heads     map[string]string    // transcript path → agent definition from its head (the head never changes), once known
+	refreshMu  sync.Mutex            // serializes Refresh; guards models
+	pinGone    map[string]time.Time  // pinned name → when no session had it any more (see prunePins)
+	models     map[string]string     // session ID → last model found in its jsonl
+	heads      map[string]string     // transcript path → agent definition from its head (the head never changes), once known
+	titleBytes int64                 // and the bytes they read
+	titleScans int                   // transcripts scanned for a title, the tests count them
+	titles     map[string]titleState // session ID → its custom title and how far its transcript was scanned for one
 
 	avatarErr, seenErr, pinsErr error // avatars.json / seen.json / pins.json could not be read, as of the last poll or bind
 
@@ -331,6 +334,13 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		ContextPct: -1, Subagents: r.Subagents, LastActivity: r.LastActivityAt,
 		Project: r.Project, TmuxSession: tmuxSession(r.TmuxTarget),
 	}
+	var tail [][]byte // the end of the transcript: the model, the agent and the title are looked for in it
+	if r.LogPath != "" {
+		tail = tailLines(r.LogPath)
+	}
+	if s.Name == "" && r.LogPath != "" { // a background session: the name it was started with
+		s.Name = p.title(r.ID, r.LogPath, tail)
+	}
 	if s.Name == "" {
 		s.Name = r.Project
 	}
@@ -354,7 +364,6 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		s.ContextPct, hudModel, s.Effort = readHUD(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
 	}
 	if r.LogPath != "" {
-		tail := tailLines(r.LogPath)
 		s.Model = modelIn(tail)
 		s.Agent = p.agent(r.LogPath, tail)
 	}

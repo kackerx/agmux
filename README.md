@@ -52,6 +52,8 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 
 没有 tmux pane 的后台会话不能跳转和发送，底栏对应键会变暗。
 
+卡片上的名字：ccmux 的 summary；没有（后台会话 `claude --bg -n <名字>` 起的就是这样）时用会话 jsonl 里最后一条 `custom-title` 的名字（每个会话最多整文件扫一次，之后只看新增的部分）；都没有才用项目名。
+
 ### tmux 浮窗绑定
 
 ```tmux
