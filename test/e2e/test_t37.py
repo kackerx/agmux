@@ -115,9 +115,9 @@ class Layout(Base):
 
 
 class Show(Base):
-    def test_agmux_show_has_the_agent_as_the_seventh_column(self):
-        self.log("b1", SETTING("orchestrator")); rows = self.show_col(); self.assertEqual(len(rows["bravo-29"]), 7, rows["bravo-29"]); self.assertEqual(rows["bravo-29"][6], "orchestrator")
-        self.assertEqual(rows["charlie-30"][6], "", "an empty column when there is none"); self.assertTrue(all(len(r) == 7 for r in rows.values()))
+    def test_agmux_show_has_the_agent_as_the_seventh_column_and_bg_as_the_eighth(self):
+        self.log("b1", SETTING("orchestrator")); rows = self.show_col(); self.assertEqual(len(rows["bravo-29"]), 8, rows["bravo-29"]); self.assertEqual(rows["bravo-29"][6], "orchestrator")
+        self.assertEqual(rows["charlie-30"][6], "", "an empty column when there is none"); self.assertTrue(all(len(r) == 8 for r in rows.values()))  # T59: the 8th is `bg` or empty
 
     def test_the_help_text_mentions_it(self):
         env = {"PATH": "/usr/bin:/bin", "HOME": str(self.env.home), "LANG": "en_US.UTF-8"}; out = subprocess.run([BIN, "help"], env=env, capture_output=True, text=True).stdout

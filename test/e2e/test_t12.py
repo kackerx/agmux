@@ -49,10 +49,13 @@ class Passthrough(PreviewBase):
         self.t.keys("q"); self.assertEqual(self.t.exit_status(), 0)
 
     def test_tab_does_nothing_on_a_card_without_a_pane_and_the_hint_is_greyed(self):
-        self.open_preview()
+        # (T60: a background session gets a pane on tab; a native one that has none still does nothing)
+        S = json.loads((self.env.fake / "show.json").read_text())
+        for x in S:
+            if x["id"] == "c1": x.update(tmuxPane=None)
+        self.env.write_show(S); self.open_preview()
         on_pane = self.hint_colour()
-        self.press("l", "j")  # b2: background
-        self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3))
+        self.press("l", "l"); self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3), "\n".join(self.pv_text()))
         self.press("Tab")
         self.assertFalse(self.preview_focused()); self.assertNotIn("keys go to the pane", self.footer())
         off_pane = self.hint_colour()
@@ -363,7 +366,7 @@ class PassthroughReview2(PreviewBase):
         self.enter_passthrough_on_a3(); self.t.lit("ok"); time.sleep(0.4)
         before = len(self.calls())
         self.t.lit("\x1b[200~\x1b[201~"); time.sleep(1.0)
-        sent = [c for c in self.calls()[before:] if c[0] != "capture-pane"]  # the preview re-captures every 500ms by itself (spec): that is not a reaction to the paste
+        sent = [c for c in self.calls()[before:] if c[0] not in ("capture-pane", "list-panes")]  # the preview re-captures every 500ms by itself (spec): that is not a reaction to the paste
         self.assertEqual(sent, [], "an empty paste must not run load-buffer / paste-buffer / send-keys")
         self.assertEqual(self.red_rows(), [], "and no error message")
         self.assertEqual(self.cat("a3"), "ok"); self.assertTrue(self.preview_focused())

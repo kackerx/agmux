@@ -130,19 +130,25 @@ exit 0
                 out.append(["send", self.pane_ids.get(c[c.index("-t") + 1], "?"), "--", " ".join(c[c.index("--") + 1:])])
         return out
 
-    def tmux_calls(self):
+    def tmux_calls(self, raw=False):
+        """what the board asked the fake tmux, argv by argv. The poll's own `list-panes -a -F ...` (T60: asked at every poll while a background session has no pane, which the fixture always has) is left out unless raw=True: it is not something the user asked for"""
         p = self.fake / "tmux.log"
         if not p.exists():
             return []
-        return [[a for a in line.split("\x1f") if a != ""] for line in p.read_text().split("\n") if line]
+        calls = [[a for a in line.split("\x1f") if a != ""] for line in p.read_text().split("\n") if line]
+        return calls if raw else [c for c in calls if not (c[:3] == ["list-panes", "-a", "-F"])]
 
     def tmux_stdin(self):
         p = self.fake / "tmux.stdin"
         return p.read_text() if p.exists() else ""
 
     def tmux_times(self):
+        """the time of each call tmux_calls() lists (same order; the poll's own list-panes is left out of both)"""
         p = self.fake / "tmux.times"
-        return [float(x) for x in p.read_text().split()] if p.exists() else []
+        times = [float(x) for x in p.read_text().split()] if p.exists() else []
+        lp = self.fake / "tmux.log"
+        calls = [[a for a in line.split("\x1f") if a != ""] for line in lp.read_text().split("\n") if line] if lp.exists() else []
+        return [t for t, c in zip(times, calls) if c[:3] != ["list-panes", "-a", "-F"]]
 
     def set_term(self, termname=None, passthrough=None):
         """T28: what the fake tmux answers to `display-message -p -c <client> '#{client_termname}'` (default xterm-256color) and `show -gv allow-passthrough` (default on)."""

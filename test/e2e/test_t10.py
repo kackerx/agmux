@@ -10,7 +10,7 @@ Two layers:
 """
 import fcntl, os, pty, struct, subprocess, termios, threading, unittest
 from lib import *
-from test_t3 import ready, by_name, NAMES, last_text_row
+from test_t3 import ready, by_name, NAMES, last_text_row, C_FOCUS, border_colours
 
 CLIENTS_FMT = "#{client_activity}\t#{client_name}\t#{client_session}\t#{client_termname}\t#{client_tty}"
 A1_PANE = "%101"  # fixture: a1 (alpha-main) lives in %101; b2 is a background session without a pane
@@ -191,12 +191,13 @@ class FakeTmux(unittest.TestCase):
         time.sleep(0.4)
         self.assertEqual([c[0] for c in self.env.tmux_calls()][-1], "switch-client", "no detach after a failed switch")
 
-    def test_background_session_makes_no_tmux_call(self):
+    def test_background_session_makes_no_ccmux_call_and_no_jump_or_typing(self):
         self.start(clients=[(100, "outer", "main")])
         self.t.keys("l"); time.sleep(0.25); self.t.keys("j"); time.sleep(0.25)  # b2: tmuxPane null
         for k in ("Enter", "H"):
             self.t.keys(k); time.sleep(0.4)
-        self.assertEqual((self.env.tmux_calls(), self.env.calls()), ([], []))
+        # T60: enter / H on a background card open `claude attach` in a window of agmux-bg (test_t60 has the details); what must still not happen: ccmux is not called, no jump, nothing is typed anywhere
+        self.assertEqual(self.env.calls(), []); self.assertEqual({c[0] for c in self.env.tmux_calls()} - {"has-session", "new-window", "new-session", "display-message", "list-clients", "show-environment"}, set(), self.env.tmux_calls())
         self.assertTrue(self.t.alive())
 
     def test_no_clients_shows_the_hint_and_stays(self):
@@ -259,11 +260,18 @@ class FakeTmux(unittest.TestCase):
 
     def test_s_on_a_card_without_a_pane_does_nothing(self):
         self.start()
-        self.t.keys("l"); time.sleep(0.25); self.t.keys("j"); time.sleep(0.3)  # b2: background
+        S = json.loads((self.env.fake / "show.json").read_text())
+        for x in S:
+            if x["id"] == "c1": x.update(tmuxPane=None)  # a native session that lost its pane (a background session would get one: T60)
+        self.env.write_show(S); self.assertTrue(wait(lambda: self.env.show_calls() >= 2, 4)); time.sleep(2.5)
+        for k in ("l", "l", "j", "k", "h", "l"):
+            if any("charlie-30" in c.line(1) and C_FOCUS in border_colours(c) for c in find_cards(self.t.snap())): break
+            self.t.keys(k); time.sleep(0.3)
+        self.assertTrue(any("charlie-30" in c.line(1) and C_FOCUS in border_colours(c) for c in find_cards(self.t.snap())), self.t.text())
         n = len(self.env.tmux_calls())
         self.t.keys("i"); time.sleep(0.5)
         self.assertEqual(self.preview_open_and_focused(), (False, False), "no preview")
-        self.assertIn("background session, no tmux pane", foot(self.t)); self.assertEqual(foot(self.t).count("background session, no tmux pane"), 1)
+        self.assertIn("no tmux pane: can't jump or send", foot(self.t)); self.assertEqual(foot(self.t).count("no tmux pane: can't jump or send"), 1)
         self.t.lit("zzz"); time.sleep(0.3)
         self.assertEqual(self.sent_text(), "", "keys are not forwarded anywhere"); self.assertEqual(self.env.calls(), [])
 

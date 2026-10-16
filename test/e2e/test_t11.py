@@ -145,10 +145,10 @@ class Preview(PreviewBase):
     def test_no_pane_message_for_background_and_folded_title(self):
         self.open_preview()
         self.press("l", "j")  # b2: background, no tmux pane
-        self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3), "\n".join(self.pv_text()))
+        self.assertTrue(wait(lambda: "background session · enter or i attaches it" in "\n".join(self.pv_text()), 3), "\n".join(self.pv_text()))  # T59 (was: no pane)
         self.assertNotIn("line 200", "\n".join(self.pv_text()))
         self.press("k", "f")  # fold G2 (b1 focused): the folded title has no pane either
-        self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3), "\n".join(self.pv_text()))
+        self.assertTrue(wait(lambda: "no pane" in "\n".join(self.pv_text()), 3), "\n".join(self.pv_text()))  # (a folded title is not a background session: still `no pane`)
 
     def test_preview_follows_the_pane_live(self):
         self.open_preview()

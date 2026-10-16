@@ -135,7 +135,7 @@ class Keys(Base):
 
     def test_background_session_greyed(self):
         self.t.keys("l"); time.sleep(0.2); self.t.keys("j"); time.sleep(0.2)  # b2
-        hint = "background session, no tmux pane"
+        hint = "background session · enter or i attaches it"
         self.assertTrue(wait(lambda: hint in "\n".join(r.text for r in self.t.snap()[-3:]), 3), "footer hint when a background card is focused:\n" + self.t.text())
         for k in ("Enter", "H"):
             self.t.keys(k); time.sleep(0.4)
@@ -185,7 +185,7 @@ class BackgroundWithError(Base):
         self.env.flag("fail"); self.t.keys("r")  # restart is not greyed; fake ccmux prints 3 stderr lines and exits 1
         self.assertTrue(wait(lambda: "boom from fake ccmux" in "\n".join(r.text for r in self.t.snap()[-3:]), 4), self.t.text())
         tail = "\n".join(r.text for r in self.t.snap()[-3:])
-        self.assertIn("background session, no tmux pane", tail, "hint must not be pushed out by the error line")
+        self.assertIn("background session · enter or i attaches it", tail, "hint must not be pushed out by the error line")
         self.assertNotIn("second stderr line", self.t.text())
         rows = self.t.text().split("\n")
         while rows and rows[-1] == "" and len(rows) > 50: rows.pop()
@@ -196,7 +196,7 @@ class BackgroundWithError(Base):
         self.env.flag("showfail")
         self.assertTrue(wait(lambda: "show exploded" in self.t.text(), 8), self.t.text())
         tail = "\n".join(r.text for r in self.t.snap()[-3:])
-        self.assertIn("background session, no tmux pane", tail)
+        self.assertIn("background session · enter or i attaches it", tail)
         self.assertNotIn("second poll-error line", self.t.text())
 
 
