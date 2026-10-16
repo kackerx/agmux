@@ -393,3 +393,25 @@
 - dev 24a88f4（T56 备注）：box 行 `pad(l+"\x1b[0m", inner)`，底色止于文字；TestPreviewWrapBackgroundStopsAtTheText。本轮 T56+T57 目标 24a88f4，送 tester。
 - tester（24a88f4，套件 ee28934）：整套 969 条 2566 s 零红零重跑。T56 22 条：232 列框内 87 文字格、150 列长行占 2 行拼回原行、100 列看板 3 行、整宽不多空行、宽字符不切半、tab 展开、最后 N 行逐行比对、颜色跨行 / 未 reset 红底续行 / 底色止于文字 / 截掉行里的蓝底延续、光标第 2 段 +13 / 下划线 / 满行后下一行首 / 宽字符挤行 / 超宽改画在换行行、滚轮 ±3 行到顶不动；反向 ad287e8 16 红、164ce6f 2 红。T57 17 条：进直通即在格上、打字 / 宽字符 +4 / 换行 / 折行 +13 / 超宽跟走、块不画、Tab 回卡 / p 关 / 99 列 / session is gone / pane 隐藏 / 滚轮上滚 → flag 0、退出后无 CUP 末序列 ?25h（q / Q）、d 起的 review 子进程 stdin / stdout 都是 TTY 且往返后直通仍工作；反向 451a2c9 2 红、ad287e8 14 红。t24 两条旧用例改。备忘：滚轮一格 = 3 个换行后的行（board 一直 ±3，不是需求变更）；滚动后窗口末行少一行（光标空行不显示）。没覆盖：输入法候选框、真 kitty 渲染、popup 路径光标（dev 自测过）、Linux、ghostty、DECSCUSR、真 hunk 排版。
 - 2026-10-15 18:29 已装 24a88f4（干净 clone，vcs.modified=false）。T46–T57 待用户验收。
+
+## 第十一批 后台会话（agent-builder 2026-10-16 转达，称用户已确认；用户可否决）
+背景：编排者以后用 `claude --bg --agent <角色> -n <项目>-<角色> --model <模型> "<任务>"` 起后台会话（无 tmux pane），看板上会越来越多。实测（ccmux 1.4.3、Claude Code 2.1.300）：`ccmux show --json` 里 `trackingMode:"background"`、`tmuxPane:null`、`summary:null`；`claude agents --json` 有 `kind:"background"` 和 `name`；名字写在会话 jsonl 里（`{"type":"custom-title","customTitle":"bg-probe2"}`，重复写了几次）；`claude attach <id|name>` 把后台会话接到当前终端（← 回 agent 视图，Ctrl+Z 回 shell，会话照跑）；`claude logs / stop / rm <id>`。
+
+### T58 后台会话的卡片名用 `-n` 给的名字（待做）
+- 现状：store.go `Name: r.Summary`，空就退回 Project，后台会话显示成项目名。
+- 定稿：Name = Summary；Summary 空时取 jsonl 里最后一条 `custom-title` 的 customTitle；再空才退回 Project。读法：先在已经读的末尾 64KB tail 里找；找不到就整文件扫一次（流式、取最后一条），按 session id 缓存结果（名字不会变，每个会话最多整扫一次）；没有 logPath 或文件读不到就退回 Project。不额外起 `claude agents` 进程。AvatarKey / pin / seen 的名字口径随 Name 一起变（后台会话有了真名就按真名记）。`agmux show` 的名字列同步。
+- 验收：单测 tail 有 custom-title → 用它；tail 没有、文件前面有 → 整扫一次拿到且第二次 poll 不再读整文件（计数）；都没有 → Project；summary 有 → 不看 jsonl；黑盒 假 ccmux 返回 summary null + 假 jsonl → 卡片名是 -n 的名字。
+
+### T59 卡片标明后台会话（待做）
+- 定稿：Session 加 `Background bool`（trackingMode == "background"）。卡片第二行右端（分支那行的右边空位）加 muted 的 `bg` 标签；预览标题里 pane id 的位置写 `bg`（有了 T60 的 attach pane 后标题仍写 `bg · %id`）。没有 pane 的消息行文案改为 `background session · enter or i attaches it`（T60 之前先改文案，键仍灰）。`agmux show` 加一列 `bg`/空。
+- 验收：单测 后台卡有 `bg` 标签、普通卡没有；预览标题；show 列；黑盒 假 ccmux trackingMode background → 卡片与标题可见 `bg`。
+
+### T60 在预览里和后台会话交互：按需 attach 到一个 tmux pane（待做）
+- 用户要的：不另开终端，在 agmux 预览窗口里就能和后台会话对话。
+- 定稿（最少新代码：让后台会话也有 pane，T24 / T57 的预览、直通、光标、跳转全部复用）：
+  - 后台卡没有 pane 时，`enter`（jump）/ `i`（reply）/ `tab`（focus_preview）先给它起一个 pane：在专用 tmux session `agmux-bg` 里开窗口 `new-window -d -t agmux-bg: -n <卡片名> -c <cwd> -P -F '#{pane_id}' -- claude attach <id>`（session 不存在就 `new-session -d -s agmux-bg … -- claude attach <id>`），然后照常：enter 切过去、i / tab 开预览进直通。`p`（预览开关）不 attach：焦点扫过后台卡时预览区显示 `background session · enter or i attaches it`。
+  - pane 的发现不存状态文件：每次 poll 跑 `tmux list-panes -a -F '#{pane_id}\t#{pane_start_command}'`，start command 匹配 `claude attach <id>` 的 pane 就是它的 TmuxPane（看板重启、多块看板都自然一致；attach 退出窗口关掉，卡片回到无 pane，再按再起）。放在 store 里跑（execx），tmux 不可用（不在 tmux / 命令失败）时静默当没有。
+  - 同一会话已有 pane 时不重复起；两块看板同时按的竞态接受（最多多开一个窗口，备忘）。
+  - `x`（kill）/ `r`（restart）对后台会话仍是现状（ccmux kill / restart 对 bg 是否有效不在本批；备忘：以后可能要走 `claude stop / rm`）。
+  - 不依赖 `claude attach` 的退出键；用户在直通里按 ← 回 agent 视图、Ctrl+Z 退出 attach 都是 claude 自己的行为，窗口随进程关。
+- 验收：单测 后台卡 enter / i / tab 在无 pane 时先发 new-window（参数含 -n 名字、-c cwd、claude attach id），有 pane 时不发；p 不发；list-panes 输出解析（多 pane、带制表符、无匹配）；store 把匹配的 pane 填进 TmuxPane 且 Background 仍为 true。黑盒 真 tmux：假 ccmux 给一个 background 会话 + 假 `claude` 脚本（attach 子命令打印并 cat），按 i → agmux-bg session 出现窗口、预览显示其输出、直通打字到达；退出 → 卡片回无 pane。dev 真机：用 `claude --bg -n agmux-bg-probe --model haiku "只回复 OK"` 起一个一次性后台会话，在看板里 i 进去对话一次，完后 `claude stop` + `claude rm`；不动用户的 25 个会话。
