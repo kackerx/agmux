@@ -25,6 +25,7 @@ type Subagent = ccmux.Subagent
 type Session struct {
 	ID, Name, AgentType, CWD, GroupKey, Branch string
 	Status, Attention, PendingTool, TmuxPane   string
+	Background                                 bool // a background session (claude --bg): ccmux tracks it without a tmux pane
 	Done                                       bool // ccmux's "done": idle, no subagent running, attentionState set, and not seen on the board
 	AgentsWorking                              bool // Status is "working" only because subagents are
 	Model, Effort                              string
@@ -332,7 +333,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		ID: r.ID, Name: r.Summary, AgentType: r.AgentType, CWD: r.CWD, Branch: r.GitBranch,
 		Status: r.Status, Attention: r.AttentionType, PendingTool: r.PendingTool, TmuxPane: r.TmuxPane,
 		ContextPct: -1, Subagents: r.Subagents, LastActivity: r.LastActivityAt,
-		Project: r.Project, TmuxSession: tmuxSession(r.TmuxTarget),
+		Project: r.Project, TmuxSession: tmuxSession(r.TmuxTarget), Background: r.TrackingMode == "background",
 	}
 	var tail [][]byte // the end of the transcript: the model, the agent and the title are looked for in it
 	if r.LogPath != "" {

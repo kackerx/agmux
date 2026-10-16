@@ -111,3 +111,12 @@ func TestTitleEdges(t *testing.T) {
 		t.Errorf("names %q %q %q, %d scans", ss[0].Name, ss[1].Name, ss[2].Name, p.titleScans)
 	}
 }
+
+// Background is trackingMode "background", nothing else.
+func TestBackgroundFlag(t *testing.T) {
+	raw := []ccmux.Session{{ID: "a", TrackingMode: "background"}, {ID: "b", TrackingMode: "native"}, {ID: "c"}}
+	ss := poller(t, raw).Sessions()
+	if !ss[0].Background || ss[1].Background || ss[2].Background {
+		t.Errorf("%v %v %v", ss[0].Background, ss[1].Background, ss[2].Background)
+	}
+}

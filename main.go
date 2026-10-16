@@ -21,7 +21,7 @@ commands:
   board [--stay]
           full-screen session board (open it in a tmux popup; AGMUX_CLIENT: see README);
           --stay: in its own tmux session, enter / q only close the popup, Q ends the board
-  show    print sessions one per line: id, name, group, status, model, context%, agent
+  show    print sessions one per line: id, name, group, status, model, context%, agent, bg (bg for a background session)
   avatars print every avatar: image sets, then pixel sprites
   avatars import <sheet.png> --name <id> [--layout 30|19] [--force]
           cut a pi-agent-portrait sheet (6 × 5 cells; 19: 5 × 4) into the image set <id>
@@ -159,7 +159,11 @@ func show(w io.Writer, p *store.Poller) error {
 		if s.ContextPct >= 0 {
 			pct = fmt.Sprintf("%d%%", s.ContextPct)
 		}
-		fmt.Fprintln(w, strings.Join([]string{s.ID, s.Name, s.GroupKey, s.Status, s.Model, pct, s.Agent}, "\t"))
+		bg := ""
+		if s.Background {
+			bg = "bg"
+		}
+		fmt.Fprintln(w, strings.Join([]string{s.ID, s.Name, s.GroupKey, s.Status, s.Model, pct, s.Agent, bg}, "\t"))
 	}
 	return nil
 }

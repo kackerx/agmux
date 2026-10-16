@@ -125,20 +125,20 @@ func TestAvatarsImport(t *testing.T) {
 	}
 }
 
-// `agmux show` ends each line with the session's agent definition (empty if it has none).
+// `agmux show` has the session's agent definition (empty if it has none) and then bg (empty unless a background session).
 func TestShowAgentColumn(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "s.jsonl")
 	os.WriteFile(log, []byte(`{"type":"agent-setting","agentSetting":"orchestrator"}`+"\n"), 0o644)
 	p := &store.Poller{StateDir: dir, Show: func() ([]ccmux.Session, error) {
-		return []ccmux.Session{{ID: "a", Summary: "one", LogPath: log}, {ID: "b", Summary: "two"}}, nil
+		return []ccmux.Session{{ID: "a", Summary: "one", LogPath: log}, {ID: "b", Summary: "two"}, {ID: "c", Summary: "three", TrackingMode: "background"}}, nil
 	}}
 	var out bytes.Buffer
 	if err := show(&out, p); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
-	if len(lines) != 2 || !strings.HasSuffix(lines[0], "\torchestrator") || !strings.HasSuffix(lines[1], "\t") || strings.Count(lines[1], "\t") != 6 {
+	if len(lines) != 3 || !strings.HasSuffix(lines[0], "\torchestrator\t") || !strings.HasSuffix(lines[1], "\t\t") || strings.Count(lines[1], "\t") != 7 || !strings.HasSuffix(lines[2], "\t\tbg") {
 		t.Errorf("show:\n%s", out.String())
 	}
 }

@@ -446,13 +446,32 @@ func cutMark(c lipgloss.Color) string { return "\x1b[0m" + fg(c, "…") }
 // branchIcon is nf-dev-git_branch and a space, before the branch on line 2.
 const branchIcon = "\ue725 "
 
-// branchRoom is the cells line 2 has for the icon and the branch in w: all, less the agent at the
-// right edge and a space.
+// line2Right is what line 2 has at its right edge: the agent definition, and bg for a background
+// session.
+func line2Right(s store.Session, w int) string {
+	right := ""
+	if s.Agent != "" {
+		right = fg(cAgent, ansi.Truncate(s.Agent, w, "…"))
+	}
+	if s.Background {
+		if right != "" {
+			right += " "
+		}
+		right += fg(cMuted, bgTag)
+	}
+	return right
+}
+
+const bgTag = "bg"
+
+// branchRoom is the cells line 2 has for the icon and the branch in w: all, less what is at the
+// right edge (see line2Right) and a space.
 func branchRoom(s store.Session, w int) int {
-	if s.Agent == "" {
+	right := line2Right(s, w)
+	if right == "" {
 		return w
 	}
-	return max(w-ansi.StringWidth(ansi.Truncate(s.Agent, w, "…"))-1, 0)
+	return max(w-ansi.StringWidth(right)-1, 0)
 }
 
 // shownBranch is the branch as it is drawn in avail cells: whole; or, when it doesn't fit and has
@@ -475,7 +494,7 @@ func shownBranch(branch string, avail int) (text string, skip, lead int) {
 }
 
 // line2: the branch (its leading segments left out when it doesn't fit, then its tail cut), and the
-// agent definition at the right edge.
+// agent definition and the bg tag at the right edge.
 func line2(s store.Session, w int, hl []int) string {
 	left := ""
 	room := branchRoom(s, w)
@@ -489,12 +508,12 @@ func line2(s store.Session, w int, hl []int) string {
 		}
 		left = hilite(branchIcon+text, shifted, cBranch)
 	}
-	if s.Agent == "" {
+	right := line2Right(s, w)
+	if right == "" {
 		return ansi.Truncate(left, w, cutMark(cBranch))
 	}
-	agent := ansi.Truncate(s.Agent, w, "…")
 	left = ansi.Truncate(left, room, cutMark(cBranch))
-	return pad(left, w-ansi.StringWidth(agent)) + fg(cAgent, agent)
+	return pad(left, w-ansi.StringWidth(right)) + right
 }
 
 // line3: context bar, the status word and its detail, subagent / shell counts, model·effort at the

@@ -116,10 +116,18 @@ func previewBox(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focus
 		content = []string{fg(cMuted, "no pane")}
 		if ok {
 			title = fg(cName, s.Name)
+			if s.Background { // bg where the pane would be
+				word, detail := status(s)
+				title += fg(cMuted, " · "+bgTag+" · ") + word + fg(cMuted, detail)
+			}
 		}
 	default:
 		word, detail := status(s)
-		title = fg(cName, s.Name) + fg(cMuted, " · "+s.TmuxPane+" · ") + word + fg(cMuted, detail)
+		where := s.TmuxPane
+		if s.Background { // attached to a pane: bg · %id
+			where = bgTag + " · " + s.TmuxPane
+		}
+		title = fg(cName, s.Name) + fg(cMuted, " · "+where+" · ") + word + fg(cMuted, detail)
 		switch {
 		case pv.pane != s.TmuxPane: // the capture for this pane hasn't arrived yet
 		case pv.err != nil:

@@ -900,7 +900,10 @@ func nearest(rects []rect, id string, d [2]int) string {
 // can be taken as part of a paste and not submit (ccmux waits the same).
 var enterDelay = 150 * time.Millisecond
 
-const noPane = "background session, no tmux pane: can't jump or send"
+const noPane = "no tmux pane: can't jump or send"
+
+// bgNote is said of a background session, which gets a pane when it is asked for (T60).
+const bgNote = "background session · enter or i attaches it"
 
 func (m Model) say(c lipgloss.Color, text string) Model {
 	m.msg = fg(c, " "+text)
@@ -1232,7 +1235,11 @@ func (m Model) msgLine(focused store.Session) string {
 		parts = append(parts, fg(cRed, " "+firstLine(err.Error()))) // or the hint after it is cut off
 	}
 	if focused.ID != "" && focused.TmuxPane == "" {
-		parts = append(parts, fg(cMuted, " "+noPane))
+		note := noPane
+		if focused.Background {
+			note = bgNote
+		}
+		parts = append(parts, fg(cMuted, " "+note))
 	}
 	return strings.Join(parts, fg(cMuted, " ·"))
 }
