@@ -113,8 +113,9 @@ type Model struct {
 	scrolled  bool       // the cards were scrolled by the wheel or page keys, not by the focus: top is the offset
 	top       int        // lines scrolled off the top of the cards while scrolled; the focus leaving the view ends it
 
-	curOut *cursorOut // where the terminal cursor is put (nil: nowhere, as in the tests)
-	curOn  bool       // the terminal cursor is shown
+	attached *attachedSrc // the panes opened for background sessions; src with them laid over it
+	curOut   *cursorOut   // where the terminal cursor is put (nil: nowhere, as in the tests)
+	curOn    bool         // the terminal cursor is shown
 
 	cfg    *config.Config
 	keymap map[string]string // key (as KeyMsg.String() spells it) → action
@@ -122,7 +123,8 @@ type Model struct {
 
 func New(src Source, run Runner) Model {
 	cfg := config.Default()
-	return Model{src: src, run: run, now: time.Now, getenv: os.Getenv, folded: map[string]bool{}, keys: newSerial(),
+	a := &attachedSrc{Source: src}
+	return Model{src: a, attached: a, run: run, now: time.Now, getenv: os.Getenv, folded: map[string]bool{}, keys: newSerial(),
 		cfg: cfg, keymap: cfg.KeyMap()}
 }
 
@@ -249,6 +251,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.capture()
 			return m, cmd
 		}
+	case attachedMsg:
+		if msg.err != nil {
+			m.msg = fg(cRed, " "+firstLine(msg.err.Error()))
+			return m, nil
+		}
+		if m.attached != nil {
+			m.attached.add(msg.id, msg.pane)
+		}
+		// the focus may have moved on meanwhile; and a card that still has no pane would ask again
+		if _, _, s, ok := m.current(); ok && s.ID == msg.id && s.TmuxPane != "" {
+			return m.do(msg.action)
+		}
+		return m, nil
 	case doneMsg:
 		switch {
 		case msg.err != nil:
@@ -800,6 +815,9 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m.send(s, "/handoff", "sent /handoff → "+s.Name)
 	case "focus_preview", "reply": // open the preview if needed and give it the keys; typing is the reply
 		if s.TmuxPane == "" {
+			if s.Background {
+				return m, m.attach(s, action)
+			}
 			return m, nil // msgLine already shows noPane
 		}
 		if m.w < previewMinTerm {
@@ -942,6 +960,9 @@ func (m Model) ccmux(ok string, args ...string) tea.Cmd {
 // --stay the board stays, and only a popup closes.
 func (m Model) jump(s store.Session) (tea.Model, tea.Cmd) {
 	if s.TmuxPane == "" {
+		if s.Background {
+			return m, m.attach(s, "jump")
+		}
 		return m, nil // msgLine already shows noPane
 	}
 	r, getenv, stay, src := m.run, m.getenv, m.stay, m.src
@@ -1258,7 +1279,7 @@ func (m Model) View() string {
 		m.curOut.place(cx, cy)
 	}
 	ss, hits := m.shown()
-	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "", m.foldedNow(), m.cardsW(), right, hits, m.pin(), m.groupMode())
+	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "" && !focused.Background, m.foldedNow(), m.cardsW(), right, hits, m.pin(), m.groupMode())
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
 		cursor := ""
 		if m.searching {
@@ -1298,7 +1319,7 @@ func (m Model) View() string {
 			hint = p + " prev · " + hint
 		}
 		last := strings.LastIndexByte(out, '\n') + 1
-		out = out[:last] + ansi.Truncate(fg(cFocus, " "+hint)+fg(cMuted, " ·")+footer(ok && focused.TmuxPane == "", m.w, m.groupMode()), m.w, "…")
+		out = out[:last] + ansi.Truncate(fg(cFocus, " "+hint)+fg(cMuted, " ·")+footer(ok && focused.TmuxPane == "" && !focused.Background, m.w, m.groupMode()), m.w, "…")
 	}
 	switch { // the footer is always the last line
 	case m.mode == flashing:

@@ -1,9 +1,14 @@
 package board
 
 import (
+	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kackerx/agmux/internal/store"
@@ -64,5 +69,191 @@ func TestBackgroundPreviewAndMessage(t *testing.T) {
 	m = psized(staticSrc{bgSession(func(s *store.Session) { s.Background = false })}, 120, 30)
 	if v := ansi.Strip(m.View()); !strings.Contains(v, noPane) || strings.Contains(v, "attaches it") {
 		t.Errorf("a session that is not a background one: %s", v)
+	}
+}
+
+// ---- T60: enter, i and tab give a background session a pane by attaching it in a tmux window ----
+
+func attachRunner(inSession bool) *fakeRunner {
+	r := &fakeRunner{tmuxOut: map[string]string{"new-session": "%9\n", "new-window": "%9\n"}, tmuxFail: map[string]error{}}
+	if !inSession {
+		r.tmuxFail["has-session"] = errors.New("can't find session: agmux-bg")
+	}
+	return r
+}
+
+func attachBoard(r *fakeRunner, extra ...store.Session) Model {
+	bg := bgSession(func(s *store.Session) { s.CWD = "/w/x" })
+	m := New(staticSrc(append([]store.Session{bg}, extra...)), r)
+	m.getenv = func(string) string { return "" }
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	return tm.(Model)
+}
+
+// the session's windows: first one made with new-session, later ones with new-window
+func newSession(pane string) []string {
+	return []string{"tmux", "new-session", "-s", "agmux-bg", "-d", "-n", "bg-probe", "-c", "/w/x", "-P", "-F", "#{pane_id}", "--", "claude", "attach", "b1"}
+}
+
+func newWindow() []string {
+	return []string{"tmux", "new-window", "-t", "=agmux-bg:", "-d", "-n", "bg-probe", "-c", "/w/x", "-P", "-F", "#{pane_id}", "--", "claude", "attach", "b1"}
+}
+
+func callsNamed(r *fakeRunner, names ...string) [][]string {
+	var out [][]string
+	for _, c := range r.calls {
+		if len(c) > 1 && slices.Contains(names, c[1]) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Enter on a background card with no pane opens the window (in a new session, or in the one that is
+// there), then does what Enter does with a pane: switches to it.
+func TestAttachOnEnter(t *testing.T) {
+	for name, c := range map[string]struct {
+		inSession bool
+		want      []string
+	}{"no session yet": {false, newSession("%9")}, "session there": {true, newWindow()}} {
+		r := attachRunner(c.inSession)
+		m := attachBoard(r)
+		press(t, m, "enter")
+		if got := callsNamed(r, "new-session", "new-window"); !reflect.DeepEqual(got, [][]string{c.want}) {
+			t.Errorf("%s: %q, want %q", name, got, c.want)
+		}
+		if got := callsNamed(r, "switch-client"); !reflect.DeepEqual(got, [][]string{{"tmux", "switch-client", "-c", "/dev/c", "-t", "%9"}}) {
+			t.Errorf("%s: switched %q", name, got)
+		}
+		if first := r.calls[0]; first[1] != "has-session" || first[2] != "-t" || first[3] != "=agmux-bg" {
+			t.Errorf("%s: asked first %q", name, first)
+		}
+	}
+}
+
+// i and tab take the preview and the keys, on the new pane.
+func TestAttachOnReplyAndTab(t *testing.T) {
+	for _, k := range []string{"i", "tab"} {
+		r := attachRunner(true)
+		m, _ := press(t, attachBoard(r), k)
+		if !m.preview || !m.passThrough() || m.pvPane != "%9" || m.pvID != "b1" {
+			t.Errorf("%s: preview %v, pass-through %v on %q", k, m.preview, m.passThrough(), m.pvPane)
+		}
+		if got := callsNamed(r, "new-window"); len(got) != 1 {
+			t.Errorf("%s: windows opened %q", k, got)
+		}
+		if got := callsNamed(r, "switch-client"); len(got) != 0 {
+			t.Errorf("%s switched: %q", k, got)
+		}
+	}
+}
+
+// p only looks: no window, and the preview says what Enter would do. A session that has a pane, or
+// that is not a background one, is not attached.
+func TestAttachNotAskedFor(t *testing.T) {
+	r := attachRunner(true)
+	m, _ := press(t, attachBoard(r), "p")
+	if got := callsNamed(r, "new-window", "new-session", "has-session"); len(got) != 0 {
+		t.Errorf("p opened a window: %q", got)
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "│ background session · enter or i attaches it") {
+		t.Errorf("the preview says nothing:\n%s", v)
+	}
+	for name, mod := range map[string]func(*store.Session){
+		"has a pane":     func(s *store.Session) { s.TmuxPane = "%5" },
+		"not background": func(s *store.Session) { s.Background = false },
+	} {
+		for _, k := range []string{"enter", "i", "tab"} {
+			r := attachRunner(true)
+			m := New(staticSrc{bgSession(func(s *store.Session) { s.CWD = "/w/x"; mod(s) })}, r)
+			m.getenv = func(string) string { return "" }
+			tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+			press(t, tm.(Model), k)
+			if got := callsNamed(r, "new-window", "new-session"); len(got) != 0 {
+				t.Errorf("%s, %s: opened %q", name, k, got)
+			}
+		}
+	}
+}
+
+// A window that can't be opened is said, once, in red: nothing is switched to, nothing is locked.
+func TestAttachFails(t *testing.T) {
+	r := attachRunner(true)
+	r.tmuxFail["new-window"] = errors.New("tmux: no space for new window\nsecond line")
+	m, _ := press(t, attachBoard(r), "tab")
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "attach bg-probe: tmux: no space for new window") || strings.Contains(v, "second line") || m.pvFocus || m.preview {
+		t.Errorf("preview %v, locked %v:\n%s", m.preview, m.pvFocus, v)
+	}
+	r = attachRunner(true)
+	r.tmuxOut["new-window"] = "\n" // tmux said nothing
+	if m, _ = press(t, attachBoard(r), "enter"); !strings.Contains(ansi.Strip(m.View()), "tmux gave no pane") {
+		t.Error("no pane id: not said")
+	}
+}
+
+// If the focus has moved by the time the window is open, the pane is kept for the card but nothing
+// is done to the one that has the focus now.
+func TestAttachFocusMoved(t *testing.T) {
+	r := attachRunner(true)
+	other := store.Session{ID: "z9", Name: "zzz", GroupKey: "/x", TmuxPane: "%2", Status: "idle", ContextPct: -1}
+	m := attachBoard(r, other)
+	m.focus = "z9"
+	tm, _ := m.Update(attachedMsg{id: "b1", pane: "%9", action: "focus_preview"})
+	m = tm.(Model)
+	if m.preview || m.pvFocus {
+		t.Error("tab went to the card that has the focus now")
+	}
+	for _, s := range m.src.Sessions() {
+		if s.ID == "b1" && s.TmuxPane != "%9" {
+			t.Errorf("the pane is not on the card: %q", s.TmuxPane)
+		}
+	}
+}
+
+// The pane is laid over the store's answer until the store has it, or ten seconds: then the store's
+// word is the only one.
+func TestAttachedSrcOverlay(t *testing.T) {
+	inner := &mutSrc{ss: []store.Session{bgSession(nil), {ID: "o", Name: "o"}}}
+	now := time.Unix(1000, 0)
+	a := &attachedSrc{Source: inner, now: func() time.Time { return now }}
+	a.add("b1", "%9")
+	pane := func() string { return a.Sessions()[0].TmuxPane }
+	if pane() != "%9" || a.Sessions()[1].TmuxPane != "" {
+		t.Fatalf("laid over: %q", pane())
+	}
+	if inner.ss[0].TmuxPane != "" {
+		t.Error("the store's own slice was written to")
+	}
+	now = now.Add(9 * time.Second)
+	if pane() != "%9" {
+		t.Error("still there at 9 s")
+	}
+	inner.ss[0].TmuxPane = "%11" // the store has found it
+	if pane() != "%11" {
+		t.Errorf("the store's pane wins: %q", pane())
+	}
+	inner.ss[0].TmuxPane = "" // and the window has closed since: the overlay must not bring it back
+	if pane() != "" {
+		t.Errorf("a closed window came back: %q", pane())
+	}
+	a.add("b1", "%12")
+	now = now.Add(11 * time.Second)
+	if pane() != "" {
+		t.Errorf("after 11 s: %q", pane())
+	}
+}
+
+// The keys that attach are lit on a background card without a pane; handoff is not one of them.
+func TestAttachFooterKeys(t *testing.T) {
+	trueColor(t)
+	lit := func(s store.Session) (jump, handoff bool) {
+		v := psized(staticSrc{s}, 240, 30).View()
+		return !strings.Contains(v, fg(cOff, "enter jump")), !strings.Contains(v, fg(cOff, "H handoff"))
+	}
+	if j, _ := lit(bgSession(nil)); !j {
+		t.Error("enter is dimmed on a background card")
+	}
+	if j, _ := lit(bgSession(func(s *store.Session) { s.Background = false })); j {
+		t.Error("enter is lit on a card with no pane that is not a background one")
 	}
 }

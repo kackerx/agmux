@@ -114,6 +114,9 @@ func previewBox(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focus
 	switch {
 	case !ok || s.TmuxPane == "":
 		content = []string{fg(cMuted, "no pane")}
+		if ok && s.Background {
+			content = []string{fg(cMuted, bgNote)}
+		}
 		if ok {
 			title = fg(cName, s.Name)
 			if s.Background { // bg where the pane would be

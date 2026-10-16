@@ -1,0 +1,69 @@
+package store
+
+import (
+	"errors"
+	"reflect"
+	"testing"
+
+	"github.com/kackerx/agmux/internal/ccmux"
+)
+
+// The pane of a background session is the one `claude attach <id>` was started in; quotes and a
+// path before claude do not matter, the first one wins, and anything else is not it.
+func TestAttachPanes(t *testing.T) {
+	listing := "%0\t\n" +
+		"%3\tclaude attach a7a826e7\n" +
+		"%4\t\"claude\" \"attach\" \"b2\"\n" +
+		"%5\t/usr/local/bin/claude attach c3 --extra\n" +
+		"%6\tclaude attach a7a826e7\n" +
+		"%7\tclaude --resume a7a826e7\n" +
+		"%8\tvim attach d4\n" +
+		"%9\tclaude attach\n" +
+		"no tab here\n" +
+		"\tclaude attach e5\n"
+	want := map[string]string{"a7a826e7": "%3", "b2": "%4", "c3": "%5"}
+	if got := attachPanes(listing); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got := attachPanes(""); len(got) != 0 {
+		t.Errorf("nothing listed: %v", got)
+	}
+}
+
+// A background session with no pane gets the attached one and is still background; an ordinary
+// one, or one ccmux gave a pane, is left alone; tmux is asked only when it matters, and failing
+// is the same as there being nothing.
+func TestFillAttached(t *testing.T) {
+	asked, fail := 0, error(nil)
+	raw := []ccmux.Session{
+		{ID: "a7", TrackingMode: "background"},
+		{ID: "b2", TrackingMode: "background", TmuxPane: "%1"},
+		{ID: "c3", TrackingMode: "native"},
+		{ID: "d4", TrackingMode: "background"},
+	}
+	p := &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir(),
+		Panes: func() (string, error) {
+			asked++
+			return "%3\tclaude attach a7\n%4\tclaude attach b2\n%5\tclaude attach c3\n", fail
+		}}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	ss := p.Sessions()
+	if got := []string{ss[0].TmuxPane, ss[1].TmuxPane, ss[2].TmuxPane, ss[3].TmuxPane}; !reflect.DeepEqual(got, []string{"%3", "%1", "", ""}) {
+		t.Errorf("panes %q", got)
+	}
+	if !ss[0].Background || asked != 1 {
+		t.Errorf("background %v, asked %d times", ss[0].Background, asked)
+	}
+	fail = errors.New("tmux: no server")
+	if err := p.Refresh(); err != nil || p.Sessions()[0].TmuxPane != "" || p.Err() != nil {
+		t.Errorf("tmux failing: pane %q, err %v", p.Sessions()[0].TmuxPane, p.Err())
+	}
+	raw = raw[1:3] // nothing in it needs a pane any more
+	asked = 0
+	p.Refresh()
+	if asked != 0 {
+		t.Errorf("asked tmux %d times with no background session without a pane", asked)
+	}
+}

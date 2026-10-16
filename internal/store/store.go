@@ -70,9 +70,10 @@ type Poller struct {
 	AvatarBind    map[string]string // config.toml's [avatars.bind]
 	AvatarDefault string            // config.toml's [avatars] default; "" = hash
 
-	Seen *avatar.FileBindings // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
-	Now  func() time.Time     // nil = time.Now; tests set it
-	Pins *avatar.FileBindings // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
+	Seen  *avatar.FileBindings   // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
+	Now   func() time.Time       // nil = time.Now; tests set it
+	Pins  *avatar.FileBindings   // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
+	Panes func() (string, error) // tmux's pane listing (see TmuxPanes), for the panes background sessions are attached in; nil = none
 
 	refreshMu  sync.Mutex            // serializes Refresh; guards models
 	pinGone    map[string]time.Time  // pinned name → when no session had it any more (see prunePins)
@@ -98,7 +99,7 @@ func NewPoller() (*Poller, error) {
 	b, err := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
 	seen, serr := avatar.LoadBindings(filepath.Join(dir, "seen.json")) // likewise: a corrupt one means nothing is seen
 	pins, perr := avatar.LoadBindings(filepath.Join(dir, "pins.json"))
-	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b, avatarErr: err, Seen: seen, seenErr: serr, Pins: pins, pinsErr: perr}, nil
+	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b, avatarErr: err, Seen: seen, seenErr: serr, Pins: pins, pinsErr: perr, Panes: TmuxPanes}, nil
 }
 
 func (p *Poller) Sessions() []Session {
@@ -299,6 +300,7 @@ func (p *Poller) Refresh() error {
 		for i, r := range raw {
 			ss[i] = p.convert(r)
 		}
+		p.fillAttached(ss)
 		if p.Pins != nil {
 			if e := p.prunePins(ss); perr == nil {
 				perr = e
