@@ -397,16 +397,16 @@
 ## 第十一批 后台会话（agent-builder 2026-10-16 转达，称用户已确认；用户可否决）
 背景：编排者以后用 `claude --bg --agent <角色> -n <项目>-<角色> --model <模型> "<任务>"` 起后台会话（无 tmux pane），看板上会越来越多。实测（ccmux 1.4.3、Claude Code 2.1.300）：`ccmux show --json` 里 `trackingMode:"background"`、`tmuxPane:null`、`summary:null`；`claude agents --json` 有 `kind:"background"` 和 `name`；名字写在会话 jsonl 里（`{"type":"custom-title","customTitle":"bg-probe2"}`，重复写了几次）；`claude attach <id|name>` 把后台会话接到当前终端（← 回 agent 视图，Ctrl+Z 回 shell，会话照跑）；`claude logs / stop / rm <id>`。
 
-### T58 后台会话的卡片名用 `-n` 给的名字（8e69c38）
+### T58 后台会话的卡片名用 `-n` 给的名字（通过 @3f8d72b / 17 条）
 - 现状：store.go `Name: r.Summary`，空就退回 Project，后台会话显示成项目名。
 - 定稿：Name = Summary；Summary 空时取 jsonl 里最后一条 `custom-title` 的 customTitle；再空才退回 Project。读法：先在已经读的末尾 64KB tail 里找；找不到就整文件扫一次（流式、取最后一条），按 session id 缓存结果（名字不会变，每个会话最多整扫一次）；没有 logPath 或文件读不到就退回 Project。不额外起 `claude agents` 进程。AvatarKey / pin / seen 的名字口径随 Name 一起变（后台会话有了真名就按真名记）。`agmux show` 的名字列同步。
 - 验收：单测 tail 有 custom-title → 用它；tail 没有、文件前面有 → 整扫一次拿到且第二次 poll 不再读整文件（计数）；都没有 → Project；summary 有 → 不看 jsonl；黑盒 假 ccmux 返回 summary null + 假 jsonl → 卡片名是 -n 的名字。
 
-### T59 卡片标明后台会话（fbffe54）
+### T59 卡片标明后台会话（通过 @3f8d72b / 15 条）
 - 定稿：Session 加 `Background bool`（trackingMode == "background"）。卡片第二行右端（分支那行的右边空位）加 muted 的 `bg` 标签；预览标题里 pane id 的位置写 `bg`（有了 T60 的 attach pane 后标题仍写 `bg · %id`）。没有 pane 的消息行文案改为 `background session · enter or i attaches it`（T60 之前先改文案，键仍灰）。`agmux show` 加一列 `bg`/空。
 - 验收：单测 后台卡有 `bg` 标签、普通卡没有；预览标题；show 列；黑盒 假 ccmux trackingMode background → 卡片与标题可见 `bg`。
 
-### T60 在预览里和后台会话交互：按需 attach 到一个 tmux pane（aa662cc）
+### T60 在预览里和后台会话交互：按需 attach 到一个 tmux pane（通过 @3f8d72b / 35 条；整套 1036 条）
 - 用户要的：不另开终端，在 agmux 预览窗口里就能和后台会话对话。
 - 定稿（最少新代码：让后台会话也有 pane，T24 / T57 的预览、直通、光标、跳转全部复用）：
   - 后台卡没有 pane 时，`enter`（jump）/ `i`（reply）/ `tab`（focus_preview）先给它起一个 pane：在专用 tmux session `agmux-bg` 里开窗口 `new-window -d -t agmux-bg: -n <卡片名> -c <cwd> -P -F '#{pane_id}' -- claude attach <id>`（session 不存在就 `new-session -d -s agmux-bg … -- claude attach <id>`），然后照常：enter 切过去、i / tab 开预览进直通。`p`（预览开关）不 attach：焦点扫过后台卡时预览区显示 `background session · enter or i attaches it`。
@@ -422,3 +422,4 @@
 - reviewer（dba7fed）退回 4 必改：(1) T58 改名后退回旧名——tail 命中不更新缓存、有缓存就不再看新增 → 改成有缓存也从 scanned 增量扫新增部分、新标题覆盖；(2) T58 补两个用例：文件变短 scanned 归零、整扫取最后一条；(3) T59 line2Right 的 agent 先截到 w 再拼 " bg" 超宽 → Background 时 agent 截到 w-3（不足只留 bg）+ 超长 agent 用例；(4) README:22 show 列说明补 bg。采纳建议 1（titleState 记 path，不同从 0 扫）、2（bg muted 断言）、3（`/` 下焦点在后台卡的 footer 用例）、4（attached=nil 的 Model 测不再发 attach，锁住防递归）、6（list-panes 加 `#{pane_dead}`，死 pane 不认领）。备忘（建议 5）：两块看板同时按，B 的卡会换成 A 的 pane 而 pvPane 仍是 B 的，B 直通掉一次要按 tab，B 开的窗口成孤儿需手关。备忘：不在 tmux 时 new-session -d 会顺带起默认 server。已核：T60 黑盒 i → agmux-bg 窗口 87×44、标题 `proj · bg · %2`、打字到达、叠加层过期不闪、id 整词匹配、名字 / cwd 带引号空格走 argv、kill-window 后回无 pane、用户手工 new-window 'claude attach id' 的 pane 会被认领（好事）、H 轮询在 Cmd 里、has-session 精确；56 MB jsonl 整扫 59 ms；用户当前 0 个后台会话、置顶 / 头像不受影响；show 第 8 列无外部调用方；变异 38 杀 31。
 - dev 3f8d72b（第十一批退回 9 条）：title() 有缓存也增量扫、tail 命中写回缓存并把 scanned 设为当前大小（取舍：读 tail 与 stat 之间的几微秒新字节跳过，tail 每次都读不会丢改名）；TestTitleRename（A→B→滚出仍 B→盖过 tail 得 C）、TestTitleOtherFile（变短清空、换无标题文件退回项目名、整扫取最后一条）；path 变了从 0 扫；line2Right Background 时 agent 截到 w-3 + 兜底 Truncate，8 种宽度用例且 muted；README 列说明；过滤分支 footer 用例；attached=nil 防递归用例；list-panes 加 pane_dead（四列 `%id\tsession\tdead\tcmd`，三列旧行忽略）；探针 9 杀。本轮目标 3f8d72b，送复审。
 - reviewer 复审 3f8d72b 通过无必改：改名滚出 tail 仍是新名；两个缺口补上；8 种宽度 bg 完整；README 对齐；5 建议都采纳并各有变异杀；真 tmux 复验 remain-on-exit 下 dead pane 3 s 后不认领、bb/t60.sh 全部一致。dev 的取舍接受（要同时满足改名落在 tail 与 Stat 之间的微秒窗口、且 2 s 内再写 64KB 才会漏；可选：首次 tail 命中把 scanned 设成 size-64KB，不阻塞）。变异 44 杀 41（存活 statErrEmpty / noFinalTrunc / noTypeCheck 均可不补）。第十一批目标 3f8d72b，送 tester。
+- tester（3f8d72b，套件 38f92a2）：整套 1036 条 2997 s，1 红是 t10 150 ms 用例被 poll 的 list-panes 插进 send-keys 之间（用例问题，tmux_calls 默认过滤 poll 的 list-panes），修后 t10 三遍、新 67 条两遍绿，整套未再跑。T58 17 条（tail / 整扫 / 多条取最后 / 无标题 / 读不到 / summary 优先 / 别的行 / 空标题 / 断行 / 中文引号 / 20 MB / 改名 / 滚出不倒退 / 半行 / 晚出现 / 变短 / 换 path / 两会话 / show / pins 按标题）。T59 15 条（bg 位置 / agent bg / 让位 / 超长 agent 4 宽度 / 标题两式 / 两种无 pane 文案 / show 第 8 列）。T60 35 条：Shape 层假 tmux 记 argv（四键先 attach、-x/-y 取屏上量值、H 等内容 5 s、p 不建、不重复、引号空格、两卡两窗、叠加层 10 s、解析 8 种、按需跑 list-panes、失败路径、non-tmux）+ Real 层私有 tmux 假 claude（窗口尺寸 / 名 / -c / 预览 / 直通 / H 等 1.5 s 后 ^M 到达 / enter 切 client / kill / 退出 / 死 pane 回无 pane 再重建 / 重启认领 / 手工窗口认领 / 前缀 id）。反向 24a88f4 67 红、dba7fed 各修复点红。旧用例 t4 / t10 / t11 / t12 / t37 改。tester 失误已记：早期几个手工窗口 PATH 走到真 claude，只报错退出未动用户会话，已改走假脚本绝对路径。没覆盖：真 bg 会话、两看板竞态、非 tmux 真环境、真 kitty、Linux、claude 退出键。
