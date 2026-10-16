@@ -425,7 +425,7 @@
 - tester（3f8d72b，套件 38f92a2）：整套 1036 条 2997 s，1 红是 t10 150 ms 用例被 poll 的 list-panes 插进 send-keys 之间（用例问题，tmux_calls 默认过滤 poll 的 list-panes），修后 t10 三遍、新 67 条两遍绿，整套未再跑。T58 17 条（tail / 整扫 / 多条取最后 / 无标题 / 读不到 / summary 优先 / 别的行 / 空标题 / 断行 / 中文引号 / 20 MB / 改名 / 滚出不倒退 / 半行 / 晚出现 / 变短 / 换 path / 两会话 / show / pins 按标题）。T59 15 条（bg 位置 / agent bg / 让位 / 超长 agent 4 宽度 / 标题两式 / 两种无 pane 文案 / show 第 8 列）。T60 35 条：Shape 层假 tmux 记 argv（四键先 attach、-x/-y 取屏上量值、H 等内容 5 s、p 不建、不重复、引号空格、两卡两窗、叠加层 10 s、解析 8 种、按需跑 list-panes、失败路径、non-tmux）+ Real 层私有 tmux 假 claude（窗口尺寸 / 名 / -c / 预览 / 直通 / H 等 1.5 s 后 ^M 到达 / enter 切 client / kill / 退出 / 死 pane 回无 pane 再重建 / 重启认领 / 手工窗口认领 / 前缀 id）。反向 24a88f4 67 红、dba7fed 各修复点红。旧用例 t4 / t10 / t11 / t12 / t37 改。tester 失误已记：早期几个手工窗口 PATH 走到真 claude，只报错退出未动用户会话，已改走假脚本绝对路径。没覆盖：真 bg 会话、两看板竞态、非 tmux 真环境、真 kitty、Linux、claude 退出键。
 - 2026-10-16 13:38 已装 3f8d72b（干净 clone，vcs.modified=false）。T46–T60 待用户验收。
 
-### T61 预览不再换行（回到截断），预览宽度可配 `[layout] preview_width`（待做）
+### T61 预览不再换行（回到截断），预览宽度可配 `[layout] preview_width`（3ebcdef 送审）
 - 用户 2026-10-16（截图 images/27.png、28.png）：T56 的硬换行太生硬，Claude Code 的表格、输入框整个乱掉；「不好实现的话按原来的来，把预览框加宽点」。判断：pane 是 TUI，按框宽换行必然破坏盒线和对齐，判别「哪些行能换」不可靠 → 回到截断，用宽度解决。实测（只读 list-panes）用户的 claude pane 宽度多为 61–71，另有 117 / 130；253 列终端 40% 预览框内 96 列，比大多数 pane 宽，只有 117 / 130 的 pane 会被截。
 - 定稿：
   - 预览内容回到 T56 之前的截断（每行 ansi.Truncate 到框内宽度，不换行；光标 cursor_x 超出框宽不画、不定位真光标（T57 的 HideCursor 路径））。保留 T56 一起修的两条：SGR 跨 pane 行延续（从整段 capture 首行算）、行尾底色止于文字不铺到边框。滚动回到按 capture 行数。previewInner 单一来源保留。
@@ -433,3 +433,4 @@
   - README / design.md（m2-preview 预览段「40%」处）同步。
 - 验收：单测 150 列长行在框里截断且无第二行；SGR 跨行与底色止于文字的既有用例仍过；cursor_x 超宽不画不定位；preview_width 50 时 previewW(253)=126、30 / 70 边界、29 / 71 报错、未写时 40；golden。黑盒 真 tmux pane 150 列的表格（盒线）在预览里左侧完整不乱；config 行；改 55 后卡片列数变化。
 - 用户配置：我在装好后把 `~/.config/agmux/config.toml` 的 preview_width 设为 55（253 列下框内约 134 列，用户所有 claude pane 都放得下；卡片区 114 列约 2 列），用户可改。
+- dev 3ebcdef（T61）：wrapRows → carrySGR 逐行 Truncate；滚动 / pvLines 回按 capture 行数；col ≥ 框宽不画、pvBox -1 不定位；保留 SGR 跨行 + 底色止于文字；wrap_test 删、cut_test 新（150 列截断、宽字符边缘丢、滚动按行、91/92）；config PreviewWidth 30–70 默认 40，模板行 + golden，previewPct 走 useConfig；README / m2 design.md 同步（T56 段改写为曾换行 T61 改回）；探针 6 杀。本轮目标 3ebcdef。
