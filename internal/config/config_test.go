@@ -567,3 +567,38 @@ func TestMarkReadKeys(t *testing.T) {
 		t.Errorf("m taken from the default's owner: %v %v", err, c.Keys["mark_read"])
 	}
 }
+
+// [layout] preview_width is a percent from 30 to 70, 40 when not written; outside it is an error that
+// says the range; the template prints it with its default.
+func TestPreviewWidth(t *testing.T) {
+	if Default().PreviewWidth != 40 {
+		t.Errorf("default %d", Default().PreviewWidth)
+	}
+	for _, n := range []int{30, 40, 50, 70} {
+		c, err := Parse("cfg", []byte(fmt.Sprintf("[layout]\npreview_width = %d\n", n)))
+		if err != nil || c.PreviewWidth != n {
+			t.Errorf("%d: %v %v", n, err, c)
+		}
+	}
+	if c, err := Parse("cfg", []byte("[layout]\nflow = \"stack\"\n")); err != nil || c.PreviewWidth != 40 {
+		t.Errorf("not written: %v %v", err, c)
+	}
+	for _, n := range []int{29, 71, 0, -5, 100} {
+		if _, err := Parse("cfg", []byte(fmt.Sprintf("[layout]\npreview_width = %d\n", n))); err == nil || err.Error() != "cfg: layout.preview_width: must be 30–70" {
+			t.Errorf("%d: %v", n, err)
+		}
+	}
+	if _, err := Parse("cfg", []byte("[layout]\npreview_width = \"wide\"\n")); err == nil || !strings.Contains(err.Error(), "preview_width") {
+		t.Errorf("a string: %v", err)
+	}
+	c, _ := Parse("cfg", []byte("[layout]\npreview_width = 55\n"))
+	if out := c.String(); !strings.Contains(out, "preview_width = 55 ") {
+		t.Errorf("printed:\n%s", out)
+	}
+	if back, err := Parse("cfg", []byte(c.String())); err != nil || back.PreviewWidth != 55 {
+		t.Errorf("round trip: %v", err)
+	}
+	if !strings.Contains(Default().String(), "preview_width = 40            # default: 40 — the preview's share of the terminal width, in percent (30–70; never under 60 columns)") {
+		t.Errorf("template line:\n%s", Default().String())
+	}
+}

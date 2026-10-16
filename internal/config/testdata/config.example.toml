@@ -64,6 +64,7 @@ disabled = "#45475a"          # default: #45475a
 
 [layout]
 max_columns = 4               # default: 4 — 1 to 8; fewer columns are used when the terminal is narrow
+preview_width = 40            # default: 40 — the preview's share of the terminal width, in percent (30–70; never under 60 columns)
 flow = "bands"                # default: "bands" — "bands": a row of groups at a time, all rows the same
                               #   height; "stack": groups stack down each column, no gaps
 group_by = "cwd"              # default: "cwd" — grouping at start: "cwd", "project", "session" or

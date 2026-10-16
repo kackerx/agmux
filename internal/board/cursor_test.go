@@ -86,7 +86,7 @@ func has(msgs []tea.Msg, want tea.Msg) bool {
 }
 
 // View puts the cursor on the pane's cursor cell: the cards' width, the header row, the preview's
-// title and the box's border and padding all counted; on a wrapped line, where that cell landed.
+// title and the box's border and padding all counted.
 func TestPassThroughPlacesCursor(t *testing.T) {
 	for _, c := range []struct {
 		name, text string
@@ -97,7 +97,6 @@ func TestPassThroughPlacesCursor(t *testing.T) {
 		{"first cell", "abc\n", cursor{row: 0, col: 0}, "\x1b[4;144H"},
 		{"third line, fifth cell", "a\nb\nabcdef\n", cursor{row: 2, col: 4}, "\x1b[6;148H"},
 		{"a bar, the same cell", "abc\n", cursor{row: 0, col: 2, bar: true}, "\x1b[4;146H"},
-		{"the second row of a wrapped line", strings.Repeat("x", 90) + "\n", cursor{row: 0, col: 89}, "\x1b[5;146H"}, // 87 inside: cell 89 is the third of row two
 	} {
 		m, out := cursorModel(c.text, &c.cur)
 		m.View()
@@ -144,6 +143,7 @@ func TestPassThroughShowsAndHidesCursor(t *testing.T) {
 		"scrolled back":      func(m *Model) { m.scroll = 2 },
 		"preview closed":     func(m *Model) { m.preview = false },
 		"cursor off screen":  func(m *Model) { m.pv.cur = &cursor{row: 99, col: 0} },
+		"beyond the box":     func(m *Model) { m.pv.cur = &cursor{row: 0, col: 87} }, // 87 columns inside: cells 0–86
 	} {
 		m, out := cursorModel("abc\n", &cursor{row: 0, col: 1})
 		mod(&m)

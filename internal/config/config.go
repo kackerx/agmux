@@ -55,9 +55,10 @@ type Config struct {
 	Keys   map[string][]string // action → key names (bubbletea's, "space" for the space bar)
 	Colors map[string]string   // name → "#rrggbb" or an ANSI index "0".."255"
 
-	MaxColumns int    // [layout] max_columns: the most columns of cards, if the terminal is wide enough
-	GroupBy    string // [layout] group_by: how cards are grouped at start: one of GroupModes
-	Flow       string // [layout] flow: "bands" (a row of groups at a time) or "stack" (group k in column k mod n)
+	MaxColumns   int    // [layout] max_columns: the most columns of cards, if the terminal is wide enough
+	PreviewWidth int    // [layout] preview_width: the preview's share of the terminal width, in percent
+	GroupBy      string // [layout] group_by: how cards are grouped at start: one of GroupModes
+	Flow         string // [layout] flow: "bands" (a row of groups at a time) or "stack" (group k in column k mod n)
 
 	AvatarRenderer string            // [avatars] renderer: "auto", "image" or "pixel"
 	AvatarDefault  string            // [avatars] default: "hash" or an avatar ID (sprite or image set)
@@ -66,7 +67,7 @@ type Config struct {
 
 // Default is the configuration with no file.
 func Default() *Config {
-	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, Flow: "bands", GroupBy: "cwd", AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
+	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, PreviewWidth: 40, Flow: "bands", GroupBy: "cwd", AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
 	for k, v := range defaultKeys {
 		c.Keys[k] = slices.Clone(v) // callers may change c; the defaults stay
 	}
@@ -112,6 +113,9 @@ var GroupModes = []string{"cwd", "project", "session", "state"}
 // The range of [layout] max_columns.
 const minMaxColumns, maxMaxColumns = 1, 8
 
+// The range of [layout] preview_width, in percent.
+const minPreviewWidth, maxPreviewWidth = 30, 70
+
 var colorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 // Parse merges a config file over the defaults (an action set in the file replaces its default
@@ -121,9 +125,10 @@ func Parse(path string, data []byte) (*Config, error) {
 		Keys   map[string][]string `toml:"keys"`
 		Colors map[string]string   `toml:"colors"`
 		Layout struct {
-			MaxColumns int    `toml:"max_columns"`
-			Flow       string `toml:"flow"`
-			GroupBy    string `toml:"group_by"`
+			MaxColumns   int    `toml:"max_columns"`
+			PreviewWidth int    `toml:"preview_width"`
+			Flow         string `toml:"flow"`
+			GroupBy      string `toml:"group_by"`
 		} `toml:"layout"`
 		Avatars struct {
 			Renderer string            `toml:"renderer"`
@@ -206,6 +211,12 @@ func Parse(path string, data []byte) (*Config, error) {
 			return nil, fmt.Errorf("%s: layout.max_columns: %d is out of range (%d to %d columns)", path, n, minMaxColumns, maxMaxColumns)
 		}
 		c.MaxColumns = raw.Layout.MaxColumns
+	}
+	if md.IsDefined("layout", "preview_width") {
+		if n := raw.Layout.PreviewWidth; n < minPreviewWidth || n > maxPreviewWidth {
+			return nil, fmt.Errorf("%s: layout.preview_width: must be %d–%d", path, minPreviewWidth, maxPreviewWidth)
+		}
+		c.PreviewWidth = raw.Layout.PreviewWidth
 	}
 	if md.IsDefined("layout", "flow") {
 		if f := raw.Layout.Flow; f != "bands" && f != "stack" {
@@ -372,6 +383,7 @@ func (c *Config) String() string {
 	}
 	b.WriteString("\n[layout]\n")
 	line(fmt.Sprintf("max_columns = %d", c.MaxColumns), with("4", fmt.Sprintf("%d to %d; fewer columns are used when the terminal is narrow", minMaxColumns, maxMaxColumns)))
+	line(fmt.Sprintf("preview_width = %d", c.PreviewWidth), with("40", fmt.Sprintf("the preview's share of the terminal width, in percent (%d–%d; never under 60 columns)", minPreviewWidth, maxPreviewWidth)))
 	line(fmt.Sprintf("flow = %q", c.Flow), with(`"bands"`, `"bands": a row of groups at a time, all rows the same`))
 	cont(`height; "stack": groups stack down each column, no gaps`)
 	line(fmt.Sprintf("group_by = %q", c.GroupBy), with(`"cwd"`, `grouping at start: "cwd", "project", "session" or`))

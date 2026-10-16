@@ -17,11 +17,14 @@ const (
 	previewMinW    = 60
 )
 
-// previewInner is the columns of text in a w-wide preview: one of gap from the cards, then "│ " … " │".
+// previewInner is the columns of text in a w-wide preview (a longer line is cut): one of gap from the cards, then "│ " … " │".
 func previewInner(w int) int { return w - 1 - 4 }
 
-// previewW is the preview's share of a w-wide terminal: 40%, at least previewMinW.
-func previewW(w int) int { return max(previewMinW, w*40/100) }
+// previewPct is the preview's share of the terminal, in percent: [layout] preview_width, set by useConfig.
+var previewPct = 40
+
+// previewW is the preview's share of a w-wide terminal: previewPct percent, at least previewMinW.
+func previewW(w int) int { return max(previewMinW, w*previewPct/100) }
 
 // previewOn: asked for with p and the terminal is wide enough right now.
 func (m Model) previewOn() bool { return m.preview && m.w >= previewMinTerm }
@@ -141,15 +144,11 @@ func previewBox(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focus
 			if pv.cur != nil && scroll == 0 { // a scrolled-back view isn't where the cursor is
 				keep = pv.cur.row + 1 // the blank rows down to the cursor's are part of the screen
 			}
-			var cur *cursor
-			if keep > 0 {
-				cur = pv.cur
-			}
-			rows, row, col := wrapRows(trimTail(pv.text, keep), inner, cur)
-			content = rows[min(max(len(rows)-(n+scroll), 0), len(rows)):] // scroll rows back: drop that many from the bottom
+			lines := carrySGR(trimTail(pv.text, keep))
+			content = lines[min(max(len(lines)-(n+scroll), 0), len(lines)):] // scroll lines back: drop that many from the bottom
 			content = content[:max(len(content)-scroll, min(len(content), n))]
-			if cur != nil {
-				curRow, curCol = row-(len(rows)-len(content)), col
+			if keep > 0 {
+				curRow, curCol = pv.cur.row-(len(lines)-len(content)), pv.cur.col
 			}
 		}
 	}
@@ -200,36 +199,19 @@ func paintCursor(l string, c *cursor, col int, real bool) string {
 	return put(l, col, style.Render(cell))
 }
 
-// wrapRows hard-wraps each line of the capture to inner columns, the pane's colors carried onto the
-// rows that continue a line. cur (nil: none) is the pane's cursor in lines; row and col are where it
-// lands among the rows (the cell after the end of its line may need a row of its own).
-func wrapRows(lines []string, inner int, cur *cursor) (rows []string, row, col int) {
-	row = -1 // the cursor is not among them
-	// tmux ends a line without a reset when its last cell is colored, and does not repeat the color
-	// on the next: so what is in force goes on across lines, from the first line of the capture
-	// (the lines above the rows shown may be where it was set).
-	// ponytail: the state is every sequence since the last reset: a long capture that never resets
-	// makes every row's prefix as long.
+// carrySGR starts each line with the color and style in force at the end of the one before. tmux
+// ends a line without a reset when its last cell is colored, and does not repeat the color on the
+// next: so it goes on across lines, from the first line of the capture (the lines above the ones
+// shown may be where it was set).
+// ponytail: the state is every sequence since the last reset: a long capture that never resets
+// makes every line's prefix as long.
+func carrySGR(lines []string) []string {
 	sgr := ""
 	for i, l := range lines {
-		parts := strings.Split(ansi.Hardwrap(l, inner, true), "\n")
-		for j, p := range parts {
-			parts[j] = sgr + p
-			sgr = activeSGR(parts[j])
-		}
-		if cur != nil && i == cur.row {
-			j, acc := 0, 0 // the row the cursor is on, and the column that row starts on
-			for ; j < len(parts)-1 && cur.col >= acc+ansi.StringWidth(parts[j]); j++ {
-				acc += ansi.StringWidth(parts[j])
-			}
-			for ; cur.col-acc >= inner; acc += inner { // past the end of the line: rows of blanks
-				parts, j = append(parts, ""), j+1
-			}
-			row, col = len(rows)+j, cur.col-acc
-		}
-		rows = append(rows, parts...)
+		lines[i] = sgr + l
+		sgr = activeSGR(lines[i])
 	}
-	return rows, row, col
+	return lines
 }
 
 // activeSGR is the color / style sequence in force at the end of l, to start the next row with.

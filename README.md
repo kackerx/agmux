@@ -37,7 +37,7 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 | `f` | 折叠 / 展开焦点所在的组 |
 | `g` | 换分组方式，按 `cwd`（目录，默认）→ `project`（ccmux 的项目：worktree 归到主仓库名下）→ `session`（tmux session，没有 pane 的后台会话归 `(no pane)`，排最后）→ `state`（working / waiting / done / idle 四组，按这个顺序）循环，底栏显示 `g group:<当前>`；换了之后各组都是展开的（折叠不跨方式），焦点还在原来的卡上；cwd 以外的组标题直接写名字，搜索不往标题里画路径命中 |
 | （默认不绑）`group_cwd` / `group_project` / `group_session` / `group_state` | 直接切到那个分组方式，不用按 `g` 循环；和 `g` 切到同一方式时行为一样（各组展开、焦点留原卡），已经在该方式就什么也不做。在配置里给它们键才有用，例如 `group_state = ["G"]`；写 `[]` 表示不绑 |
-| `p` | 开关右侧预览（终端至少 100 列）；预览里会画出 pane 的光标（块状 = 反色，竖线 / 下划线 = focus 色下划线；光标被隐藏或预览往回滚时不画） |
+| `p` | 开关右侧预览（终端至少 100 列；宽度占终端的 40%，最少 60 列，`[layout] preview_width` 可改，30–70；pane 里比框宽的行从右边截掉，不换行，Claude Code 的表格和输入框才不会乱）；预览里会画出 pane 的光标（块状 = 反色，竖线 / 下划线 = focus 色下划线；光标被隐藏或预览往回滚时不画） |
 | `tab` | 打开预览（没开的话）并进入；在预览里时除 `tab` 外所有按键都发给那个 pane（含 `ctrl-c`、`shift+tab`），再按 `tab` 回到卡片（预览留着，`p` 才关它），滚轮往回翻。直通里 `tab` 到不了 pane，要补全请在真终端里按 |
 | `i` | 回复：开预览并把按键交给这个会话（等于 `p` + `tab`），之后打的字直接进它的 pane；`tab` 回到卡片 |
 | `H` | 发 `/handoff` |
@@ -128,6 +128,7 @@ border = "#585b70"  # 所有非焦点卡的边框统一用这个色（默认空 
 
 [layout]
 max_columns = 4                     # 终端够宽时最多几列卡片（1–8）；每列至少 40 列宽，所以窄终端到不了这个数（5 列约需 ≥ 200 列）
+preview_width = 40                  # 预览占终端宽度的百分比（30–70，默认 40，最少 60 列）；越宽，pane 里的长行被截掉得越少，卡片区相应变窄
 flow = "bands"                      # 组怎么排：bands（默认）每 n 个组一行，行高 = 最高的组，矮的组下面留空；stack 第 k 个组进第 k mod n 列，每列自己往下堆（没有空洞，列高不齐）
 group_by = "cwd"                    # 启动时的分组方式：cwd | project | session | state；运行中按 g 换
 

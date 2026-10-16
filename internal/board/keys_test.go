@@ -3110,7 +3110,7 @@ func TestPreviewDrawsCursor(t *testing.T) {
 			t.Errorf("%s: width %d, the box keeps its edges", c.name, w)
 		}
 	}
-	// no cursor drawn: hidden, scrolled back, above or below the window, off to the left
+	// no cursor drawn: hidden, scrolled back, above or below the window, off to the left or right
 	plain := cursorBox(previewMsg{pane: "%1", text: text}, 0)
 	for name, args := range map[string]struct {
 		cur    *cursor
@@ -3118,7 +3118,7 @@ func TestPreviewDrawsCursor(t *testing.T) {
 	}{
 		"hidden": {nil, 0}, "scrolled": {&cursor{row: 2, col: 1}, 3},
 		"above the window": {&cursor{row: -1, col: 1}, 0}, "below it": {&cursor{row: 40, col: 1}, 0},
-		"left of it": {&cursor{row: 2, col: -1}, 0},
+		"left of it": {&cursor{row: 2, col: -1}, 0}, "right of the box": {&cursor{row: 2, col: 35}, 0},
 	} {
 		got := cursorBox(previewMsg{pane: "%1", text: text, cur: args.cur}, args.scroll)
 		if args.scroll == 0 && !reflect.DeepEqual(got, plain) {

@@ -1,6 +1,6 @@
 # M2 预览窗口（设计）
 
-目标：不离开看板就能看一个会话在干什么、并直接回一句。参考 ccmux picker 的 preview（右侧、40%、按键直通），但抓屏和按键都直接走 tmux，不经过 ccmux（见 README「tmux 优先」）。
+目标：不离开看板就能看一个会话在干什么、并直接回一句。参考 ccmux picker 的 preview（右侧、默认 40%（M3 起 `[layout] preview_width` 可配）、按键直通），但抓屏和按键都直接走 tmux，不经过 ccmux（见 README「tmux 优先」）。
 
 ## 布局
 ```
@@ -11,11 +11,11 @@
                                             ┃ ╰──────────────────────────────────────────╯
  j/k/h/l 卡片 · p 预览 · tab 进入预览 · …     ┃ [预览获焦时] keys go to the pane · tab back to the cards
 ```
-- `P`（M3 起改 `p`）开关预览；开着时预览占终端宽度 40%（最少 60 列，终端不足 100 列时不开、底栏提示；开着时缩到 100 列以下按 P 就是关掉，不只是提示），卡片区按剩余宽度用 M1 的列数算法重排。
+- `P`（M3 起改 `p`）开关预览；开着时预览占终端宽度的 preview_width%（默认 40，范围 30–70，最少 60 列，终端不足 100 列时不开、底栏提示；开着时缩到 100 列以下按 P 就是关掉，不只是提示），卡片区按剩余宽度用 M1 的列数算法重排。
 - 换焦点（键盘、鼠标、展开折叠组）都立即抓一次屏；抓屏在途时焦点变了，结果回来发现 pane 不是当前焦点就马上再抓一次。
 - 底栏放不下时从右侧截断加 …，不按优先级丢项（M3 的英文底栏已把 j/k h/l 合成一项）。
 - 预览标题行：会话名 · pane id · 状态。内容 = `tmux capture-pane -p -e -t <pane> -S -<N>`，N = 预览可用高度；预览开着时每 500ms 抓一次（卡片仍 2s 轮询）。
-- 光标（T24，dev 2026-10-12 在 tmux 3.7c 真 pane 实测）：抓屏时同一次 tmux 调用用 `;` 拼上 `display-message -p -t <pane> '#{cursor_x} #{cursor_y} #{cursor_flag} #{cursor_shape} #{pane_height}'`，输出第一行是光标、其余是屏幕（同一时刻、不多开进程）。实测事实：cursor_x / cursor_y 从 0 起、相对当前可见屏（不含历史），宽字符占 2 格；cursor_flag 1 显示 / 0 隐藏（tput civis、`\e[?25l`、copy-mode 都是 0）；cursor_shape 是文字 default / block / underline / bar（DECSCUSR 0→default，1、2→block，3、4→underline，5、6→bar；civis 不改 shape；nvim 普通态 block、插入态 bar）。捕获文本带历史，光标行 = 总行数 − pane_height + cursor_y。画法：flag=0 不画；block / default → 该格反色（空白格也反成块）；bar / underline → 该格 focus 色下划线（终端画不出细竖线）；预览滚动偏移非 0、或 cursor_x 超出预览宽度 → 不画；预览和直通态都画，随每次抓屏刷新。内容填满框而光标停在末尾空行时，末尾空行只裁到光标行为止（框少显示最上一行）；预览的 tab 按 8 列制表位展开（和 cursor_x 一致）；信息行认不出（旧 tmux）就丢掉第一行、不画光标。Claude Code 输入框未实测（ink 自己画反色块，真光标多半 flag=0），不特判。T56 起预览里长行按框宽硬换行（不再截断），光标画在换行后的行列，所以「cursor_x 超出预览宽度不画」不再成立。T57 起直通态不画反色块 / 下划线，改为把终端真光标放到那一格并显示（`tea.WithOutput` 传嵌入 *os.File 的包装，每次写完追加 `\x1b[行;列H`——bubbletea v1 每帧末尾固定把光标放到最后一行开头，输入法候选框跟终端光标走；位置在 View 算；格子里只放一个无效果的 `\x1b[27m`，让光标移动也改变画面、渲染器才会重写），离开直通 / 光标不可画 / 预览关闭时 HideCursor；kitty 0.49 + tmux 的普通 pane 和 popup 里实测（`#{cursor_x} #{cursor_y}`、`kitty @ get-text --add-cursor` 都等于预览里那一格，宽字符、换行后的行也对）。
+- 光标（T24，dev 2026-10-12 在 tmux 3.7c 真 pane 实测）：抓屏时同一次 tmux 调用用 `;` 拼上 `display-message -p -t <pane> '#{cursor_x} #{cursor_y} #{cursor_flag} #{cursor_shape} #{pane_height}'`，输出第一行是光标、其余是屏幕（同一时刻、不多开进程）。实测事实：cursor_x / cursor_y 从 0 起、相对当前可见屏（不含历史），宽字符占 2 格；cursor_flag 1 显示 / 0 隐藏（tput civis、`\e[?25l`、copy-mode 都是 0）；cursor_shape 是文字 default / block / underline / bar（DECSCUSR 0→default，1、2→block，3、4→underline，5、6→bar；civis 不改 shape；nvim 普通态 block、插入态 bar）。捕获文本带历史，光标行 = 总行数 − pane_height + cursor_y。画法：flag=0 不画；block / default → 该格反色（空白格也反成块）；bar / underline → 该格 focus 色下划线（终端画不出细竖线）；预览滚动偏移非 0、或 cursor_x 超出预览宽度 → 不画；预览和直通态都画，随每次抓屏刷新。内容填满框而光标停在末尾空行时，末尾空行只裁到光标行为止（框少显示最上一行）；预览的 tab 按 8 列制表位展开（和 cursor_x 一致）；信息行认不出（旧 tmux）就丢掉第一行、不画光标。Claude Code 输入框未实测（ink 自己画反色块，真光标多半 flag=0），不特判。T56 曾把预览里的长行按框宽硬换行，但 Claude Code 的表格和输入框（盒线、对齐）被换行整个打乱，T61 改回按框宽截断（不换行），用 preview_width 加宽预览来解决；cursor_x 超出框宽仍不画、也不定位真光标。SGR 跨 pane 行延续（tmux 行末带色不 reset、下一行不重写，从整段 capture 首行算起）和行尾底色止于文字（pad 前 reset）两条修复保留。T57 起直通态不画反色块 / 下划线，改为把终端真光标放到那一格并显示（`tea.WithOutput` 传嵌入 *os.File 的包装，每次写完追加 `\x1b[行;列H`——bubbletea v1 每帧末尾固定把光标放到最后一行开头，输入法候选框跟终端光标走；位置在 View 算；格子里只放一个无效果的 `\x1b[27m`，让光标移动也改变画面、渲染器才会重写），离开直通 / 光标不可画 / 预览关闭时 HideCursor；kitty 0.49 + tmux 的普通 pane 和 popup 里实测（`#{cursor_x} #{cursor_y}`、`kitty @ get-text --add-cursor` 都等于预览里那一格，宽字符也对）。
 - 焦点换卡片，预览跟着换；焦点在折叠标题或 background 会话（无 pane）上时预览显示「没有 pane」。
 
 ## 按键直通（回复）
@@ -53,4 +53,4 @@
 
 ## 不做
 - sidebar 紧凑卡片、详情页、5h 限额：顺延到 M2.5（原备忘：详情页要大头像、mission、心跳曲线、子 agent 小头像、.handoff/ 历史；顶栏右侧放 rate_limits 的 5 小时限额）。
-- 预览宽度可调和记忆：先固定 40%。
+- 预览宽度可调：M3 起 `[layout] preview_width`（百分比，30–70，默认 40）；不记忆。

@@ -74,7 +74,7 @@ func useConfig(c *config.Config) {
 		*v = lipgloss.Color(c.Colors[name])
 	}
 	avatar.AlertColor = cRed
-	maxCols, stackFlow = c.MaxColumns, c.Flow == "stack"
+	maxCols, stackFlow, previewPct = c.MaxColumns, c.Flow == "stack", c.PreviewWidth
 	footerKeys = footerFor(c)
 }
 
