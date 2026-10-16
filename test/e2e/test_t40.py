@@ -57,7 +57,7 @@ class Base(unittest.TestCase):
 
 class Config(Base):
     def test_the_default_is_bands_and_config_prints_it_after_max_columns(self):
-        out = plain_config(self.cli("config", text="").stdout); self.assertIn('[layout]\nmax_columns = 4\nflow = "bands"\n', out)
+        out = plain_config(self.cli("config", text="").stdout); self.assertIn('[layout]\nmax_columns = 4\npreview_width = 40\nflow = "bands"\n', out)
 
     def test_stack_round_trips(self):
         out = self.cli("config", text='[layout]\nflow = "stack"\n'); self.assertEqual(out.returncode, 0, out.stderr); self.assertIn('flow = "stack"', out.stdout)
@@ -71,7 +71,7 @@ class Config(Base):
         r = self.cli("config", text='[layout]\nflow = "x"\n'); self.assertTrue(r.stderr.strip().endswith('layout.flow: "x" is not a flow (use "bands" or "stack")'), r.stderr)
 
     def test_max_columns_and_flow_together(self):
-        r = self.cli("config", text='[layout]\nmax_columns = 3\nflow = "stack"\n'); self.assertEqual(r.returncode, 0, r.stderr); self.assertIn("max_columns = 3\nflow = \"stack\"", plain_config(r.stdout))
+        r = self.cli("config", text='[layout]\nmax_columns = 3\nflow = "stack"\n'); self.assertEqual(r.returncode, 0, r.stderr); self.assertIn("max_columns = 3\npreview_width = 40\nflow = \"stack\"", plain_config(r.stdout))
 
     def test_readme_documents_flow(self):
         readme = (SRC / "README.md").read_text(); self.assertIn("flow", readme); self.assertIn("stack", readme); self.assertIn("bands", readme)

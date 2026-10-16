@@ -132,9 +132,9 @@ class Geometry(CursorBase):
         self.assertEqual(rev[0][1], x + 2, "in the first text column")
         above = "".join(c[0] for c in rows[-2][1][x + 1:]).split("│")[0].strip(); self.assertEqual(above, "200")
 
-    def test_a_cursor_column_past_the_box_width_is_drawn_on_the_wrapped_row(self):
-        tm("respawn-pane", "-k", "-t", self.panes["a1"], sh("printf \"%95s\" x")); time.sleep(0.8)  # the pane is 100 wide: cursor_x = 95; the box takes 87 a row (T56: the line wraps, the cursor goes with it; before T56 it was left out)
-        self.open_preview_on(); r, c = self.text_col("x"); self.assertEqual(self.marked("rev"), [(r, c + 1)], "right after the x, on the 2nd row of the wrapped line"); self.assertEqual(self.marked("ul"), [])
+    def test_a_cursor_column_outside_the_preview_is_not_drawn(self):
+        tm("respawn-pane", "-k", "-t", self.panes["a1"], sh("printf \"%95s\" x")); time.sleep(0.8)  # the pane is 100 wide: cursor_x = 95; the preview's text is 87 cells (T61: cut, not wrapped: T56's wrapping is gone)
+        self.open_preview_on(); self.assertEqual(self.marked("rev"), []); self.assertEqual(self.marked("ul"), [])
 
     def test_scrolling_back_hides_it_and_returning_to_the_bottom_brings_it_back(self):
         tm("respawn-pane", "-k", "-t", self.panes["a1"], sh("seq 1 200")); time.sleep(1.2)

@@ -92,7 +92,7 @@ class Base(unittest.TestCase):
 
 class Config(Base):
     def test_the_default_is_cwd_and_config_prints_it_after_flow(self):
-        out = plain_config(self.cli("config", text="").stdout); self.assertIn('[layout]\nmax_columns = 4\nflow = "bands"\ngroup_by = "cwd"\n', out)
+        out = plain_config(self.cli("config", text="").stdout); self.assertIn('[layout]\nmax_columns = 4\npreview_width = 40\nflow = "bands"\ngroup_by = "cwd"\n', out)
 
     def test_each_mode_round_trips(self):
         for m in MODES:

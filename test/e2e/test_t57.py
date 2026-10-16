@@ -49,13 +49,13 @@ class Follows(Real):
     def test_a_line_break_moves_it_to_the_next_row(self):
         self.to_cat(); self.enter(); self.t.lit("ab"); time.sleep(0.5); self.t.keys("Enter"); time.sleep(0.9); r, c = self.text_col("ab"); self.settle((r, c)); self.t.keys("C-j"); time.sleep(0.9); self.settle((r + 1, c - 0)); self.t.lit("cd"); time.sleep(0.9); self.settle((r + 1, c + 2))
 
-    def test_a_line_wider_than_the_box_puts_it_on_the_wrapped_row(self):
-        tm("resize-window", "-t", "pane-a3", "-x", 150); self.to_cat(); self.enter(); self.t.lit("".join(f"{i:03d}." for i in range(30))[:100]); time.sleep(1.2)
-        r, c = self.text_col("000.001."); self.settle((r + 1, c + 13)); self.assertEqual(self.marked("rev"), [], "(87 a row: 100 characters = 13 on the 2nd row)")
-        self.t.lit("!"); time.sleep(0.9); self.settle((r + 1, c + 14))
-
-    def test_a_cursor_that_the_old_code_left_out_for_being_past_the_box_is_there(self):
-        tm("resize-window", "-t", "pane-a3", "-x", 150); self.to_cat(); self.enter(); self.t.lit("x" * 95); time.sleep(1.2); r, c = self.text_col("x" * 87); self.settle((r + 1, c + 8))
+    def test_a_cursor_past_the_last_cell_of_the_box_is_not_placed_and_not_drawn(self):
+        # T61: the preview is cut, not wrapped: the box has 87 text cells; the pane's cursor at column 87 or more is not in it
+        tm("resize-window", "-t", "pane-a3", "-x", 150); self.to_cat(); self.enter(); self.t.lit("x" * 85); time.sleep(1.0); r, c = self.text_col("x" * 10); self.settle((r, c + 85)); self.assertEqual(self.marked("rev"), [])
+        self.t.lit("x"); time.sleep(0.9); self.settle((r, c + 86), 3)  # cursor_x = 86: the 87th and last cell
+        self.t.lit("x"); self.assertTrue(wait(lambda: self.cur()[2] == 0, 4), f"cursor_x = 87: past the box: the real cursor is hidden ({self.cur()})\n{self.t.text()}"); self.assertEqual(self.marked("rev"), [], "and no block either")
+        self.t.lit("xxxxx"); time.sleep(0.9); self.assertEqual(self.cur()[2], 0); self.assertEqual(self.marked("rev"), []); self.assertEqual(len([r for r in self.t.snap() if "x" * 20 in r.text]), 1, "one row: nothing wrapped")
+        self.t.keys("Enter"); self.t.keys("C-j"); time.sleep(0.9); self.t.lit("ab"); time.sleep(0.9); r2, c2 = self.text_col("ab"); self.settle((r2, c2 + 2), 4)  # a new line: the cursor is back in the box
 
 
 class Leaves(Real):
