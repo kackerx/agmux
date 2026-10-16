@@ -293,3 +293,58 @@ func TestAttachOnHandoff(t *testing.T) {
 		t.Errorf("i polled the pane %d times", n)
 	}
 }
+
+// The agent gives way to bg, not the other way round: " bg" stays whole at any width, the agent
+// is cut to what is left, and on a card too narrow for both only bg shows.
+func TestBackgroundTagKeepsToWidth(t *testing.T) {
+	trueColor(t)
+	for _, w := range []int{20, 11, 10, 9, 5, 4, 3, 2} {
+		s := bgSession(func(s *store.Session) { s.Agent = "orchestrator" })
+		raw := line2(s, w, nil)
+		got := ansi.Strip(raw)
+		if ansi.StringWidth(got) > w || !strings.HasSuffix(got, "bg") || !strings.HasSuffix(raw, fg(cMuted, "bg")) {
+			t.Errorf("w=%d: %q (%d wide)", w, got, ansi.StringWidth(got))
+		}
+		if w >= 6 && !strings.Contains(got, " bg") {
+			t.Errorf("w=%d: no space before bg: %q", w, got)
+		}
+	}
+	if got := ansi.Strip(line2(bgSession(func(s *store.Session) { s.Agent = "ab" }), 20, nil)); !strings.HasSuffix(got, "ab bg") {
+		t.Errorf("a short agent is whole: %q", got)
+	}
+}
+
+// With a filter kept (the line below the cards is the filter's hint plus the footer), the keys
+// that attach are lit on a background card without a pane and dim on any other card without one.
+func TestAttachFooterKeysUnderFilter(t *testing.T) {
+	trueColor(t)
+	view := func(s store.Session) string {
+		m := psized(staticSrc{s}, 240, 30)
+		m, _ = press(t, m, "/", "b", "enter")
+		if m.query != "b" || m.searching {
+			t.Fatalf("filter %q, searching %v", m.query, m.searching)
+		}
+		return m.View()
+	}
+	v := view(bgSession(nil))
+	if strings.Contains(v, fg(cOff, "enter jump")) || strings.Contains(v, fg(cOff, "tab focus preview")) || strings.Contains(v, fg(cOff, "i reply")) || !strings.Contains(v, "esc clear") {
+		t.Errorf("a background card under a filter has its keys dimmed:\n%s", ansi.Strip(v))
+	}
+	v = view(bgSession(func(s *store.Session) { s.Background = false }))
+	if !strings.Contains(v, fg(cOff, "enter jump")) {
+		t.Errorf("a card with no pane that is not a background one keeps them dim:\n%s", ansi.Strip(v))
+	}
+}
+
+// What stops a card that still has no pane after the window opened from asking again, which
+// would open windows without end: a model with nowhere to keep the pane takes the message and does
+// nothing.
+func TestAttachedMsgWithoutPaneDoesNotAskAgain(t *testing.T) {
+	r := attachRunner(true)
+	m := attachBoard(r)
+	m.attached = nil // the pane is not kept, so the card still has none
+	tm, cmd := m.Update(attachedMsg{id: "b1", pane: "%9", action: "focus_preview"})
+	if cmd != nil || tm.(Model).preview || len(r.calls) != 0 {
+		t.Errorf("cmd %v, preview %v, calls %q", cmd != nil, tm.(Model).preview, r.calls)
+	}
+}

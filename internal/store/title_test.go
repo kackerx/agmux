@@ -120,3 +120,69 @@ func TestBackgroundFlag(t *testing.T) {
 		t.Errorf("%v %v %v", ss[0].Background, ss[1].Background, ss[2].Background)
 	}
 }
+
+func appendTo(t *testing.T, path, s string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(s)
+	f.Close()
+}
+
+// A session renamed later is called by the new name, whether the rename is in the tail or has
+// scrolled out of it since.
+func TestTitleRename(t *testing.T) {
+	p, log := titled(t, strings.Replace(titleLine, "%s", "A", 1)+filler(200<<10))
+	if got := nameOf(t, p); got != "A" {
+		t.Fatalf("name %q", got)
+	}
+	appendTo(t, log, strings.Replace(titleLine, "%s", "B", 1))
+	if got := nameOf(t, p); got != "B" {
+		t.Errorf("renamed, in the tail: %q", got)
+	}
+	appendTo(t, log, filler(100<<10)) // B is out of the tail now
+	if got := nameOf(t, p); got != "B" {
+		t.Errorf("the rename scrolled out of the tail: %q", got)
+	}
+	// and a rename that went out of the tail between two polls
+	appendTo(t, log, strings.Replace(titleLine, "%s", "C", 1)+filler(100<<10))
+	if got := nameOf(t, p); got != "C" {
+		t.Errorf("renamed and buried before the next poll: %q", got)
+	}
+}
+
+// A transcript that is shorter than what was scanned is another file: it is read from the top; the
+// whole file is read for the last title, not the first; and so is another path for the same session.
+func TestTitleOtherFile(t *testing.T) {
+	p, log := titled(t, strings.Replace(titleLine, "%s", "old", 1)+filler(200<<10))
+	if got := nameOf(t, p); got != "old" {
+		t.Fatalf("name %q", got)
+	}
+	os.WriteFile(log, []byte(strings.Replace(titleLine, "%s", "new", 1)+filler(100<<10)), 0o644) // shorter, the title out of the tail
+	if got := nameOf(t, p); got != "new" {
+		t.Errorf("a shorter file: %q", got)
+	}
+	os.WriteFile(log, []byte(filler(50<<10)), 0o644) // and now one with none
+	if got := nameOf(t, p); got != "proj" {
+		t.Errorf("the title of the file that was: %q", got)
+	}
+	p, _ = titled(t, strings.Replace(titleLine, "%s", "first", 1)+filler(100<<10)+strings.Replace(titleLine, "%s", "last", 1)+filler(100<<10))
+	if got := nameOf(t, p); got != "last" {
+		t.Errorf("a whole-file scan takes the last: %q", got)
+	}
+	// the same session in another transcript: nothing of the first one's scan is taken for it
+	p, _ = titled(t, filler(200<<10))
+	if got := nameOf(t, p); got != "proj" {
+		t.Fatalf("name %q", got)
+	}
+	other := filepath.Join(t.TempDir(), "b.jsonl")
+	os.WriteFile(other, []byte(strings.Replace(titleLine, "%s", "elsewhere", 1)+filler(300<<10)), 0o644) // longer than the first
+	p.Show = func() ([]ccmux.Session, error) {
+		return []ccmux.Session{{ID: "a", Project: "proj", LogPath: other}}, nil
+	}
+	if got := nameOf(t, p); got != "elsewhere" {
+		t.Errorf("another path: %q", got)
+	}
+}

@@ -450,8 +450,12 @@ const branchIcon = "\ue725 "
 // session.
 func line2Right(s store.Session, w int) string {
 	right := ""
-	if s.Agent != "" {
-		right = fg(cAgent, ansi.Truncate(s.Agent, w, "…"))
+	room := w
+	if s.Background {
+		room -= len(bgTag) + 1 // the agent is cut to leave " bg" whole
+	}
+	if s.Agent != "" && room > 0 {
+		right = fg(cAgent, ansi.Truncate(s.Agent, room, "…"))
 	}
 	if s.Background {
 		if right != "" {
@@ -459,7 +463,7 @@ func line2Right(s store.Session, w int) string {
 		}
 		right += fg(cMuted, bgTag)
 	}
-	return right
+	return ansi.Truncate(right, w, "")
 }
 
 const bgTag = "bg"

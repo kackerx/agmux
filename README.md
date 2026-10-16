@@ -19,7 +19,7 @@ go install github.com/kackerx/agmux@latest
 
 ```sh
 agmux board     # 全屏看板，建议开在 tmux 浮窗里
-agmux show      # 每个会话一行：id、名字、分组、状态、模型、上下文%、agent 定义（没有就空）
+agmux show      # 每个会话一行：id、名字、分组、状态、模型、上下文%、agent 定义（没有就空）、bg（后台会话，否则空）
 agmux avatars   # 打印全部头像：先是图片集（id、来源、各状态帧数），再是像素头像
 agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 sheet 切成图片集（见「头像图片」）
 ```
@@ -52,7 +52,7 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 
 后台会话（`claude --bg` 起的）没有 tmux pane：在它的卡片上按 `enter` / `i` / `tab`，看板先在 tmux session `agmux-bg` 里开一个窗口跑 `claude attach <id>`（session 不在就新建，窗口名是卡片名、目录是会话的 cwd，不抢你的当前窗口），再照常跳过去（`enter`）或在预览里进直通（`i` / `tab`），之后预览、直通、光标都和普通会话一样；`p` 只看，不 attach，预览区写 `background session · enter or i attaches it`。看板每次轮询用 `tmux list-panes -a` 按启动命令 `claude attach <id>` 认出这个 pane（不存状态文件，重启看板、开多块看板都一致；attach 退出、窗口关掉，卡片就回到没有 pane，再按再开）。直通里 `←` 回 claude 的 agent 视图、`Ctrl+Z` 退出 attach 都是 claude 自己的行为。`H`（发 /handoff）在后台会话上也是先 attach、等窗口出画面再发。新窗口没有 client 时按预览框的大小开（不是 manual，`enter` 跳过去就跟着你的终端变大）。没有 pane 的非后台会话仍然不能跳转和发送，底栏对应键变暗。`x` / `r` 对后台会话还是 `ccmux kill` / `restart` 的现状。
 
-卡片上的名字：ccmux 的 summary；没有（后台会话 `claude --bg -n <名字>` 起的就是这样）时用会话 jsonl 里最后一条 `custom-title` 的名字（每个会话最多整文件扫一次，之后只看新增的部分）；都没有才用项目名。后台会话的卡片第二行右端有灰色的 `bg`，预览标题里 pane 的位置写 `bg`（有 pane 时 `bg · %id`）；`agmux show` 的最后一列是 `bg`（后台会话）或空。
+卡片上的名字：ccmux 的 summary；没有（后台会话 `claude --bg -n <名字>` 起的就是这样）时用会话 jsonl 里最后一条 `custom-title` 的名字（文件每个字节最多读一次，之后只看新增的部分，所以改名也跟得上）；都没有才用项目名。后台会话的卡片第二行右端有灰色的 `bg`，预览标题里 pane 的位置写 `bg`（有 pane 时 `bg · %id`）；`agmux show` 的最后一列是 `bg`（后台会话）或空。
 
 ### tmux 浮窗绑定
 

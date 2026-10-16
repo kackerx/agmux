@@ -15,7 +15,8 @@ import (
 // file has been scanned, so that a transcript without one is not read again from the top.
 type titleState struct {
 	title   string
-	scanned int64 // the file up to here (a whole number of lines) has been looked at
+	path    string // the transcript it is about: another one starts over
+	scanned int64  // the file up to here (a whole number of lines) has been looked at
 }
 
 // titleIn is the customTitle of the last custom-title line among lines, "" if none.
@@ -42,29 +43,38 @@ func parseTitle(line []byte) string {
 	return ""
 }
 
-// title is the session's custom title: the last one in the tail the caller read anyway; else the
-// one found before; else the rest of the transcript, scanned (streamed: it reaches 16MB) from where
-// the last scan ended, so each byte is read once. "" when there is none or the file can't be read.
+// title is the session's custom title: the last one in the transcript. The tail the caller read
+// anyway has the recent ones; the rest of the file is streamed (it reaches 16MB) from where the last
+// scan ended, so each byte is read once, and what is found there is newer than what was known. A
+// renamed session gets its new name this way, however much is written after the rename. "" when
+// there is none or the file can't be read.
 func (p *Poller) title(id, path string, tail [][]byte) string {
-	if t := titleIn(tail); t != "" {
-		return t
-	}
 	if p.titles == nil {
 		p.titles = map[string]titleState{}
 	}
 	st := p.titles[id]
-	if st.title != "" {
+	fi, err := os.Stat(path)
+	if err != nil {
 		return st.title
 	}
-	if fi, err := os.Stat(path); err != nil || fi.Size() == st.scanned {
-		return ""
-	} else if fi.Size() < st.scanned { // not the file it was
-		st.scanned = 0
+	if st.path != path || fi.Size() < st.scanned { // not the file it was: from the top
+		st = titleState{path: path}
 	}
-	p.titleScans++
-	from := st.scanned
-	st.title, st.scanned = scanTitle(path, from)
-	p.titleBytes += st.scanned - from
+	if t := titleIn(tail); t != "" {
+		st.title = t
+		if st.scanned == 0 { // the tail is the end of the file: nothing before it needs a scan to find a title
+			st.scanned = fi.Size()
+		}
+	}
+	if fi.Size() > st.scanned {
+		p.titleScans++
+		t, end := scanTitle(path, st.scanned)
+		p.titleBytes += end - st.scanned
+		st.scanned = end
+		if t != "" {
+			st.title = t
+		}
+	}
 	p.titles[id] = st
 	return st.title
 }

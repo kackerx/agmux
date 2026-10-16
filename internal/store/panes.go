@@ -11,9 +11,10 @@ import (
 // <id>` in a tmux window; which pane that is, is read off tmux on every poll (not kept in a file:
 // a restarted or a second board finds the same).
 
-// TmuxPanes lists every pane as "<pane id>\t<its session>\t<the command it was started with>" lines.
+// TmuxPanes lists every pane as "<pane id>\t<its session>\t<1 if it is dead>\t<the command it was started with>"
+// lines.
 func TmuxPanes() (string, error) {
-	out, err := execx.Run("tmux", "list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{pane_start_command}")
+	out, err := execx.Run("tmux", "list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{pane_dead}\t#{pane_start_command}")
 	return string(out), err
 }
 
@@ -26,8 +27,9 @@ func attachPanes(listing string) map[string]attachedPane {
 	unquote := strings.NewReplacer(`"`, "", `'`, "")
 	for _, line := range strings.Split(listing, "\n") {
 		pane, rest, ok := strings.Cut(line, "\t")
-		session, cmd, ok2 := strings.Cut(rest, "\t") // a session name has no tab; the command may
-		if !ok || !ok2 || pane == "" {
+		session, rest, ok2 := strings.Cut(rest, "\t") // a session name has no tab; the command may
+		dead, cmd, ok3 := strings.Cut(rest, "\t")
+		if !ok || !ok2 || !ok3 || pane == "" || dead == "1" { // a dead pane (remain-on-exit) is a window nobody can use
 			continue
 		}
 		f := strings.Fields(unquote.Replace(cmd))
