@@ -434,3 +434,4 @@
 - 验收：单测 150 列长行在框里截断且无第二行；SGR 跨行与底色止于文字的既有用例仍过；cursor_x 超宽不画不定位；preview_width 50 时 previewW(253)=126、30 / 70 边界、29 / 71 报错、未写时 40；golden。黑盒 真 tmux pane 150 列的表格（盒线）在预览里左侧完整不乱；config 行；改 55 后卡片列数变化。
 - 用户配置：我在装好后把 `~/.config/agmux/config.toml` 的 preview_width 设为 55（253 列下框内约 134 列，用户所有 claude pane 都放得下；卡片区 114 列约 2 列），用户可改。
 - dev 3ebcdef（T61）：wrapRows → carrySGR 逐行 Truncate；滚动 / pvLines 回按 capture 行数；col ≥ 框宽不画、pvBox -1 不定位；保留 SGR 跨行 + 底色止于文字；wrap_test 删、cut_test 新（150 列截断、宽字符边缘丢、滚动按行、91/92）；config PreviewWidth 30–70 默认 40，模板行 + golden，previewPct 走 useConfig；README / m2 design.md 同步（T56 段改写为曾换行 T61 改回）；探针 6 杀。本轮目标 3ebcdef。
+- reviewer（3ebcdef）通过无必改：回退干净；超宽光标 HideCursor 不追加 CUP；carrySGR 整行先算再截，7 种样式逐格一致、截掉的右半段开的色延续到下一行；preview_width 路径同 maxCols、30/40/55/70 × 6 种宽度无越界、校验文案与 golden 对；真 tmux 150 列盒线表格在 40% / 55% 下左侧逐行一致；变异 13 杀 12（存活等价）。采纳建议 1（文案统一成 `71 is out of range (30 to 70 percent)` 回显值）和 2（README preview_width 行补「终端窄时卡片可能窄于 40 列」），dev 补一个 commit 后直接送 tester。
