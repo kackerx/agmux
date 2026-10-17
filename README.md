@@ -12,8 +12,12 @@
 ## 安装
 
 ```sh
+brew install kackerx/tap/agmux    # 从源码编，需要 Go（brew 会装）
+npm i -g @kackerx/agmux           # 预编译二进制：darwin / linux × arm64 / x64
 go install github.com/kackerx/agmux@latest
 ```
+
+`agmux --version` 打印版本、提交和时间。二进制没有签名，macOS 上从浏览器下载的压缩包会被 Gatekeeper 拦；brew、npm、go install 不受影响。
 
 ## 用法
 

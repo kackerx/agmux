@@ -1,0 +1,10 @@
+{
+  "name": "@kackerx/agmux",
+  "version": "0.0.0",
+  "description": "A card board for the coding agents in tmux, in a popup",
+  "repository": "github:kackerx/agmux",
+  "homepage": "https://github.com/kackerx/agmux",
+  "bin": { "agmux": "bin/agmux.js" },
+  "files": ["bin"],
+  "engines": { "node": ">=18" }
+}

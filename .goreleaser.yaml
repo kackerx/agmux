@@ -1,0 +1,32 @@
+# A v* tag builds the four binaries, the archives, checksums.txt and the
+# changelog of the GitHub Release (.github/workflows/release.yml). OSS GoReleaser only.
+version: 2
+project_name: agmux
+
+builds:
+  - id: agmux
+    main: .
+    binary: agmux
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux] # no Windows: tmux is not there
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version=v{{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.CommitDate}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "agmux_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    # the spec and test commits start with the milestone's name (m3:, specs:, e2e:)
+    exclude: ["^m3:", "^specs:", "^e2e:", "^docs:", "^Merge "]
+
+release:
+  draft: false

@@ -1,0 +1,93 @@
+# a v* tag runs ci.yml's checks, then GoReleaser
+# (.goreleaser.yaml) builds the archives and makes the GitHub Release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # the Release and its files
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the changelog reads the commits since the last tag
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # the formula of kackerx/homebrew-tap is made from this tag's source and
+  # committed there (TAP_GITHUB_TOKEN: a token that can push to that repo)
+  tap:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+      - uses: actions/checkout@v4
+        with:
+          repository: kackerx/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: tap
+      - name: write and push Formula/agmux.rb
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          curl -fsSL "https://github.com/kackerx/agmux/archive/refs/tags/$TAG.tar.gz" -o source.tar.gz
+          mkdir -p tap/Formula
+          commit=$(git -C src rev-parse --short HEAD)
+          date=$(TZ=UTC git -C src log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd)
+          sh src/.github/scripts/tap-formula.sh "$TAG" "$(sha256sum source.tar.gz | cut -d' ' -f1)" "$commit" "$date" > tap/Formula/agmux.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/agmux.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "agmux $TAG"
+          git push
+
+  # the npm packages: the binaries of the Release's archives under
+  # @kackerx/agmux-<os>-<arch>, and agmux that runs them (NPM_TOKEN)
+  npm:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: the archives of the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "$GITHUB_REF_NAME" --pattern '*.tar.gz' --dir archives
+      - run: node npm/build.mjs "$GITHUB_REF_NAME" archives out
+      - name: the binary of this runner says the tag
+        run: out/agmux-linux-x64/bin/agmux --version | grep -F "agmux $GITHUB_REF_NAME "
+      - name: publish the platform packages, then the shell package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for d in out/agmux-*; do npm publish "./$d" --access public; done # ./: a bare out/x is a GitHub user/repo to npm
+          npm publish ./out/agmux --access public
