@@ -471,3 +471,4 @@
 - 历史已用 git filter-repo 重写（备份 mirror 在 orchestrator scratchpad rewrite/agmux-before-rewrite.git）：作者全部 kackerx noreply；`.claude/agent-memory/` 整段从历史删除并 .gitignore；同长度替换掉公司机用户名、IDE 项目目录名、两个项目名、一个分支名（对照表只在 orchestrator 本地记忆文件里，不进仓库）；提交消息里的短 hash 已被 filter-repo 自动映射。重写后 475 → 460 个提交（纯记忆文件提交消失）。
 - 2026-10-17 20:00 GitHub 上首次 ci.yml（run 39030657720，fe0a681）绿：test job 成功。警告两条：actions/checkout@v4、setup-go@v5 还是 Node 20（runner 已强制 Node 24，先能跑）；ubuntu-latest 10-19 起迁 Ubuntu 26。让 dev 把三个 action 升到当前大版本。
 - dev b2416bc：checkout / setup-go / setup-node / goreleaser-action 升 v7（Node 24）。已推，CI run 39030789651 绿，无 Node 弃用警告。打 v0.1.0 前只差 tester 整套 + 用户 TAP_GITHUB_TOKEN。
+- 注意：本文件在「历史已用 git filter-repo 重写」那行以上记的 commit hash 都是重写前的旧 hash，对照查备份 mirror。2026-10-17 20:20 两个 secret 齐（TAP_GITHUB_TOKEN 的范围比需要的宽：能 push sqlmux、admin tap，用户可自行收窄），公开历史最终扫描无公司信息，用户拍板直接发：打 v0.1.0。
