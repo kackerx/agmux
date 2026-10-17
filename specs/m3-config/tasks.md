@@ -438,3 +438,22 @@
 - dev 9b178a0（T61 建议）：越界文案 `layout.preview_width: 71 is out of range (30 to 70 percent)`；README 半句。本轮目标 9b178a0，送 tester。
 - tester（9b178a0，套件 74533ad）：整套 1048 条 3021 s，3 红是 config [layout] 行序变化（max_columns → preview_width → flow）的旧断言，改后 90 条复跑绿。t61 14 条（253 列 40/55/30/70 → 101/139/75/177 与卡片 3/2/4/1 列、100 列 30%/40% 下限 60、120 列 70% 卡片 36 列不崩、框内 = 预览宽−5、<100 列仍拒绝、150 列盒线表格 40%/55% 左侧一致、config 行 / 回读 / 30 70 合法 / 71 29 0 100 −5 两路径文案 / 类型错）；t56 重写截断口径 21 条（左 87 格无第二行、整宽、宽字符边缘丢、tab、最后 N 行、颜色 7 种含截掉右半段开色延续、光标 86 画 87 不画、滚轮 3 行）；t57 改超宽不定位；t24 回不画。反向 3f8d72b 34 红。没覆盖：真 kitty、popup 路径、Linux、preview_width 与 --stay popup 宽度交互。
 - 2026-10-17 14:01 已装 9b178a0（干净 clone，vcs.modified=false）；用户配置 preview_width = 55（round-trip 一致）。T46–T61 待用户验收。
+
+## 第十二批 分发：GitHub Release + brew tap + npm（用户 2026-10-17）
+- 用户要的：agmux 像 sqlmux 一样用 npm 和 brew 装；token 复用 sqlmux 的。
+- 已查（只读）：agmux 本地仓库没有 remote，GitHub 上没有 kackerx/agmux；sqlmux 的链路在 ~/proj/sqlmux（`.goreleaser.yaml`、`.github/workflows/{ci,release}.yml`、`.github/scripts/tap-formula.sh`、`npm/build.mjs` + `npm/sqlmux/`），tap 是 `kackerx/homebrew-tap`（公开，现只有 Formula/sqlmux.rb），两个 secret `NPM_TOKEN` / `TAP_GITHUB_TOKEN` 是 sqlmux 仓库级的，值读不出来，要用户往 agmux 仓库再加一次；npm 裸名 `agmux` 已被别人占（0.0.7，另一个项目），壳包用 `@kackerx/agmux`，平台包 `@kackerx/agmux-{darwin,linux}-{arm64,x64}`。sqlmux-orchestrator 的坑：一次 push 别超过 3 个 tag（不触发 workflow）；源码 tar.gz 没 .git，commit/date 由 release.yml 算好传给 formula；`npm publish ./out/x` 要带 `./`；npm latest 约 2 min 后才变；不做签名 / notarize。
+- 阻塞在用户的（见给用户的问题）：建公开仓库 kackerx/agmux（内置的 5 套火影同人头像随之公开）；往新仓库加两个 secret；第一个 tag。
+
+### T62 `agmux --version`
+- 定稿：`agmux --version` / `agmux version` 打印 `agmux v0.1.0 (3f2a1b9, 2026-10-17T06:01:34Z)`。main.go 加 `version/commit/date` 三个变量（默认 dev/none/unknown）供 ldflags -X；没注入时退回 `debug.ReadBuildInfo()`：Main.Version（go install @latest 得到 v0.1.0 / (devel)）+ vcs.revision 前 7 位 + vcs.time。usage 第一行补 `agmux [--version] <command>`。照 sqlmux cmd/sqlmux/main.go 的 versionLine 写，别多。
+- 验收：单测 注入三值 → 原样；未注入 + BuildInfo 有 vcs → 取 vcs；都没有 → `agmux dev (none, unknown)`；`agmux --version` 退出码 0 且只有这一行。
+
+### T63 发布流水线（照抄 sqlmux，改名字）
+- 定稿：
+  - `.goreleaser.yaml`：project_name agmux，`main: .`，binary agmux，darwin/linux × amd64/arm64，CGO 关，-trimpath，ldflags 注 main.version/commit/date（版本带 v），archives tar.gz `agmux_{{.Version}}_{{.Os}}_{{.Arch}}`，checksums.txt，changelog 排掉 `^e2e:` / `^m3:` / `^specs:` / `^docs:` / `^Merge `（我们的 spec 提交前缀是里程碑名，如 `m3:`，都排）。不要 brews 段。
+  - `.github/workflows/ci.yml`：push main / PR / workflow_call；go vet、go test ./...（test/e2e 是 Python + 真 tmux，不进 CI）、gofmt -l 为空、go mod tidy 无 diff。不加 golangci-lint（项目没在用）。
+  - `.github/workflows/release.yml`：`v*` tag → ci → goreleaser（GITHUB_TOKEN）→ tap job（checkout kackerx/homebrew-tap 用 `secrets.TAP_GITHUB_TOKEN`，`.github/scripts/tap-formula.sh` 生成 Formula/agmux.rb：desc 一句、homepage、源码 tar.gz 从源编 `depends_on "go" => :build`，`system "go", "build", *std_go_args(ldflags:), "."`，test 断言 `agmux v#{version}`）→ npm job（gh release download → `node npm/build.mjs` → 四个平台包再壳包，`NODE_AUTH_TOKEN: secrets.NPM_TOKEN`，发前跑 `out/agmux-linux-x64/bin/agmux --version | grep -F "agmux $TAG "`）。
+  - `npm/build.mjs` + `npm/agmux/{package.json,bin/agmux.js}`：壳包名 `@kackerx/agmux`，bin 名 `agmux`，optionalDependencies 四个 `@kackerx/agmux-<os>-<cpu>`，require.resolve 找二进制 spawn，找不到的提示里 `go install github.com/kackerx/agmux@latest`。
+  - README 安装段改成三种：`brew install kackerx/tap/agmux`、`npm i -g @kackerx/agmux`、`go install github.com/kackerx/agmux@latest`；加一句二进制未签名。
+  - 不做：trusted publishing / OIDC（先沿用 NPM_TOKEN，和 sqlmux 一致；以后再说）、签名 / notarize、Windows、GoReleaser 的 brews / casks。
+- 验收（本地能做的；GitHub 上的要等仓库建好第一个 tag）：`go build -trimpath -ldflags "-X main.version=v0.0.0-test -X main.commit=abc1234 -X main.date=2026-10-17T00:00:00Z" -o /tmp/x .` 后 `--version` 一致；用这个二进制手工打 4 个假 tar.gz（同名规则，可用同一个二进制）喂 `node npm/build.mjs v0.0.0-test <dir> <out>`，`out/agmux/bin/agmux.js --version` 走到平台包；`npm pack --dry-run ./out/agmux` 列出只有 bin + package.json；`sh .github/scripts/tap-formula.sh v0.0.0-test <sha> abc1234 <date> | ruby -c`（或至少肉眼）；`actionlint` 若装了就跑；goreleaser 未装，dev 可 `go run github.com/goreleaser/goreleaser/v2@latest release --snapshot --clean --skip=publish` 验一次（能跑就跑，跑不了写明）。
