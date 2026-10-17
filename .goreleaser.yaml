@@ -30,7 +30,7 @@ changelog:
   filters:
     # what the user does not see: the milestones' commits (m1: m2: m3:), the spec, task, memory and
     # design notes and the tests
-    exclude: ['^m\d+:', "^specs:", "^tasks:", "^memory:", "^orchestrator memory:", "^design:", "^test:", "^e2e:", "^docs:", "^Merge "]
+    exclude: ['^m\d+[:/]', "^specs:", "^tasks:", "^memory:", "^orchestrator memory:", "^design:", "^test:", "^e2e:", "^docs:", "^docs ", "^Merge "]
 
 release:
   draft: false
