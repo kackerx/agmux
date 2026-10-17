@@ -469,3 +469,4 @@
 - 2026-10-17 18:46 已装 f9e2f17（干净 clone，vcs.modified=false）；`agmux --version` 在无 tag 的本地装出伪版本 `v0.0.0-20261017094136-f9e2f175122e (f9e2f17, …)`，预期。dev 24ad6af：changelog 正则 `^m\d+[:/]` + `^docs `（不送审，纯配置）。主干现在 = 24ad6af，推送前等用户六件决定。
 - 2026-10-17 用户拍板：提交身份全部改成 kackerx、用 kackerx 建远程仓库推送；记忆文件去跟踪；火影留着；npm 新 token 由用户提供（已设为仓库 secret）；brew 的 TAP_GITHUB_TOKEN 用户自己找。公司名的来源：testdata/show.json 是 M1 时从用户机器上真 `ccmux show --json` 抓的夹具，测试和 M1 设计稿里的名字都是从它来的。
 - 历史已用 git filter-repo 重写（备份 mirror 在 orchestrator scratchpad rewrite/agmux-before-rewrite.git）：作者全部 kackerx noreply；`.claude/agent-memory/` 整段从历史删除并 .gitignore；同长度替换掉公司机用户名、IDE 项目目录名、两个项目名、一个分支名（对照表只在 orchestrator 本地记忆文件里，不进仓库）；提交消息里的短 hash 已被 filter-repo 自动映射。重写后 475 → 460 个提交（纯记忆文件提交消失）。
+- 2026-10-17 20:00 GitHub 上首次 ci.yml（run 39030657720，fe0a681）绿：test job 成功。警告两条：actions/checkout@v4、setup-go@v5 还是 Node 20（runner 已强制 Node 24，先能跑）；ubuntu-latest 10-19 起迁 Ubuntu 26。让 dev 把三个 action 升到当前大版本。
