@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -189,5 +190,36 @@ func TestConfigCmdPrintsTheTemplate(t *testing.T) {
 	back, err := config.Parse(saved, []byte(got))
 	if err != nil || back.MaxColumns != 6 || back.Flow != "stack" || len(back.Keys["quit"]) != 1 || back.Keys["exit"][0] != "Q" {
 		t.Errorf("saved as config.toml: %v %+v", err, back)
+	}
+}
+
+// --version says what the build put in; what it did not, Go's record of the module and the vcs
+// (a go install ...@v0.1.0, or a build in a checkout); dev, none and unknown with neither.
+func TestVersionLine(t *testing.T) {
+	defer func(v, c, d string) { version, commit, date = v, c, d }(version, commit, date)
+	info := func(v string, vcs ...string) *debug.BuildInfo {
+		b := &debug.BuildInfo{Main: debug.Module{Version: v}}
+		for i := 0; i+1 < len(vcs); i += 2 {
+			b.Settings = append(b.Settings, debug.BuildSetting{Key: vcs[i], Value: vcs[i+1]})
+		}
+		return b
+	}
+	rev, tm := "3f2a1b9c0d4e5f60718293a4b5c6d7e8f9012345", "2026-10-17T06:01:34Z"
+	for _, c := range []struct {
+		info          *debug.BuildInfo
+		v, cm, d, out string
+	}{
+		{nil, "dev", "none", "unknown", "agmux dev (none, unknown)"},
+		{info("(devel)"), "dev", "none", "unknown", "agmux dev (none, unknown)"},
+		{info(""), "dev", "none", "unknown", "agmux dev (none, unknown)"},
+		{info("v0.1.0"), "dev", "none", "unknown", "agmux v0.1.0 (none, unknown)"},
+		{info("(devel)", "vcs.revision", rev, "vcs.time", tm), "dev", "none", "unknown", "agmux dev (3f2a1b9, " + tm + ")"},
+		{info("(devel)", "vcs.revision", "abc"), "dev", "none", "unknown", "agmux dev (abc, unknown)"},
+		{info("v0.1.0", "vcs.revision", rev, "vcs.time", tm), "v0.2.0", "abc1234", "2026-01-01T00:00:00Z", "agmux v0.2.0 (abc1234, 2026-01-01T00:00:00Z)"}, // ldflags win
+	} {
+		version, commit, date = c.v, c.cm, c.d
+		if got := versionLine(c.info); got != c.out {
+			t.Errorf("%v with %q %q %q: %q, want %q", c.info, c.v, c.cm, c.d, got, c.out)
+		}
 	}
 }

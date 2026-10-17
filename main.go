@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/kackerx/agmux/internal/avatar"
@@ -15,7 +16,35 @@ import (
 	"github.com/kackerx/agmux/internal/store"
 )
 
-const usage = `usage: agmux <command>
+// Set by the release build (-ldflags "-X main.version=…", .goreleaser.yaml); a go install has none.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+// versionLine is what --version prints: "agmux v0.1.0 (3f2a1b9, 2026-10-17T06:01:34Z)". What the
+// build did not put in is taken from what Go recorded in info: the module's version (the tag of a
+// go install ...@v0.1.0) and the vcs revision and time; dev, none and unknown are left without.
+func versionLine(info *debug.BuildInfo) string {
+	v, c, d := version, commit, date
+	if info != nil {
+		if v == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			v = info.Main.Version
+		}
+		for _, s := range info.Settings {
+			switch {
+			case s.Key == "vcs.revision" && c == "none":
+				c = s.Value[:min(7, len(s.Value))]
+			case s.Key == "vcs.time" && d == "unknown":
+				d = s.Value
+			}
+		}
+	}
+	return fmt.Sprintf("agmux %s (%s, %s)", v, c, d)
+}
+
+const usage = `usage: agmux [--version] <command>
 
 commands:
   board [--stay]
@@ -65,6 +94,10 @@ func main() {
 		avatars(os.Stdout, os.Stderr)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
+		return
+	case "--version", "version":
+		info, _ := debug.ReadBuildInfo()
+		fmt.Println(versionLine(info))
 		return
 	default:
 		fmt.Fprintf(os.Stderr, "agmux: unknown command %q\n\n%s", os.Args[1], usage)
