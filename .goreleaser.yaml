@@ -3,6 +3,9 @@
 version: 2
 project_name: agmux
 
+git:
+  ignore_tags: ["m*"] # a milestone's tag is no release: the changelog goes back to the last v*
+
 builds:
   - id: agmux
     main: .
@@ -25,8 +28,9 @@ checksum:
 changelog:
   sort: asc
   filters:
-    # the spec and test commits start with the milestone's name (m3:, specs:, e2e:)
-    exclude: ["^m3:", "^specs:", "^e2e:", "^docs:", "^Merge "]
+    # what the user does not see: the milestones' commits (m1: m2: m3:), the spec, task, memory and
+    # design notes and the tests
+    exclude: ['^m\d+:', "^specs:", "^tasks:", "^memory:", "^orchestrator memory:", "^design:", "^test:", "^e2e:", "^docs:", "^Merge "]
 
 release:
   draft: false

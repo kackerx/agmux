@@ -223,3 +223,23 @@ func TestVersionLine(t *testing.T) {
 		}
 	}
 }
+
+// `agmux version` and `agmux --version` print the one line from the build's record and exit 0;
+// with more words they are a usage error.
+func TestVersionCommand(t *testing.T) {
+	defer func(f func() (*debug.BuildInfo, bool)) { readBuildInfo = f }(readBuildInfo)
+	readBuildInfo = func() (*debug.BuildInfo, bool) {
+		return &debug.BuildInfo{Main: debug.Module{Version: "v9.8.7"}}, true
+	}
+	for _, arg := range []string{"version", "--version"} {
+		var out, errs bytes.Buffer
+		if code := run([]string{arg}, &out, &errs); code != 0 || errs.Len() != 0 ||
+			out.String() != "agmux v9.8.7 (none, unknown)\n" { // no ldflags in a test: the record's version
+			t.Errorf("%s: exit %d, %q, %q", arg, code, out.String(), errs.String())
+		}
+	}
+	var out, errs bytes.Buffer
+	if code := run([]string{"--version", "x"}, &out, &errs); code != 2 || out.Len() != 0 || !strings.Contains(errs.String(), "usage") {
+		t.Errorf("--version x: exit %d, %q, %q", code, out.String(), errs.String())
+	}
+}

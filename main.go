@@ -62,51 +62,58 @@ commands:
           point ~/.claude/settings.json's statusLine.command at agmux statusline (dry run without --write)
 `
 
-func main() {
-	if len(os.Args) >= 2 { // the commands that take arguments
-		switch os.Args[1] {
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+
+// readBuildInfo is debug.ReadBuildInfo; the tests put their own record in.
+var readBuildInfo = debug.ReadBuildInfo
+
+// run is the command line: args without the program name, the exit code back.
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) >= 1 { // the commands that take arguments
+		switch args[0] {
 		case "statusline":
-			os.Exit(statusline.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+			return statusline.Run(args[1:], os.Stdin, stdout, stderr)
 		case "setup":
-			os.Exit(statusline.Setup(os.Args[2:], os.Stdout, os.Stderr))
+			return statusline.Setup(args[1:], stdout, stderr)
 		case "board":
-			os.Exit(boardCmd(os.Args[2:]))
+			return boardCmd(args[1:])
 		case "config":
-			os.Exit(configCmd(os.Args[2:]))
+			return configCmd(args[1:])
 		case "avatars":
-			if len(os.Args) > 2 {
-				os.Exit(avatarsCmd(os.Args[2:], os.Stdout, os.Stderr))
+			if len(args) > 1 {
+				return avatarsCmd(args[1:], stdout, stderr)
 			}
 		}
 	}
-	if len(os.Args) != 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+	if len(args) != 1 {
+		fmt.Fprint(stderr, usage)
+		return 2
 	}
 	var err error
-	switch os.Args[1] {
+	switch args[0] {
 	case "show":
 		var p *store.Poller
 		if p, err = store.NewPoller(); err == nil {
-			err = show(os.Stdout, p)
+			err = show(stdout, p)
 		}
 	case "avatars":
-		avatars(os.Stdout, os.Stderr)
+		avatars(stdout, stderr)
 	case "-h", "--help", "help":
-		fmt.Print(usage)
-		return
+		fmt.Fprint(stdout, usage)
+		return 0
 	case "--version", "version":
-		info, _ := debug.ReadBuildInfo()
-		fmt.Println(versionLine(info))
-		return
+		info, _ := readBuildInfo()
+		fmt.Fprintln(stdout, versionLine(info))
+		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "agmux: unknown command %q\n\n%s", os.Args[1], usage)
-		os.Exit(2)
+		fmt.Fprintf(stderr, "agmux: unknown command %q\n\n%s", args[0], usage)
+		return 2
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "agmux:", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "agmux:", err)
+		return 1
 	}
+	return 0
 }
 
 // avatars prints the image sets (id, where from, frames per state) and then every sprite with its

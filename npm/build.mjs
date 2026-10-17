@@ -13,6 +13,7 @@ if (!out) {
 }
 const version = tag.replace(/^v/, "");
 const here = import.meta.dirname;
+const license = join(here, "..", "LICENSE"); // npm packs the LICENSE at a package's root
 // [GOOS, GOARCH of the archive, process.platform, process.arch of Node]
 const platforms = [
   ["darwin", "arm64", "darwin", "arm64"],
@@ -44,7 +45,9 @@ for (const [goos, goarch, os, cpu] of platforms) {
     files: ["bin"],
   };
   writeFileSync(join(dir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+  cpSync(license, join(dir, "LICENSE"));
   shell.optionalDependencies[name] = version;
 }
 cpSync(join(here, "agmux"), join(out, "agmux"), { recursive: true });
 writeFileSync(join(out, "agmux", "package.json"), JSON.stringify(shell, null, 2) + "\n");
+cpSync(license, join(out, "agmux", "LICENSE"));

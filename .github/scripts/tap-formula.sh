@@ -16,7 +16,7 @@ class Agmux < Formula
   depends_on "go" => :build
 
   def install
-    ldflags = "-X main.version=v#{version} -X main.commit=${commit} -X main.date=${date}" # std_go_args adds -s -w
+    ldflags = "-s -w -X main.version=v#{version} -X main.commit=${commit} -X main.date=${date}"
     system "go", "build", *std_go_args(ldflags:), "."
   end
 
