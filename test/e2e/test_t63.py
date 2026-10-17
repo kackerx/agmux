@@ -146,7 +146,7 @@ class Config(unittest.TestCase):
         for part in ("project_name: agmux", "main: .", "binary: agmux", "CGO_ENABLED=0", "-trimpath", "goos: [darwin, linux]", "goarch: [amd64, arm64]", "-X main.version=v{{.Version}}", "-X main.commit={{.ShortCommit}}", "-X main.date={{.CommitDate}}", 'name_template: "agmux_{{ .Version }}_{{ .Os }}_{{ .Arch }}"', "checksums.txt", 'ignore_tags: ["m*"]'):
             self.assertIn(part, g)
         self.assertNotIn("brews", g); self.assertNotIn("windows", g); self.assertNotIn("casks", g)
-        for p in ("^m\\d+:", "^e2e:", "^specs:", "^docs:", "^Merge "): self.assertIn(p, g, "internal commits stay out of the changelog")
+        for p in ("^m\\d+[:/]", "^e2e:", "^specs:", "^docs:", "^docs ", "^Merge "): self.assertIn(p, g, "internal commits stay out of the changelog")
 
     def test_the_changelog_filter_against_this_repos_subjects(self):
         pats = re.findall(r"""['"](\^[^'"]+)['"]""", self.text(".goreleaser.yaml").split("filters:")[1].split("release:")[0]); self.assertGreaterEqual(len(pats), 8, pats)

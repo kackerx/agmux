@@ -77,7 +77,7 @@ class Base(unittest.TestCase):
         want = want_outline(oracle(S or self.sessions(), mode, self.home), folded)
         def same():
             try: return outline_of(t.snap()) == want
-            except IndexError: return False  # a capture torn by a repaint in progress (a card cut short): look again
+            except (IndexError, AttributeError): return False  # a capture torn by a repaint in progress (a card cut short, a name not drawn yet): look again
         ok = wait(same, timeout)
         self.assertTrue(ok, f"mode {mode}:\nwant {want}\ngot  {outline_of(t.snap())}\n{t.text()}")
 
