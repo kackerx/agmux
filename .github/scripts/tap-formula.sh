@@ -11,6 +11,7 @@ class Agmux < Formula
   homepage "https://github.com/kackerx/agmux"
   url "https://github.com/kackerx/agmux/archive/refs/tags/${tag}.tar.gz"
   sha256 "${sha}"
+  license "MIT"
 
   depends_on "go" => :build
 

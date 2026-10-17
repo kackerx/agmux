@@ -36,6 +36,7 @@ for (const [goos, goarch, os, cpu] of platforms) {
     name,
     version,
     description: `The ${os}-${cpu} binary of agmux`,
+    license: shell.license,
     repository: shell.repository,
     homepage: shell.homepage,
     os: [os],
