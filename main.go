@@ -1,4 +1,4 @@
-// agmux: a TUI board for the coding agents ccmux tracks in tmux.
+// agmux: a TUI board for the coding agents (Claude Code, pi) running in tmux.
 package main
 
 import (

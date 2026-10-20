@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kackerx/agmux/internal/avatar"
-	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/execx"
 	"github.com/kackerx/agmux/internal/fuzzy"
@@ -37,22 +36,23 @@ type Source interface {
 	TogglePin(s store.Session) (pinned bool, err error) // pin s to the top of its group, or unpin it; which it did
 }
 
-// Runner runs ccmux and tmux; tests swap in one that records them.
+// Runner does what the board does outside itself: tmux, and r / x / d on a session (control.go);
+// tests swap in one that records them.
 type Runner interface {
-	Run(args ...string) error                  // ccmux; error carries its stderr
-	Interactive(args ...string) *exec.Cmd      // ccmux, given the terminal via tea.ExecProcess
+	Restart(s store.Session) error             // r: ends the agent and starts it again where it was; blocks while it exits
+	Kill(s store.Session) error                // x
+	Review(s store.Session) (*exec.Cmd, error) // d: the command that shows the diff, given the terminal via tea.ExecProcess
 	Tmux(args ...string) (string, error)       // tmux from $PATH, reaching the server through the inherited $TMUX
 	TmuxIn(stdin string, args ...string) error // tmux with stdin (load-buffer)
 }
 
 type realRunner struct{}
 
-func (realRunner) Run(args ...string) error {
-	_, err := ccmux.Run(args...)
-	return err
+func (r realRunner) Restart(s store.Session) error { return realControl(r.Tmux).restart(s) }
+func (r realRunner) Kill(s store.Session) error    { return realControl(r.Tmux).kill(s) }
+func (r realRunner) Review(s store.Session) (*exec.Cmd, error) {
+	return realControl(r.Tmux).review(s)
 }
-
-func (realRunner) Interactive(args ...string) *exec.Cmd { return exec.Command("ccmux", args...) }
 
 func (realRunner) Tmux(args ...string) (string, error) {
 	out, err := execx.Run("tmux", args...)
@@ -858,9 +858,13 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		}
 	case "restart":
 		m.msg = fg(cMuted, " restarting "+s.Name+"…")
-		return m, m.ccmux("restarted "+s.Name, "restart", s.ID)
+		return m, m.act("restarted "+s.Name, func() error { return m.run.Restart(s) })
 	case "review":
-		return m, tea.ExecProcess(m.review(s))
+		c, err := m.run.Review(s)
+		if err != nil {
+			return m, func() tea.Msg { return doneMsg{err: err} }
+		}
+		return m, tea.ExecProcess(m.review(c, s))
 	}
 	return m, nil
 }
@@ -930,17 +934,16 @@ func (m Model) say(c lipgloss.Color, text string) Model {
 	return m
 }
 
-// review hands the terminal to `ccmux review`. Its stderr still reaches the terminal, and a
-// copy is kept so a failure shows ccmux's last word instead of a bare "exit status 1".
-func (m Model) review(s store.Session) (*exec.Cmd, tea.ExecCallback) {
-	c := m.run.Interactive("review", s.ID)
+// review hands the terminal to the command that shows the diff. Its stderr still reaches the
+// terminal, and a copy is kept so a failure shows its last word instead of a bare "exit status 1".
+func (m Model) review(c *exec.Cmd, s store.Session) (*exec.Cmd, tea.ExecCallback) {
 	c.Stdout = os.Stdout // left nil, bubbletea gives it the program's output: cursorOut is not a file, so the child would get a pipe
 	var buf bytes.Buffer
 	c.Stderr = io.MultiWriter(os.Stderr, &buf)
 	return c, func(err error) tea.Msg {
 		if err != nil {
 			if last := lastLine(buf.String()); last != "" {
-				err = errors.New("ccmux review: " + last)
+				err = errors.New("review: " + last)
 			}
 		}
 		return doneMsg{ok: "review finished: " + s.Name, err: err, retrack: true}
@@ -952,10 +955,9 @@ func lastLine(s string) string {
 	return strings.TrimSpace(lines[len(lines)-1])
 }
 
-// ccmux runs `ccmux args...` off the UI goroutine and reports back with a doneMsg.
-func (m Model) ccmux(ok string, args ...string) tea.Cmd {
-	r := m.run
-	return func() tea.Msg { return doneMsg{ok: ok, err: r.Run(args...)} }
+// act runs f off the UI goroutine and reports back with a doneMsg.
+func (m Model) act(ok string, f func() error) tea.Cmd {
+	return func() tea.Msg { return doneMsg{ok: ok, err: f()} }
 }
 
 // jump switches tmux to the session and leaves the board (the popup must close to show it); under
@@ -1185,7 +1187,7 @@ func (m Model) kill(s store.Session) (tea.Model, tea.Cmd) {
 	if !m.alive(s.ID) {
 		return m.say(cMuted, s.Name+" is gone"), nil
 	}
-	return m, m.ccmux("killed "+s.Name, "kill", s.ID)
+	return m, m.act("killed "+s.Name, func() error { return m.run.Kill(s) })
 }
 
 // mouse: click a card to focus it, click the focused card again to jump to it. Over the preview

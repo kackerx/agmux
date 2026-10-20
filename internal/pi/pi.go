@@ -77,9 +77,8 @@ func Setup(write bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "agmux setup: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "pi: would install the extension (%d lines): %s\n", bytes.Count(Extension, []byte("\n")), path)
 	if !write {
-		fmt.Fprintln(stdout, "dry run: add --write to apply")
+		fmt.Fprintf(stdout, "pi: would install the extension (%d lines): %s\ndry run: add --write to apply\n", bytes.Count(Extension, []byte("\n")), path)
 		return 0
 	}
 	if err := install(path); err != nil {

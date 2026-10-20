@@ -29,6 +29,7 @@ type piEntry struct {
 	PID         int    `json:"pid"`
 	SessionID   string `json:"sessionId"`
 	CWD         string `json:"cwd"`
+	Transcript  string `json:"transcript"`
 	Name        string `json:"name"`
 	Status      string `json:"status"` // idle | working | waiting
 	PendingTool string `json:"pendingTool"`
@@ -71,7 +72,7 @@ func (c *Pi) Sessions() ([]Raw, error) {
 	for _, e := range es {
 		r := Raw{
 			ID: e.SessionID, AgentType: "pi", SessionID: e.SessionID, PID: e.PID, CWD: e.CWD, Name: e.Name,
-			Status: e.Status, PendingTool: e.PendingTool, // the transcript is not read: it is not Claude Code's format
+			Status: e.Status, PendingTool: e.PendingTool, Transcript: e.Transcript, // the Poller does not read it: not Claude Code's format
 			StatusChangedAt: time.UnixMilli(e.StatusAt), LastActivity: time.UnixMilli(e.UpdatedAt),
 		}
 		if e.StatusAt == 0 {

@@ -16,7 +16,6 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/kackerx/agmux/internal/avatar"
-	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
@@ -121,7 +120,7 @@ func TestBackgroundWorkIsWorkingColor(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
-	base := store.Session{ID: "a", Name: "n", Status: "working", ContextPct: -1, Subagents: make([]ccmux.Subagent, 2), Shells: 3}
+	base := store.Session{ID: "a", Name: "n", Status: "working", ContextPct: -1, Subagents: make([]store.Subagent, 2), Shells: 3}
 	agents := base
 	agents.AgentsWorking = true
 	tool := base
@@ -186,13 +185,13 @@ func TestCardStatus(t *testing.T) {
 		{"working + tool", func(s *store.Session) {
 			s.Status = "working"
 			s.PendingTool = "Bash"
-			s.Subagents = make([]ccmux.Subagent, 1)
+			s.Subagents = make([]store.Subagent, 1)
 		}, "⏵ working", cWorking, " · Bash", avatar.Scan, cWorking},
-		{"raw working + agents: no 'agents'", func(s *store.Session) { s.Status = "working"; s.Subagents = make([]ccmux.Subagent, 2) }, "⏵ working", cWorking, "", avatar.Scan, cWorking},
+		{"raw working + agents: no 'agents'", func(s *store.Session) { s.Status = "working"; s.Subagents = make([]store.Subagent, 2) }, "⏵ working", cWorking, "", avatar.Scan, cWorking},
 		{"working because of agents", func(s *store.Session) {
 			s.Status = "working"
 			s.AgentsWorking = true
-			s.Subagents = make([]ccmux.Subagent, 1)
+			s.Subagents = make([]store.Subagent, 1)
 		}, "⏵ working", cWorking, " · agents", avatar.Scan, cWorking},
 		{"done", func(s *store.Session) { s.Status = "idle"; s.Done = true }, "● done", cDone, "", avatar.Normal, cDone},
 		{"idle", func(s *store.Session) { s.Status = "idle" }, "⏸ idle", cMuted, "", avatar.Dim, cDim},
@@ -398,7 +397,7 @@ func TestLine3Fields(t *testing.T) {
 		{"model only", 40, func(s *store.Session) { s.Model = "claude-opus-5-5" }, "  Opus 5.5", []string{"·"}},
 		{"effort only: nothing", 40, func(s *store.Session) { s.Effort = "high" }, "⏸ idle", []string{"high", "·"}},
 		{"no agents, no shells", 40, func(s *store.Session) {}, "⏸ idle", []string{"⚇", "⚙", "0"}},
-		{"agents only", 40, func(s *store.Session) { s.Subagents = make([]ccmux.Subagent, 2) }, "⏸ idle  ⚇ 2", []string{"⚙"}},
+		{"agents only", 40, func(s *store.Session) { s.Subagents = make([]store.Subagent, 2) }, "⏸ idle  ⚇ 2", []string{"⚙"}},
 		{"shells only", 40, func(s *store.Session) { s.Shells = 1 }, "⏸ idle  ⚙ 1", []string{"⚇"}},
 		{"counts then two cells then the model", 29, func(s *store.Session) { s.Shells, s.Model = 1, "claude-opus-5-5" }, "⚙ 1  Opus 5.5", nil},
 	} {
@@ -417,7 +416,7 @@ func TestLine3Fields(t *testing.T) {
 }
 
 func TestLine3Yields(t *testing.T) {
-	s := store.Session{Status: "working", PendingTool: "mcp__claude_ai_Claude_Docs__batch", Subagents: make([]ccmux.Subagent, 2),
+	s := store.Session{Status: "working", PendingTool: "mcp__claude_ai_Claude_Docs__batch", Subagents: make([]store.Subagent, 2),
 		Shells: 1, Model: "claude-opus-5-5", Effort: "high", ContextPct: 41}
 	for _, c := range []struct {
 		w            int

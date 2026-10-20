@@ -18,12 +18,16 @@ import (
 	"unicode"
 
 	"github.com/kackerx/agmux/internal/avatar"
-	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/pi"
 	"github.com/kackerx/agmux/internal/xdg"
 )
 
-type Subagent = ccmux.Subagent
+// Subagent is a subagent a session runs (the board draws them; no source tells of them now).
+type Subagent struct {
+	AgentID     string
+	Status      string
+	PendingTool string
+}
 
 type Session struct {
 	ID, Name, AgentType, CWD, GroupKey, Branch string
@@ -33,7 +37,9 @@ type Session struct {
 	AgentsWorking                              bool // Status is "working" only because subagents are
 	Model, Effort                              string
 	Project, TmuxSession                       string // ccmux's project (worktrees under their main repo); the tmux session the pane is in, "" with no pane
-	MainRepoRoot                               string // ccmux's mainRepoRoot: the main repo of a worktree, "" outside git
+	MainRepoRoot                               string // the main repo of a worktree, "" outside git
+	PID                                        int    // the agent's process, 0 if not known (restart and kill signal it)
+	SessionID, Transcript                      string // what the agent itself calls the session, and its jsonl: to resume it ("" if not known)
 	GroupLabel                                 string // what the board's current grouping calls this card's group ("" = the cwd as a path); set by the board, not the poller
 	Agent                                      string // the agent definition (claude --agent <name>) from the transcript's agent-setting line; "" if none
 	ContextPct                                 int    // <0 = unknown
@@ -406,8 +412,11 @@ func (p *Poller) convert(r Raw, pl paneListing) Session {
 	s := Session{
 		ID: r.ID, AgentType: r.AgentType, CWD: r.CWD, Branch: r.Branch,
 		Status: r.Status, Attention: r.Attention, PendingTool: r.PendingTool, TmuxPane: r.Pane,
-		ContextPct: -1, LastActivity: r.LastActivity, Project: r.Project, MainRepoRoot: r.MainRepoRoot,
+		ContextPct: -1, LastActivity: r.LastActivity, Project: r.Project, MainRepoRoot: r.MainRepoRoot, PID: r.PID, SessionID: r.SessionID, Transcript: r.Transcript,
 		TmuxSession: r.TmuxSession, Background: r.Background,
+	}
+	if r.AgentType == "pi" {
+		r.Transcript = "" // not Claude Code's format: the extension says all there is, and the Session keeps the path to resume it by
 	}
 	var tail [][]byte // the end of the transcript: the model, the agent, the branch and the title are looked for in it
 	if r.Transcript != "" {

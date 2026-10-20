@@ -64,7 +64,7 @@ func TestSetup(t *testing.T) {
 	if _, err := os.Stat(path); err == nil {
 		t.Fatal("a dry run wrote it")
 	}
-	if code, out, errs := setup(t, true); code != 0 || !strings.Contains(out, "installed "+path) || errs != "" {
+	if code, out, errs := setup(t, true); code != 0 || !strings.Contains(out, "installed "+path) || strings.Contains(out, "would") || errs != "" {
 		t.Fatalf("write: %d %q %q", code, out, errs)
 	}
 	if got, _ := os.ReadFile(path); !bytes.Equal(got, Extension) {

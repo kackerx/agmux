@@ -97,19 +97,24 @@ func (f *fakeRunner) TmuxIn(stdin string, args ...string) error {
 	return err
 }
 
-func (f *fakeRunner) Run(args ...string) error {
+func (f *fakeRunner) do(args ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, args)
 	return f.err
 }
 
-func (f *fakeRunner) Interactive(args ...string) *exec.Cmd {
-	f.calls = append(f.calls, append([]string{"(interactive)"}, args...))
+func (f *fakeRunner) Restart(s store.Session) error { return f.do("restart", s.ID) }
+func (f *fakeRunner) Kill(s store.Session) error    { return f.do("kill", s.ID) }
+
+func (f *fakeRunner) Review(s store.Session) (*exec.Cmd, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, []string{"(interactive)", "review", s.ID})
 	if f.script == "" {
-		return exec.Command("true")
+		return exec.Command("true"), nil
 	}
-	return exec.Command("/bin/sh", "-c", f.script)
+	return exec.Command("/bin/sh", "-c", f.script), nil
 }
 
 // two groups: /a has a1 (pane) and a2 (background), /b has b1.
@@ -321,12 +326,13 @@ func TestReview(t *testing.T) {
 	for _, c := range []struct {
 		script, wantMsg string
 	}{
-		{"echo progress >&2; echo 'hunk: no changes to review' >&2; exit 1", "ccmux review: hunk: no changes to review"},
+		{"echo progress >&2; echo 'hunk: no changes to review' >&2; exit 1", "review: hunk: no changes to review"},
 		{"exit 2", "exit status 2"},
 		{"echo fine >&2", "review finished: one"},
 	} {
 		m := newModel(&fakeRunner{script: c.script})
-		cmd, done := m.review(sessions[0])
+		c0, _ := m.run.Review(sessions[0])
+		cmd, done := m.review(c0, sessions[0])
 		msg := done(cmd.Run()) // what ExecProcess does once the terminal is back
 		tm, next := m.Update(msg)
 		if v := ansi.Strip(tm.(Model).View()); !strings.Contains(v, c.wantMsg) {

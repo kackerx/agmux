@@ -198,11 +198,12 @@ func TestQuitInPassThroughLeavesNoPosition(t *testing.T) {
 	}
 }
 
-// ccmux review runs with the terminal itself as stdout: left nil, bubbletea would hand the child
+// The review command runs with the terminal itself as stdout: left nil, bubbletea would hand the child
 // the program's output, which is cursorOut and so a pipe, and hunk would lay out for 80 columns.
 func TestReviewChildStdoutIsTheTerminal(t *testing.T) {
 	m := wide(&fakeRunner{}, 232, 50)
-	if cmd, _ := m.review(sessions[0]); cmd.Stdout != os.Stdout {
+	c, _ := (&fakeRunner{}).Review(sessions[0])
+	if cmd, _ := m.review(c, sessions[0]); cmd.Stdout != os.Stdout {
 		t.Errorf("Stdout is %v, want os.Stdout", cmd.Stdout)
 	}
 }

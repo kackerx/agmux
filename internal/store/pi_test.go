@@ -78,6 +78,20 @@ func TestPiSource(t *testing.T) {
 	}
 }
 
+// A pi session's transcript is for resuming it: it reaches the Session, and is not read for names, models or branches.
+func TestPiTranscriptIsKept(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	os.WriteFile(path, []byte(`{"type":"custom-title","customTitle":"read by mistake"}`+"\n"+`{"gitBranch":"mistake"}`+"\n"), 0o644)
+	p := poller(t, []Raw{{ID: "p", AgentType: "pi", PID: 77, SessionID: "sid", Transcript: path, Project: "proj"}, {ID: "c", AgentType: "claude", PID: 78, SessionID: "sid2", Transcript: path, Project: "proj"}})
+	pi, cl := byID(t, p.Sessions(), "p"), byID(t, p.Sessions(), "c")
+	if pi.Transcript != path || pi.PID != 77 || pi.SessionID != "sid" || pi.Name != "proj" || pi.Branch == "mistake" {
+		t.Errorf("pi: %+v", pi)
+	}
+	if cl.Transcript != path || cl.Name != "read by mistake" || cl.Branch != "mistake" {
+		t.Errorf("claude's is read: %+v", cl)
+	}
+}
+
 func TestParseStart(t *testing.T) {
 	for in, want := range map[string]string{
 		"Tue Oct 20 07:34:09 2026": "2026-10-20T07:34:09Z",

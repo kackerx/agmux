@@ -45,16 +45,16 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 | `tab` | 打开预览（没开的话）并进入；在预览里时除 `tab` 外所有按键都发给那个 pane（含 `ctrl-c`、`shift+tab`），再按 `tab` 回到卡片（预览留着，`p` 才关它），滚轮往回翻。直通里 `tab` 到不了 pane，要补全请在真终端里按 |
 | `i` | 回复：开预览并把按键交给这个会话（等于 `p` + `tab`），之后打的字直接进它的 pane；`tab` 回到卡片 |
 | `H` | 发 `/handoff` |
-| `r` | 重启会话 |
-| `x` | 杀掉会话（按 `y` 确认） |
-| `d` | 用 ccmux review 看改动 |
+| `r` | 重启会话：前台的 Claude / pi 先发 SIGTERM（5 秒内不退出就 SIGKILL），再往它的 pane 里敲 `claude --resume <会话 id>`（pi 是 `pi --session <会话文件>`）；后台会话是 `claude respawn <id>`；没有 pane 的前台会话不能重启 |
+| `x` | 杀掉会话（按 `y` 确认）：前台的发 SIGTERM（2 秒内不退出就 SIGKILL），后台会话是 `claude stop <id>` |
+| `d` | 看改动：在会话所在 git 仓库的根目录跑 `hunk diff --watch`；没有 hunk 就 `git diff`，交给 `$GIT_PAGER` / `$PAGER`（都没设是 `less -R`）；不在 git 仓库里会在底栏说 |
 | `a` | 给这个会话换头像：在这张卡正下方（放不下就在上方）弹出 5 列的头像格子（行数按头像数，25 个就是 5 行，全部显示），先是图片集（内置的，再是你的），最后是像素头像；`h` `j` `k` `l` / 方向键移动，`enter` 绑定，`esc` / `q` / 再按一次 `a`（动作 `avatar` 的键，改了键就是改后的那个）取消；屏幕放不下全部行时才按行滚动，滚动时上 / 下边框用灰色写 `↑ n more` / `↓ n more`（上 / 下被滚掉的头像数）；当前穿的那个一开始就选着，底下的消息行显示选中的 id |
 | `t`（动作 `pin`） | 置顶 / 取消置顶焦点卡：置顶的卡在它所在的组里排最前，卡片名字前有 `▲`；多张置顶按置顶先后排（先顶的在前），取消后回到组内默认的名字序。置顶和分组方式无关（切到 project / session / state 仍在各组最前），记在 `$XDG_STATE_HOME/agmux/pins.json`（会话名 → 置顶时间；和头像绑定一样按名字，所以会话 `r` 重启、`/handoff` 换了 ID 仍置顶，没有会话用这个名字**满 60 秒**时条目才自动删，`r` 重启中途那几秒看不到会话不算；没有名字的会话按 project 当名字，同项目的这类会话一起置顶，和头像绑定一致），重启后还在；文件坏了当作都没置顶，底栏报一行，修好或删掉即可。搜索过滤、`s` 定位、折叠照常，`agmux show` 不变 |
 | `m`（动作 `mark_read`） | 把焦点卡的 done 标成已读（变 idle），不用开预览，和预览 / `tab` / `enter` 走同一条已读路径（同一个 `seen.json`），底栏一行 `read <名字>`；焦点卡不是 done、或在折叠的组标题上时什么也不发生 |
 | `q` / `esc` | 退出（预览获焦时先按 `tab` 回到卡片；保留着 `/` 过滤时 `esc` 先清空过滤） |
 | `Q`（动作 `exit`） | 真正退出看板进程；`agmux board --stay` 下 `enter` 跳转从不结束进程、`q` / `esc` 在浮窗里也只收起浮窗，只有它能结束一个浮窗里的看板 |
 
-后台会话（`claude --bg` 起的）没有 tmux pane：在它的卡片上按 `enter` / `i` / `tab`，看板先在 tmux session `agmux-bg` 里开一个窗口跑 `claude attach <id>`（session 不在就新建，窗口名是卡片名、目录是会话的 cwd，不抢你的当前窗口），再照常跳过去（`enter`）或在预览里进直通（`i` / `tab`），之后预览、直通、光标都和普通会话一样；`p` 只看，不 attach，预览区写 `background session · enter or i attaches it`。看板每次轮询用 `tmux list-panes -a` 按启动命令 `claude attach <id>` 认出这个 pane（不存状态文件，重启看板、开多块看板都一致；attach 退出、窗口关掉，卡片就回到没有 pane，再按再开）。直通里 `←` 回 claude 的 agent 视图、`Ctrl+Z` 退出 attach 都是 claude 自己的行为。`H`（发 /handoff）在后台会话上也是先 attach、等窗口出画面再发。新窗口没有 client 时按预览框的大小开（不是 manual，`enter` 跳过去就跟着你的终端变大）。没有 pane 的非后台会话仍然不能跳转和发送，底栏对应键变暗。`x` / `r` 对后台会话还是 `ccmux kill` / `restart` 的现状。claude daemon 预热的备用进程（登记里 `spare: true`）不是会话，看板和 `agmux show` 都不显示；对它 `claude attach` 会让 daemon 把它认领成一个 fork 当前会话的新会话。
+后台会话（`claude --bg` 起的）没有 tmux pane：在它的卡片上按 `enter` / `i` / `tab`，看板先在 tmux session `agmux-bg` 里开一个窗口跑 `claude attach <id>`（session 不在就新建，窗口名是卡片名、目录是会话的 cwd，不抢你的当前窗口），再照常跳过去（`enter`）或在预览里进直通（`i` / `tab`），之后预览、直通、光标都和普通会话一样；`p` 只看，不 attach，预览区写 `background session · enter or i attaches it`。看板每次轮询用 `tmux list-panes -a` 按启动命令 `claude attach <id>` 认出这个 pane（不存状态文件，重启看板、开多块看板都一致；attach 退出、窗口关掉，卡片就回到没有 pane，再按再开）。直通里 `←` 回 claude 的 agent 视图、`Ctrl+Z` 退出 attach 都是 claude 自己的行为。`H`（发 /handoff）在后台会话上也是先 attach、等窗口出画面再发。新窗口没有 client 时按预览框的大小开（不是 manual，`enter` 跳过去就跟着你的终端变大）。没有 pane 的非后台会话仍然不能跳转和发送，底栏对应键变暗。`x` / `r` 对后台会话是 `claude stop` / `claude respawn`。claude daemon 预热的备用进程（登记里 `spare: true`）不是会话，看板和 `agmux show` 都不显示；对它 `claude attach` 会让 daemon 把它认领成一个 fork 当前会话的新会话。
 
 卡片上的名字，按这个顺序取第一个有的：会话登记里用户或同伴给的 `name`（`/rename`、`claude -n`、后台 `-n`）→ 会话 jsonl 里最后一条 `custom-title`（文件每个字节最多读一次，之后只看新增的部分，所以改名也跟得上）→ pane 标题里的摘要（去掉 ✳ / 盲文转圈前缀，`Claude Code` 不算）→ 登记里 Claude 自己编的名字（`nameSource` 为 `derived`）→ 项目名。后台会话的卡片第二行右端有灰色的 `bg`，预览标题里 pane 的位置写 `bg`（有 pane 时 `bg · %id`）；`agmux show` 的最后一列是 `bg`（后台会话）或空。
 
