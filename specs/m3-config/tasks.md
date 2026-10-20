@@ -474,3 +474,11 @@
 - 注意：本文件在「历史已用 git filter-repo 重写」那行以上记的 commit hash 都是重写前的旧 hash，对照查备份 mirror。2026-10-17 20:20 两个 secret 齐（TAP_GITHUB_TOKEN 的范围比需要的宽：能 push sqlmux、admin tap，用户可自行收窄），公开历史最终扫描无公司信息，用户拍板直接发：打 v0.1.0。
 - v0.1.0 release run 39031950151：ci ✓、release ✓（4 个 tar.gz + checksums）、tap ✓（Formula/agmux.rb 已推到 kackerx/homebrew-tap）、**npm ✗**：第一个平台包就 403「Two-factor authentication or granular access token with bypass 2fa enabled is required to publish」——用户新开的 granular token 没勾「Bypass two-factor authentication」。npm 上什么都没发出去。修法：用户重开 token（Packages and scopes = Read and write、范围要能建新包（All packages）、勾 Bypass 2FA）→ 我更新 secret → `gh run rerun --failed` 只重跑 npm job。
 - tester 重写后整套（c9366a5 内容，套件 15aa6b0）：1084 条 3075 s，2 红均非替换所致（t43 老竞态 helper 漏接 AttributeError；t63 断言跟 changelog 新正则），修后 57 条复跑绿；替换涉及的分组 / 路径缩写 / 宽度用例全绿。tester 已清掉主仓库里全部旧 worktree。npm 发布：两个 granular token 都 403（npm 不认 bypass 2FA，已知问题 npm/cli#9268），改用户本地 `npm login` 后跑脚本手发五包（包已用 Release 真归档打好在 orchestrator scratchpad npm-v0.1.0/），之后排 Trusted Publishing。
+
+## 第十三批 后台会话归到开它的会话组（用户 2026-10-20，截图 images/31.png）
+- 现象（现状即如此，是 T60 决定 (2) 的后果）：按 tmux 会话分组时，后台会话 attach 前没有 pane → 进「(no pane)」组；attach 后 pane 在 agmux-bg 里 → 进 agmux-bg 组。用户要的是跟开它的那个会话（blessmuse）同组。
+- 已查（只读）：bg 进程都是 `claude daemon` 的子进程（daemon 父进程是 1），进程树找不到开它的 pane；ccmux show 对 bg 只有 cwd / project / mainRepoRoot，originInvocationId 为 null。可靠的只有 cwd：开 bg 的会话几乎总在同一个项目目录里。
+
+### T64 按 session 分组时后台会话跟同 cwd 的前台会话走
+- 定稿：只改 session 分组的键。后台会话（Background）的 session 组键 = 和它同 cwd（先 cwd 相等，再退 mainRepoRoot 相等）的**前台**会话所在的 tmux session；多个候选时取前台会话最多的那个 tmux session，再并列取 LastActivity 最近的。找不到同目录前台会话时保持现状（有 pane 用 pane 的 session，没有就 (no pane)）。attach 前后组键一致，卡片不再搬家。cwd / project / state 分组不变。卡片上的 `bg` 标签不变；预览标题仍 `bg · %id`。不改 attach 窗口放在 agmux-bg 的做法。
+- 验收：单测 一个 bg + 两个前台（blessmuse 组），attach 前后组键都是 blessmuse；两个 tmux session 都有同 cwd 前台会话时按数量、再按最近；只有 mainRepoRoot 相同（worktree）也算；没有同目录前台会话且无 pane → (no pane)，有 pane → 其 pane 的 session；非 bg 会话键不变。黑盒 假 ccmux 两前台一后台同 cwd，按 session 分组后台卡在前台组里，i 之后仍在，agmux-bg 组不出现（没有别的 bg）。
