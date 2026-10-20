@@ -98,7 +98,7 @@ type Poller struct {
 	titleScans int                   // transcripts scanned for a title, the tests count them
 	titles     map[string]titleState // session ID → its custom title and how far its transcript was scanned for one
 	worked     map[string]bool       // session ID → seen not idle by this poller, or its status changed since: only such a session can be done
-	firstAt    map[string]time.Time  // session ID → its StatusChangedAt when this poller first saw it
+	firstAt    map[string]firstSeen  // session ID → its StatusChangedAt and process when this poller first saw it
 	repos      map[string]repoInfo   // cwd → what git says of it, asked once
 	branches   map[string]branchInfo // cwd → the branch git said, and when
 
@@ -336,6 +336,11 @@ func (p *Poller) pinnedAt(key string) (t time.Time, ok bool) {
 	return t, ok
 }
 
+type firstSeen struct {
+	at  time.Time
+	pid int
+}
+
 // Refresh polls the sources once.
 func (p *Poller) Refresh() error {
 	p.refreshMu.Lock()
@@ -366,18 +371,19 @@ func (p *Poller) Refresh() error {
 			p.worked = map[string]bool{}
 		}
 		if p.firstAt == nil {
-			p.firstAt = map[string]time.Time{}
+			p.firstAt = map[string]firstSeen{}
 		}
 		for _, r := range raw {
 			live[r.ID] = true
-			if _, ok := p.firstAt[r.ID]; !ok {
-				p.firstAt[r.ID] = r.StatusChangedAt
+			if f, ok := p.firstAt[r.ID]; !ok || f.pid != r.PID { // another process under the same ID (a restart between two polls) is first seen anew
+				p.firstAt[r.ID] = firstSeen{r.StatusChangedAt, r.PID}
+				delete(p.worked, r.ID)
 			}
 			// worked: seen busy, or its status changed since it was first seen (a short answer between two polls)
-			p.worked[r.ID] = p.worked[r.ID] || r.Status != "idle" || r.StatusChangedAt.After(p.firstAt[r.ID])
+			p.worked[r.ID] = p.worked[r.ID] || r.Status != "idle" || r.StatusChangedAt.After(p.firstAt[r.ID].at)
 		}
 		maps.DeleteFunc(p.worked, func(id string, _ bool) bool { return !live[id] })
-		maps.DeleteFunc(p.firstAt, func(id string, _ time.Time) bool { return !live[id] })
+		maps.DeleteFunc(p.firstAt, func(id string, _ firstSeen) bool { return !live[id] })
 		if p.Seen != nil { // a session that is gone is not "seen" any more
 			if perr := p.Seen.Prune(func(id string) bool { return live[id] }); serr == nil {
 				serr = perr

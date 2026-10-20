@@ -67,9 +67,11 @@ func (c *Pi) Sessions() ([]Raw, error) {
 			kept := es[:0]
 			for _, e := range es {
 				// a process that started after the file was last written is not the one that wrote it (the pid was used again)
-				if at, ok := parseStart(starts[e.PID]); ok && !at.After(time.UnixMilli(e.UpdatedAt)) {
+				at, ok := parseStart(starts[e.PID])
+				switch {
+				case ok && !at.After(time.UnixMilli(e.UpdatedAt)):
 					kept = append(kept, e)
-				} else {
+				case ok: // a reused pid: the file is of one that is gone. Not told by ps, not said: next poll
 					c.forget(file[e.PID])
 				}
 			}

@@ -4,7 +4,9 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +24,7 @@ type machine struct {
 	alive     map[int]bool
 	onTerm    func(pid int) // what a process does when told to end; nil = it ends at once
 	ignore    bool          // SIGTERM does nothing
+	immortal  bool          // SIGKILL does nothing either
 	exitAfter time.Duration // SIGTERM ends it after this long
 	killErr   error         // SIGKILL fails
 	sigErr    error
@@ -42,6 +45,7 @@ func (m *machine) control() control {
 			switch {
 			case sig == syscall.SIGKILL && m.killErr != nil:
 				return m.killErr
+			case sig == syscall.SIGKILL && m.immortal:
 			case sig == syscall.SIGKILL:
 				m.alive[pid] = false
 			case m.exitAfter > 0:
@@ -204,11 +208,36 @@ func TestControlRestart(t *testing.T) {
 	if err := m.control().restart(claudeFg); err != nil || len(m.log) != 4 || m.log[1] != "signal killed 4242" || !strings.HasPrefix(m.log[2], "tmux send-keys") {
 		t.Errorf("a stubborn one: %v %q", err, m.log)
 	}
+	// r twice: the process is not there, and the shell is not told to start it (it would type the command into the session the first r started)
+	m = newMachine()
+	if err := m.control().restart(claudeFg); err == nil || !strings.Contains(err.Error(), "not running") || len(m.log) != 0 {
+		t.Errorf("r on a process that is gone: %v %q", err, m.log)
+	}
+	m = newMachine(4242)
+	m.sigErr = syscall.ESRCH // it went between the check and the signal
+	m.alive[4242] = true
+	m.onTerm = nil
+	if err := m.control().restart(claudeFg); err == nil || slices.ContainsFunc(m.log, func(l string) bool { return strings.HasPrefix(l, "tmux") }) {
+		t.Errorf("a signal that fails: %v %q", err, m.log)
+	}
+	// one that survives SIGKILL: nothing is typed, and it is an error
+	m = newMachine(4242)
+	m.ignore, m.immortal = true, true
+	if err := m.control().restart(claudeFg); err == nil || !strings.Contains(err.Error(), "still there after SIGKILL") || slices.ContainsFunc(m.log, func(l string) bool { return strings.HasPrefix(l, "tmux") }) {
+		t.Errorf("r on an immortal one: %v %q", err, m.log)
+	}
+	m = newMachine(4242)
+	m.ignore, m.immortal = true, true
+	if err := m.control().kill(claudeFg); err == nil || !strings.Contains(err.Error(), "still there after SIGKILL") {
+		t.Errorf("x on an immortal one: %v", err)
+	}
 	// what is missing is said, and nothing is signalled
 	for name, s := range map[string]store.Session{
 		"no pane":       {Name: "n", AgentType: "claude", PID: 4242, SessionID: "x"},
 		"no session id": {Name: "n", AgentType: "claude", PID: 4242, TmuxPane: "%1"},
 		"pi, no file":   {Name: "n", AgentType: "pi", PID: 4242, TmuxPane: "%1"},
+		"codex":         {Name: "n", AgentType: "codex", PID: 4242, TmuxPane: "%1", SessionID: "x"},
+		"no type":       {Name: "n", PID: 4242, TmuxPane: "%1", SessionID: "x"},
 	} {
 		m = newMachine(4242)
 		if err := m.control().restart(s); err == nil || len(m.log) != 0 {
@@ -237,16 +266,13 @@ func TestControlReview(t *testing.T) {
 		t.Errorf("hunk: %v %+v", err, cmd)
 	}
 	m.hunk = false
-	for _, c := range []struct{ gitPager, pager, want string }{{"", "", "less -R"}, {"", "bat", "bat"}, {"delta", "bat", "delta"}} {
-		t.Setenv("GIT_PAGER", c.gitPager)
-		t.Setenv("PAGER", c.pager)
-		cmd, err = m.control().review(claudeFg)
-		if err != nil || !reflect.DeepEqual(cmd.Args, []string{"git", "-C", "/w/repo", "diff"}) || lastEnv(cmd.Env, "GIT_PAGER") != c.want {
-			t.Errorf("git diff with %q %q: %v %v", c.gitPager, c.pager, err, cmd.Args)
-		}
+	t.Setenv("LESS", "--quit-if-one-screen")
+	cmd, err = m.control().review(claudeFg)
+	if err != nil || !reflect.DeepEqual(cmd.Args, []string{"sh", "-c", `git --no-pager -C "$1" diff --color=always | less -R`, "sh", "/w/repo"}) || !slices.Contains(cmd.Env, "LESS=") || lastEnv(cmd.Env, "LESS") != "" {
+		t.Errorf("git diff piped to less: %v %v %v", err, cmd.Args, lastEnv(cmd.Env, "LESS"))
 	}
 	m.rootErr = errors.New("not a git repository")
-	if _, err := m.control().review(claudeFg); err == nil || !strings.Contains(err.Error(), "/w/p") {
+	if _, err := m.control().review(claudeFg); err == nil || !strings.Contains(err.Error(), "/w/p is not in a git repository (not a git repository)") || !strings.HasPrefix(err.Error(), "dev: ") {
 		t.Errorf("not a repo: %v", err)
 	}
 	if _, err := m.control().review(store.Session{Name: "n"}); err == nil {
@@ -272,5 +298,43 @@ func TestShellQuote(t *testing.T) {
 		if got := shellQuote(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
+	}
+}
+
+// The fallback really runs: git's diff of the repo's root goes into less -R, whatever LESS says.
+func TestReviewFallbackRuns(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	repo := t.TempDir()
+	repo, _ = filepath.EvalSymlinks(repo)
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("one\n"), 0o644)
+	git("add", ".")
+	git("commit", "-q", "-m", "x")
+	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("one\ntwo-added\n"), 0o644)
+	os.MkdirAll(filepath.Join(repo, "sub"), 0o755)
+	bin, got := t.TempDir(), filepath.Join(t.TempDir(), "less.out")
+	os.WriteFile(filepath.Join(bin, "less"), []byte("#!/bin/sh\necho \"args: $* LESS=[$LESS]\" > "+got+"\ncat >> "+got+"\n"), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LESS", "--quit-if-one-screen")
+	c := realControl(nil)
+	c.lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	cmd, err := c.review(store.Session{Name: "n", CWD: filepath.Join(repo, "sub")}) // from a directory below the root
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	data, _ := os.ReadFile(got)
+	if !strings.Contains(string(data), "args: -R LESS=[]") || !strings.Contains(string(data), "two-added") {
+		t.Errorf("what less was given:\n%s", data)
 	}
 }

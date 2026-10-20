@@ -1039,3 +1039,26 @@ func TestDoneNeedsAWorkingSession(t *testing.T) {
 		t.Error("gone and back idle: not seen working by this run")
 	}
 }
+
+// Another process under the same ID (a restart that fits between two polls) is a session first seen anew: its
+// newer status time is not work, and what the old one had done does not carry over.
+func TestDoneAfterARestartWithTheSameID(t *testing.T) {
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	raw := []Raw{{ID: "a", PID: 100, Status: "working", StatusChangedAt: at}}
+	p := poller(t, raw)
+	raw[0].Status, raw[0].StatusChangedAt = "idle", at.Add(time.Minute)
+	p.Refresh()
+	if !byID(t, p.Sessions(), "a").Done {
+		t.Fatal("worked and stopped")
+	}
+	raw[0].PID, raw[0].StatusChangedAt = 200, at.Add(time.Hour) // restarted, idle again, newer
+	p.Refresh()
+	if byID(t, p.Sessions(), "a").Done {
+		t.Error("a new process is first seen: not done")
+	}
+	raw[0].StatusChangedAt = at.Add(2 * time.Hour) // and it works
+	p.Refresh()
+	if !byID(t, p.Sessions(), "a").Done {
+		t.Error("the new process worked")
+	}
+}

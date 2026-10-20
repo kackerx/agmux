@@ -77,14 +77,14 @@ func TestPiSource(t *testing.T) {
 		return m
 	}
 	for name, want := range map[string]bool{"1.json": true, "2.json": true, "3.json": true, "5.json": true, "6.json": true, "1.json.tmp.1792": true,
-		"4.json": false, "7.json": false, "999.json": false, "999.json.tmp.5": false, "998.json.tmp.5": false} {
+		"4.json": false, "7.json": true, "999.json": false, "999.json.tmp.5": false, "998.json.tmp.5": false} {
 		if left()[name] != want {
 			t.Errorf("%s kept: %v, want %v", name, left()[name], want)
 		}
 	}
 	// ps failing lists everything alive; no directory or no file lists nothing
 	c.StartsOf = func([]int) (map[int]string, error) { return nil, fmt.Errorf("no ps") }
-	if rs, _ := c.Sessions(); len(rs) != 3 {
+	if rs, _ := c.Sessions(); len(rs) != 4 { // 1 2 3 and 7, which ps did not know a moment ago
 		t.Errorf("without ps: %d", len(rs))
 	}
 	if rs, err := (&Pi{Dir: filepath.Join(t.TempDir(), "none")}).Sessions(); len(rs) != 0 || err != nil {

@@ -77,6 +77,9 @@ func (c control) end(s store.Session, wait time.Duration) error {
 		for i := 0; i < 20 && c.alive(s.PID); i++ { // the kernel needs a moment
 			time.Sleep(waitPoll)
 		}
+		if c.alive(s.PID) {
+			return fmt.Errorf("%s (pid %d) is still there after SIGKILL", s.Name, s.PID)
+		}
 	}
 	return nil
 }
@@ -107,10 +110,15 @@ func (c control) restart(s store.Session) error {
 		again = "pi --session " + shellQuote(s.Transcript)
 	case s.AgentType == "pi":
 		return fmt.Errorf("%s: pi has not said which session file it has", s.Name)
-	case s.SessionID != "":
+	case s.AgentType == "claude" && s.SessionID != "":
 		again = "claude --resume " + shellQuote(s.SessionID)
-	default:
+	case s.AgentType == "claude":
 		return fmt.Errorf("%s: no session id to resume it by", s.Name)
+	default:
+		return fmt.Errorf("%s: r can't start a %s session again", s.Name, s.AgentType)
+	}
+	if s.PID > 1 && !c.alive(s.PID) { // r pressed twice: the second would type the command into the session the first started
+		return fmt.Errorf("%s is not running (restarted already?)", s.Name)
 	}
 	if err := c.end(s, restartWait); err != nil {
 		return err
@@ -130,26 +138,17 @@ func (c control) review(s store.Session) (*exec.Cmd, error) {
 	}
 	root, err := c.toplevel(s.CWD)
 	if err != nil || root == "" {
-		return nil, fmt.Errorf("%s is not in a git repository: %s", s.CWD, s.Name)
+		return nil, fmt.Errorf("%s: %s is not in a git repository (%v)", s.Name, s.CWD, err)
 	}
 	if hunk, err := c.lookPath("hunk"); err == nil {
 		cmd := exec.Command(hunk, "diff", "--watch")
 		cmd.Dir = root
 		return cmd, nil
 	}
-	cmd := exec.Command("git", "-C", root, "diff")
-	pager := firstSet(os.Getenv("GIT_PAGER"), os.Getenv("PAGER"), "less -R") // less -R: git's default less quits at once on a short diff, and keeps no colors
-	cmd.Env = append(os.Environ(), "GIT_PAGER="+pager)
+	// git's own pager would quit at once on a short diff when the user's LESS says so (-F) and keep no colors: less -R, with no LESS
+	cmd := exec.Command("sh", "-c", `git --no-pager -C "$1" diff --color=always | less -R`, "sh", root)
+	cmd.Env = append(os.Environ(), "LESS=")
 	return cmd, nil
-}
-
-func firstSet(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // shellQuote is s as one word for a POSIX shell.

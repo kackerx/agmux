@@ -47,9 +47,9 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 | `tab` | 打开预览（没开的话）并进入；在预览里时除 `tab` 外所有按键都发给那个 pane（含 `ctrl-c`、`shift+tab`），再按 `tab` 回到卡片（预览留着，`p` 才关它），滚轮往回翻。直通里 `tab` 到不了 pane，要补全请在真终端里按 |
 | `i` | 回复：开预览并把按键交给这个会话（等于 `p` + `tab`），之后打的字直接进它的 pane；`tab` 回到卡片 |
 | `H` | 发 `/handoff` |
-| `r` | 重启会话：前台的 Claude / pi 先发 SIGTERM（5 秒内不退出就 SIGKILL），再往它的 pane 里敲 `claude --resume <会话 id>`（pi 是 `pi --session <会话文件>`）；后台会话是 `claude respawn <id>`；没有 pane 的前台会话不能重启 |
+| `r` | 重启会话（连按两次，第二次发现进程已经不在，会报 "not running"，不会把命令敲进新起的会话）：前台的 Claude / pi 先发 SIGTERM（5 秒内不退出就 SIGKILL），再往它的 pane 里敲 `claude --resume <会话 id>`（pi 是 `pi --session <会话文件>`）；后台会话是 `claude respawn <id>`；没有 pane 的前台会话不能重启 |
 | `x` | 杀掉会话（按 `y` 确认）：前台的发 SIGTERM（2 秒内不退出就 SIGKILL），后台会话是 `claude stop <id>` |
-| `d` | 看改动：在会话所在 git 仓库的根目录跑 `hunk diff --watch`；没有 hunk 就 `git diff`，交给 `$GIT_PAGER` / `$PAGER`（都没设是 `less -R`）；不在 git 仓库里会在底栏说 |
+| `d` | 看改动：在会话所在 git 仓库的根目录跑 `hunk diff --watch`；没有 hunk 就 `git diff` 交给 `less -R`（清掉 `LESS`，免得你的 `--quit-if-one-screen` 让短 diff 一闪而过；不看 `$PAGER`）；不在 git 仓库里会在底栏说 |
 | `a` | 给这个会话换头像：在这张卡正下方（放不下就在上方）弹出 5 列的头像格子（行数按头像数，25 个就是 5 行，全部显示），先是图片集（内置的，再是你的），最后是像素头像；`h` `j` `k` `l` / 方向键移动，`enter` 绑定，`esc` / `q` / 再按一次 `a`（动作 `avatar` 的键，改了键就是改后的那个）取消；屏幕放不下全部行时才按行滚动，滚动时上 / 下边框用灰色写 `↑ n more` / `↓ n more`（上 / 下被滚掉的头像数）；当前穿的那个一开始就选着，底下的消息行显示选中的 id |
 | `t`（动作 `pin`） | 置顶 / 取消置顶焦点卡：置顶的卡在它所在的组里排最前，卡片名字前有 `▲`；多张置顶按置顶先后排（先顶的在前），取消后回到组内默认的名字序。置顶和分组方式无关（切到 project / session / state 仍在各组最前），记在 `$XDG_STATE_HOME/agmux/pins.json`（会话名 → 置顶时间；和头像绑定一样按名字，所以会话 `r` 重启、`/handoff` 换了 ID 仍置顶，没有会话用这个名字**满 60 秒**时条目才自动删，`r` 重启中途那几秒看不到会话不算；没有名字的会话按 project 当名字，同项目的这类会话一起置顶，和头像绑定一致），重启后还在；文件坏了当作都没置顶，底栏报一行，修好或删掉即可。搜索过滤、`s` 定位、折叠照常，`agmux show` 不变 |
 | `m`（动作 `mark_read`） | 把焦点卡的 done 标成已读（变 idle），不用开预览，和预览 / `tab` / `enter` 走同一条已读路径（同一个 `seen.json`），底栏一行 `read <名字>`；焦点卡不是 done、或在折叠的组标题上时什么也不发生 |
