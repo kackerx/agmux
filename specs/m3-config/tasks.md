@@ -525,3 +525,8 @@
 ### T71 删 internal/ccmux、README / CREDITS
 - README 前置条件去掉 ccmux，加 `agmux setup --write` 装 pi 扩展；CREDITS 致谢 ccmux 的实现思路（MIT）；`agmux show` 文档。用户自己卸 ccmux 的三个 hook。
 - dev 真机验（T67 前置）：只有子代理在跑时登记 status = busy（65 s 连续，statusUpdatedAt 不变）→ 不读 subagents 目录；AgentsWorking 恒 false（`working · agents` 细分没了，照准）。`shell` = 后台 shell 在跑、主会话空闲 → 按设计映射 idle（子代理再开后台 shell 这种情况会显示 idle，接受）。细节：sessions 目录还有 `<pid>.<hash>.key` 文件，只 glob `*.json`；procStart 与 `ps -o lstart=` 同格式，一次 `ps -o pid=,lstart= -p …` 校验全部；时间字段是毫秒时间戳。
+
+### T72 agent 角色优先读 claude-agent 状态文件（agent-builder 2026-10-20 转达，称用户已同意；用户可否决）
+- 背景（agent-builder 实测 2.1.301）：/clear、裸 resume 之后新 jsonl 没有 agent-setting 行，进程参数也看不到角色，handoff 每次交接都 /clear，所以常驻角色交接后按 transcript 判不出来。用户机器上 SessionStart hook `~/.config/bin/claude-agent-record` 把 hook 输入的 agent_type 写到 `${XDG_STATE_HOME:-~/.local/state}/claude-agent/<session_id>`（一行：角色名或 `-`），只增不删。我核过：48 个文件，内容如 `storefront-qa`；settings.json 第 75 行挂着；`~/.config/bin/claude-hud` 已这么读。
+- 定稿：Session.Agent 先读该文件（按 sessionId；trim；`-` 或不存在 → 退回现有 agent-setting 尾部读法）。文件小，每次 poll 直接读，不缓存。README agent 列说明加一句这个来源（hook 不是 agmux 的，不装）。排在 T67 之后（用 T67 的 SessionID）。
+- 验收：单测 文件有名 → 用它；`-` → 退回 tail；不存在 → 退回 tail；XDG_STATE_HOME 生效；空白 trim。
