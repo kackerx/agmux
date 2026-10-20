@@ -500,3 +500,27 @@
 - dev 12591e6（T66）：npm job permissions contents: read + id-token: write；node 24；删 NODE_AUTH_TOKEN / NPM_TOKEN；--provenance（官方说 OIDC 默认带，多余无害）。官方文档要点：npm ≥ 11.5.1；repository.url 须与仓库一致（我们是简写 github:kackerx/agmux，首次 OIDC 发布最可能的失败点，报错就改完整 URL）；Trusted Publisher 配置 **2 天内不发布会过期**，用户要在打下一个 tag 前再配；只支持 GitHub 托管 runner。第十三批目标 12591e6，送 reviewer。
 - reviewer（12591e6）通过无必改：T64 变异 10 杀 9（存活等价）、全序确定、attach 前后一致、regroup 微秒级不缓存；T65 5 杀 5，过滤在 seen / convert 之前，真机只读对比 ccmux 30 条 → agmux 29 条（少的正是备用 03c4fd88，真后台 701ce329 在）；T66 对照官方文档 node 24 / id-token / 无 token 引用 / actionlint 0；repository 简写无风险（registry 上已发版本存的就是规范形式，publish 自己规范化）。补进用户配置步骤：Trusted Publisher **2 天内要发一次**；「Allowed actions」要勾 `npm publish`；字段大小写敏感。建议 1（repository 改对象形式去 warning）顺手；建议 2（TTYWriter 两个 100 ms 阈值用例并行时偶红一次，复现不出）记备忘。第十三批目标 12591e6，送 tester。
 - dev c597ae6：npm 壳包 repository 改对象形式（平台包从壳包读），npm pack 无 warn。随第十三批一起装。
+
+## 第十四批 M5 自家发现层（用户 2026-10-20 点头：去 ccmux、codex 不要、pi 保留、来源策略抽象）
+设计：specs/m5-own-discovery/design.md（§4 替换表、§7 done 来源、§9 pi）。顺序：T67 → T68 → T69 → T70（tester 的夹具 T70 可与 T67 并行起步）→ T71。
+
+### T67 Source 接口 + Claude 来源（替换 ccmux show）
+- 定稿：store 里 `type Source interface { Sessions() ([]Raw, error) }`（Raw = 与 agent 无关的中间结构：ID、AgentType、PID、SessionID、CWD、Pane、TmuxSession、Name、Status(working|idle|waiting)、Attention(permission|question|plan_approval|"")、StatusChangedAt、Transcript、Background、BgJobID）；Poller 持有 `[]Source`，合并后走现有 convert。Claude 来源读 `~/.claude/sessions/*.json`（`$CLAUDE_CONFIG_DIR` 优先，与 statusline 同一套路径逻辑）：`kill(pid,0)` 活着才算，`procStart` 与 ps 的进程起始时间不一致（pid 复用）丢；`spare:true` 丢（T65 的 spare() 及 ccmux.Session.LastPrompt/Prompts 删）；字段映射见 design §4：tmux 字段 `agmux # main:@14.%37` → TmuxSession = `agmux # main`、Pane = `%37`；status busy→working、waiting→waiting、idle|shell→idle；waitingFor `permission prompt`→permission，其它非空→question；尾部最后一个 tool_use 是 ExitPlanMode 且 waiting → plan_approval；StatusChangedAt = statusUpdatedAt；kind bg → Background，id = jobId，状态 / transcript / 名字从 `~/.claude/jobs/<jobId>/state.json`（照 ccmux deriveBackgroundState：tempo blocked → waiting（有 questions → question，needs 非空 → permission）；done|stopped|failed → idle；其它 working；logPath = linkScanPath；name = state.name）。Name = 登记 name（nameSource 任意），空则 T58 的 custom-title，再空项目名。Transcript = statusline 存的 transcript_path，否则 `projects/<cwd 非 [A-Za-z0-9] 转 ->/<sessionId>.jsonl`。pendingTool = 尾部最后一个未配对 tool_use 的 name（有 tool_result 配对则空）。Branch = 尾部最后一条带 gitBranch 的条目；Project / MainRepoRoot：`git -C cwd rev-parse --show-toplevel --git-dir --git-common-dir` 一次按 cwd 缓存（git-dir ≠ common-dir 即 worktree，MainRepoRoot = common-dir 的父目录；project = MainRepoRoot 的 basename，无 git 则 cwd basename）。Subagents：先真机只读验「只有子代理在跑时登记是否 busy」，是就不读 subagents 目录；否则 `subagents/agent-*.jsonl` 10 s 内有写入算 agents 在跑。
+- done：Status idle 且 StatusChangedAt 新于 seen.json 的记录 → Done；seen key 改 id + StatusChangedAt（现有 MarkSeen 路径不变，后台会话同样适用）。
+- `agmux show` 同源；列不变（第 8 列 bg）。
+- 不动：board、avatar、statusline、T60 attach 认领（list-panes 仍跑）、config。internal/ccmux 包先留着不删（T71），但 Poller 默认只装 Claude 来源，`ccmux` 二进制不再被调用。
+- 验收：单测 登记文件夹具（interactive / bg / spare / 死 pid / procStart 不符 / 坏 JSON 只丢那条）→ Sessions 正确；tmux 字段解析（含 session 名里带 ` # ` 和 `:`）；status / attention 映射表每格一例；jobs state 四种 tempo/state；done 三步（working→idle 变 done；MarkSeen 后 idle；再变又 done）；Name 三级回退；Transcript 两级回退；pendingTool 配对 / 未配对；worktree 的 MainRepoRoot；show 输出。真机只读：dev 用自己的 Claude 会话对比 ccmux show 的 29 条与新来源的列表（id 集合、pane、状态一致；差异逐条解释）。
+
+### T68 pi 扩展 + pi 来源 + setup 安装
+- 定稿见 design §9。扩展源码放 internal/pi/agmux.js（go:embed），`agmux setup` 多一段：dry-run 打印将写入 `~/.pi/agent/extensions/agmux.js` 的差异，`--write` 写入（已有且内容一致跳过；用户改过的不覆盖，提示）。pi Source 读 `~/.pi/agent/agmux-sessions/*.json`，pane 爬 ppid；AgentType = "pi"。无 statusline → ContextPct -1、Model 空。r / x 见 §9。
+- 验收：单测 扩展文件内容包含 7 个事件名；setup dry-run / write / 不覆盖；pi 文件夹具 → Sessions；ppid 爬 pane（三层、找不到 → 无 pane）；底栏提示条件。真机：dev 装扩展后起一个一次性 pi 会话（`pi` 在临时目录，问一句退出），看板出现 / 状态变化 / 退出消失；装的扩展文件事后留着（用户要用），一次性会话的 jsonl 删掉。
+
+### T69 r / x / d 不走 ccmux
+- r：Claude 前台 = SIGTERM pid，等 ≤5 s 退出，`tmux send-keys -t <pane> 'claude --resume <sessionId>' Enter`；Claude 后台 = `claude respawn <jobId>`；pi = SIGTERM 后 `pi -c`（或按 id 恢复，dev 查）。x：前台 SIGTERM（等 ≤2 s，不行 SIGKILL）；Claude 后台 `claude stop <jobId>`（输出含 No job matching 视为成功）。d：`git -C <cwd> rev-parse --show-toplevel` 到仓库根 exec `hunk diff --watch`；没有 hunk → `git diff` 走 `$PAGER`/less。pin 跨重启靠名字（T53）不变。
+- 验收：单测 假 runner 记 argv / 信号；三类会话三种动作；hunk 缺失回退。真机 dev 用自己的一次性会话各做一遍 r / x。
+
+### T70 e2e 夹具换登记目录（tester，与 T67 并行起步）
+- 假 ccmux 二进制 → 假 `$HOME`（或 `$CLAUDE_CONFIG_DIR`）下的 `sessions/*.json` + `jobs/*/state.json` + `projects/<slug>/<id>.jsonl`，pi 用 `~/.pi/agent/agmux-sessions/*.json`；pid 用 harness 自己起的长命进程（`sleep`）保证活着，procStart 由 harness 按 ps 填。lib.py 的 fixture 表保留语义，改生成器。23 个文件逐个过。
+
+### T71 删 internal/ccmux、README / CREDITS
+- README 前置条件去掉 ccmux，加 `agmux setup --write` 装 pi 扩展；CREDITS 致谢 ccmux 的实现思路（MIT）；`agmux show` 文档。用户自己卸 ccmux 的三个 hook。

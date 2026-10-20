@@ -65,3 +65,11 @@
 - 用户主用 Claude Code + pi。ccmux 现在列出的 34 个会话里 32 claude、2 pi。
 - 结构：store 里一个 `Source` 接口（列出该 agent 的活会话：id、pid、cwd、pane、name、status、attention、statusChangedAt、transcript、Background），两个实现 `claude`（登记文件）和 `pi`（待调查：ccmux 的 PiHookAdapter 怎么做、pi 的扩展 API 能否自己写一个登记文件）。Poller 把各 Source 的结果合并。codex / opencode 不实现，接口留着就是扩展点，不预埋代码。
 - pi 调查进行中，结果补在第 9 节。
+
+## 9. pi 来源（调查结论，2026-10-20）
+- 装的是 `@earendil-works/pi-coding-agent` 1.1.0（`~/.pi` → `~/.config/.pi` 软链；@oh-my-pi 是另一个 agent）。pi 自己没有活会话登记；会话 jsonl 在 `~/.pi/agent/sessions/--<cwd 的 / 换 ->--/<ISO>_<uuid>.jsonl`，首行 `{"type":"session","id","cwd"}`，名字是 `session_info{name}` 条目，不记分支；pane 标题 `π - <name> - <dir>`。
+- ccmux 对 pi 的做法：往 `~/.pi/agent/extensions/ccmux.js` 装一个扩展，按 session_start / agent_start / agent_end / session_shutdown 写 `~/.config/ccmux/session-pids/pi-<id>.json`（state 只有 idle / working，无 attention、无 pendingTool）；pane 靠 pid 往上爬到 pane_pid。**这台机器上这个扩展从未装过**，所以现在两个 pi 会话只是扫进程 + 读屏幕猜的，logPath / 状态全空。
+- pi 扩展 API 有全部需要的事件：session_start / session_shutdown、session_info_changed(name)、agent_start / agent_end、tool_execution_start / end(toolName)、ui_prompt_start / end（pi 唯一的「等待」态：扩展弹对话框时）；ctx 给 cwd、sessionManager.getSessionId / getSessionFile / getSessionName、hasUI。
+- **定稿**：agmux 自带一个几十行的 pi 扩展（照 ccmux 的 ccmux.js 写），由 `agmux setup --write` 装到 `~/.pi/agent/extensions/agmux.js`（和 statusline 一样可 dry-run），每个有 UI 的 pi 会话写 `~/.pi/agent/agmux-sessions/<pid>.json`：`{pid, sessionId, cwd, transcript, name, status: idle|working|waiting, pendingTool, updatedAt}`，shutdown 删文件，原子写。agmux 的 pi Source 读这个目录，`kill(pid,0)` 死的丢；pane = 从 pid 沿 ppid 爬到某个 pane 的 pane_pid（一次 `ps -axo pid,ppid` + `list-panes -a -F '#{pane_id}\t#{session_name}\t#{pane_pid}'`，每 2 s 一次，和 T60 的 list-panes 合并成一条）。分支 `git -C cwd branch --show-current`，按 cwd 缓存。模型 / 上下文：pi 没有 statusline，空。r = SIGTERM 后在 pane 里 `pi -c`（ccmux 的做法；dev 查 `pi --help` 有没有按 id 恢复的参数，有就用）；x = SIGTERM。
+- 不做无扩展的兜底（扫进程猜状态）：没装扩展就不显示 pi，底栏提示一句 `pi: run agmux setup --write`（只在发现有 `pi` 进程而目录为空时）。现跑着的两个 pi 会话要重启后才会出现。
+- 失去：对比 ccmux 几乎没有（ccmux 对 pi 本来就只有 idle / working），少了屏幕正则的限速检测。
