@@ -30,6 +30,7 @@ type Session struct {
 	AgentsWorking                              bool // Status is "working" only because subagents are
 	Model, Effort                              string
 	Project, TmuxSession                       string // ccmux's project (worktrees under their main repo); the tmux session the pane is in, "" with no pane
+	MainRepoRoot                               string // ccmux's mainRepoRoot: the main repo of a worktree, "" outside git
 	GroupLabel                                 string // what the board's current grouping calls this card's group ("" = the cwd as a path); set by the board, not the poller
 	Agent                                      string // the agent definition (claude --agent <name>) from the transcript's agent-setting line; "" if none
 	ContextPct                                 int    // <0 = unknown
@@ -335,7 +336,7 @@ func (p *Poller) convert(r ccmux.Session) Session {
 		ID: r.ID, Name: r.Summary, AgentType: r.AgentType, CWD: r.CWD, Branch: r.GitBranch,
 		Status: r.Status, Attention: r.AttentionType, PendingTool: r.PendingTool, TmuxPane: r.TmuxPane,
 		ContextPct: -1, Subagents: r.Subagents, LastActivity: r.LastActivityAt,
-		Project: r.Project, TmuxSession: tmuxSession(r.TmuxTarget), Background: r.TrackingMode == "background",
+		Project: r.Project, MainRepoRoot: r.MainRepoRoot, TmuxSession: tmuxSession(r.TmuxTarget), Background: r.TrackingMode == "background",
 	}
 	var tail [][]byte // the end of the transcript: the model, the agent and the title are looked for in it
 	if r.LogPath != "" {

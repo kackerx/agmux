@@ -72,3 +72,11 @@ func TestFillAttached(t *testing.T) {
 		t.Errorf("asked tmux %d times with no background session without a pane", asked)
 	}
 }
+
+// ccmux's mainRepoRoot reaches the session: the board groups a background session by it.
+func TestMainRepoRootConverted(t *testing.T) {
+	p := poller(t, []ccmux.Session{{ID: "a", MainRepoRoot: "/w/main"}})
+	if got := p.Sessions()[0].MainRepoRoot; got != "/w/main" {
+		t.Errorf("MainRepoRoot %q", got)
+	}
+}

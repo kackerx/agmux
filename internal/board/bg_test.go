@@ -348,3 +348,66 @@ func TestAttachedMsgWithoutPaneDoesNotAskAgain(t *testing.T) {
 		t.Errorf("cmd %v, preview %v, calls %q", cmd != nil, tm.(Model).preview, r.calls)
 	}
 }
+
+// In the session grouping a background session goes with the foreground sessions in its directory
+// (else in its main repo): the tmux session with the most of them, then the latest activity. It is
+// the same before and after the attach, which puts its pane in agmux-bg. With none it keeps what it
+// had: its pane's session, or (no pane).
+func TestBgGroupFollowsForeground(t *testing.T) {
+	t0 := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	fg := func(id, cwd, root, tmux string, ago time.Duration) store.Session {
+		return store.Session{ID: id, CWD: cwd, MainRepoRoot: root, TmuxSession: tmux, TmuxPane: "%" + id, LastActivity: t0.Add(-ago)}
+	}
+	bg := func(id, cwd, root, tmux string) store.Session {
+		s := store.Session{ID: id, CWD: cwd, MainRepoRoot: root, Background: true, TmuxSession: tmux}
+		if tmux != "" {
+			s.TmuxPane = "%" + id
+		}
+		return s
+	}
+	key := func(ss []store.Session, id string) string {
+		for _, s := range regroup(ss, "session") {
+			if s.ID == id {
+				return s.GroupKey
+			}
+		}
+		t.Fatalf("no %s", id)
+		return ""
+	}
+	none := "\U0010FFFF" + noPaneGroup
+	w := "/w/shopcart"
+	for _, c := range []struct {
+		name string
+		ss   []store.Session
+		want string
+	}{
+		{"two foreground, no pane", []store.Session{fg("a", w, "", "blessmuse", 0), fg("b", w, "", "blessmuse", 0), bg("x", w, "", "")}, "blessmuse"},
+		{"attached: its pane is in agmux-bg", []store.Session{fg("a", w, "", "blessmuse", 0), bg("x", w, "", "agmux-bg")}, "blessmuse"},
+		{"the most foreground sessions", []store.Session{fg("a", w, "", "one", 0), fg("b", w, "", "two", time.Hour), fg("c", w, "", "two", time.Hour), bg("x", w, "", "")}, "two"},
+		{"a tie: the latest activity of the session", []store.Session{fg("a", w, "", "one", time.Hour), fg("b", w, "", "two", time.Minute), bg("x", w, "", "")}, "two"},
+		{"equal in both: by name", []store.Session{fg("a", w, "", "two", 0), fg("b", w, "", "one", 0), bg("x", w, "", "")}, "one"},
+		{"sessions without a pane do not count", []store.Session{{ID: "a", CWD: w}, {ID: "b", CWD: w}, fg("c", w, "", "one", 0), bg("x", w, "", "")}, "one"},
+		{"a worktree: the main repo", []store.Session{fg("a", "/w/other", "/w/main", "blessmuse", 0), bg("x", w, "/w/main", "")}, "blessmuse"},
+		{"the directory before the main repo", []store.Session{fg("a", w, "/w/main", "one", time.Hour), fg("b", "/w/o1", "/w/main", "two", 0), fg("c", "/w/o2", "/w/main", "two", 0), bg("x", w, "/w/main", "")}, "one"},
+		{"no main repo is no match", []store.Session{fg("a", "/w/other", "", "one", 0), bg("x", w, "", "")}, none},
+		{"another directory, no pane", []store.Session{fg("a", "/w/other", "/w/o", "one", 0), bg("x", w, "/w/main", "")}, none},
+		{"another directory, a pane", []store.Session{fg("a", "/w/other", "", "one", 0), bg("x", w, "", "agmux-bg")}, "agmux-bg"},
+		{"a foreground session without a pane is no home", []store.Session{{ID: "a", CWD: w}, bg("x", w, "", "")}, none},
+		{"another background session is no home", []store.Session{bg("y", w, "", "agmux-bg"), bg("x", w, "", "")}, none},
+	} {
+		if got := key(c.ss, "x"); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	ss := []store.Session{fg("a", w, "", "blessmuse", 0), bg("x", w, "", "")}
+	if got := key(ss, "a"); got != "blessmuse" {
+		t.Errorf("a foreground session: %q", got)
+	}
+	for _, mode := range []string{"cwd", "project", "state"} { // only the session grouping moves it
+		for i, s := range regroup(ss, mode) {
+			if want := regroup([]store.Session{ss[i]}, mode)[0].GroupKey; s.GroupKey != want {
+				t.Errorf("%s: %s is in %q alone and %q with the others", mode, s.ID, want, s.GroupKey)
+			}
+		}
+	}
+}

@@ -156,6 +156,10 @@ func stateOf(s store.Session) string {
 // project and session go by name, state in its order. The sessions are copies.
 func regroup(ss []store.Session, mode string) []store.Session {
 	out := make([]store.Session, len(ss))
+	var homes map[string]string
+	if mode == "session" {
+		homes = bgHomes(ss)
+	}
 	for i, s := range ss {
 		switch mode {
 		case "project":
@@ -165,8 +169,12 @@ func regroup(ss []store.Session, mode string) []store.Session {
 			}
 			s.GroupLabel = s.GroupKey
 		case "session":
-			s.GroupKey, s.GroupLabel = s.TmuxSession, s.TmuxSession
-			if s.TmuxSession == "" { // no pane: tmuxTarget is null
+			ts := s.TmuxSession
+			if h, ok := homes[s.ID]; ok {
+				ts = h
+			}
+			s.GroupKey, s.GroupLabel = ts, ts
+			if ts == "" { // no pane: tmuxTarget is null
 				s.GroupKey, s.GroupLabel = "\U0010FFFF"+noPaneGroup, noPaneGroup // sorts after every name
 			}
 		case "state":
@@ -176,6 +184,48 @@ func regroup(ss []store.Session, mode string) []store.Session {
 		out[i] = s
 	}
 	return out
+}
+
+// bgHomes names the tmux session each background session is grouped in: the one of the foreground
+// sessions in its directory (else in its main repo, for a worktree), the one with the most of them,
+// then the one with the latest activity. ccmux does not say which pane started a background
+// session, so the directory is what is known; with no such session it has no entry.
+func bgHomes(ss []store.Session) map[string]string {
+	var homes map[string]string
+	for _, b := range ss {
+		if !b.Background {
+			continue
+		}
+		for _, same := range []func(f store.Session) bool{
+			func(f store.Session) bool { return f.CWD == b.CWD },
+			func(f store.Session) bool { return b.MainRepoRoot != "" && f.MainRepoRoot == b.MainRepoRoot },
+		} {
+			n, last := map[string]int{}, map[string]time.Time{}
+			for _, f := range ss {
+				if f.Background || f.TmuxSession == "" || !same(f) {
+					continue
+				}
+				n[f.TmuxSession]++
+				if f.LastActivity.After(last[f.TmuxSession]) {
+					last[f.TmuxSession] = f.LastActivity
+				}
+			}
+			best := ""
+			for t := range n {
+				if best == "" || n[t] > n[best] || n[t] == n[best] && (last[t].After(last[best]) || last[t].Equal(last[best]) && t < best) {
+					best = t
+				}
+			}
+			if best != "" {
+				if homes == nil {
+					homes = map[string]string{}
+				}
+				homes[b.ID] = best
+				break
+			}
+		}
+	}
+	return homes
 }
 
 // rect is where a card sits in the body, in cells; band is which row of groups it is in.
