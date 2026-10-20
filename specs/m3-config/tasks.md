@@ -482,3 +482,9 @@
 ### T64 按 session 分组时后台会话跟同 cwd 的前台会话走
 - 定稿：只改 session 分组的键。后台会话（Background）的 session 组键 = 和它同 cwd（先 cwd 相等，再退 mainRepoRoot 相等）的**前台**会话所在的 tmux session；多个候选时取前台会话最多的那个 tmux session，再并列取 LastActivity 最近的。找不到同目录前台会话时保持现状（有 pane 用 pane 的 session，没有就 (no pane)）。attach 前后组键一致，卡片不再搬家。cwd / project / state 分组不变。卡片上的 `bg` 标签不变；预览标题仍 `bg · %id`。不改 attach 窗口放在 agmux-bg 的做法。
 - 验收：单测 一个 bg + 两个前台（blessmuse 组），attach 前后组键都是 blessmuse；两个 tmux session 都有同 cwd 前台会话时按数量、再按最近；只有 mainRepoRoot 相同（worktree）也算；没有同目录前台会话且无 pane → (no pane)，有 pane → 其 pane 的 session；非 bg 会话键不变。黑盒 假 ccmux 两前台一后台同 cwd，按 session 分组后台卡在前台组里，i 之后仍在，agmux-bg 组不出现（没有别的 bg）。
+
+### T65 不把 claude daemon 的备用进程当后台会话（用户 2026-10-20 截图 images/32.png：点了 bg 卡冒出和 shopify-orch 一模一样的会话）
+- 已查（只读，用户机器）：`claude --bg` 的 daemon 会预热「备用」进程（ps 里 `--bg-spare …claim.sock`），ccmux show 把它们也列成 trackingMode background：id 有、pid 有、logPath null、lastPrompt ""、prompts []（本例 dce23d2f、03c4fd88）。看板按项目名把它们显示成「blessmuse · bg · working」的空卡。用户对这种空卡按 i → agmux 跑 `claude attach dce23d2f` → daemon 把这个备用进程认领成一个**新会话**，内容是 fork 当前目录里正在跑的那个会话（63498847 = `--fork-session --resume a3f41046.jsonl --name "shopify-orch (2)"`，updatedAt 与 dce23d2f 只差 9 s，新备用 03c4fd88 的 pid 紧挨着它），于是出现和 shopify-orch 完全一样的副本；再点一个空卡再来一份。agmux 自己只跑过 `claude attach <id>`，fork 是 daemon 的行为。注意：被认领的进程 ps 里仍带 `--bg-spare`（701ce329 是真会话也带），所以不能按进程参数判。
+- 定稿：store 里过滤：Background 且 logPath 为空且 lastPrompt / prompts 都为空的记录是备用进程，不进 Sessions（show 列表也不列）。其余不动。README 后台会话段加一句：daemon 的备用进程不显示。
+- 验收：单测 ccmux 记录 background + 无 logPath + 无 prompt → 不出现；有 prompt 无 logPath（刚起的真后台会话）→ 出现；有 logPath 无 prompt → 出现；native 记录不受影响。黑盒 假 ccmux 混一条备用记录 → 看板无此卡、show 无此行、不会对它跑 attach。
+- 备忘：这是 ccmux / Claude Code 侧的问题（备用进程不该当会话列出来；attach 备用进程会 fork 当前会话），可以给 ccmux 提 issue。用户现在机器上多出的副本：63498847（waiting）和被认领的 dce23d2f，`claude stop` + `claude rm` 清掉即可，agmux 不代做。
