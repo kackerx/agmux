@@ -524,3 +524,4 @@
 
 ### T71 删 internal/ccmux、README / CREDITS
 - README 前置条件去掉 ccmux，加 `agmux setup --write` 装 pi 扩展；CREDITS 致谢 ccmux 的实现思路（MIT）；`agmux show` 文档。用户自己卸 ccmux 的三个 hook。
+- dev 真机验（T67 前置）：只有子代理在跑时登记 status = busy（65 s 连续，statusUpdatedAt 不变）→ 不读 subagents 目录；AgentsWorking 恒 false（`working · agents` 细分没了，照准）。`shell` = 后台 shell 在跑、主会话空闲 → 按设计映射 idle（子代理再开后台 shell 这种情况会显示 idle，接受）。细节：sessions 目录还有 `<pid>.<hash>.key` 文件，只 glob `*.json`；procStart 与 `ps -o lstart=` 同格式，一次 `ps -o pid=,lstart= -p …` 校验全部；时间字段是毫秒时间戳。
