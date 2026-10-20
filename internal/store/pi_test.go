@@ -17,7 +17,7 @@ func piDir(t *testing.T, files map[string]string) *Pi {
 			t.Fatal(err)
 		}
 	}
-	return &Pi{Dir: dir, Alive: func(pid int) bool { return pid != 999 }}
+	return &Pi{Dir: dir, Alive: func(pid int) bool { return pid != 999 && pid != 998 }}
 }
 
 func piFile(pid int, rest string) string {
@@ -36,7 +36,9 @@ func TestPiSource(t *testing.T) {
 		"5.json":          `{"pid":5,"sessionId":`,
 		"6.json":          `{"pid":6}`,   // no session id
 		"7.json":          piFile(7, ""), // gone from ps
-		"1.json.tmp.1792": "half",
+		"1.json.tmp.1792": "half",        // of a write that is under way: kept
+		"999.json.tmp.5":  "half",        // of one that pi did not finish: it is gone
+		"998.json.tmp.5":  "half",        // no file of its own
 	})
 	c.StartsOf = func([]int) (map[int]string, error) {
 		old, late := time.UnixMilli(1792483395000).UTC().Add(-time.Hour), time.UnixMilli(1792483395000).UTC().Add(time.Hour)
@@ -65,9 +67,24 @@ func TestPiSource(t *testing.T) {
 	if r := got["pi-3"]; r.Status != "idle" || !r.StatusChangedAt.Equal(r.LastActivity) {
 		t.Errorf("unknown status and no statusAt: %+v", r)
 	}
+	// what is gone is cleared away: the files of dead and reused pids and the tmp files of dead ones; the rest stays
+	left := func() map[string]bool {
+		m := map[string]bool{}
+		es, _ := os.ReadDir(c.Dir)
+		for _, e := range es {
+			m[e.Name()] = true
+		}
+		return m
+	}
+	for name, want := range map[string]bool{"1.json": true, "2.json": true, "3.json": true, "5.json": true, "6.json": true, "1.json.tmp.1792": true,
+		"4.json": false, "7.json": false, "999.json": false, "999.json.tmp.5": false, "998.json.tmp.5": false} {
+		if left()[name] != want {
+			t.Errorf("%s kept: %v, want %v", name, left()[name], want)
+		}
+	}
 	// ps failing lists everything alive; no directory or no file lists nothing
 	c.StartsOf = func([]int) (map[int]string, error) { return nil, fmt.Errorf("no ps") }
-	if rs, _ := c.Sessions(); len(rs) != 5 {
+	if rs, _ := c.Sessions(); len(rs) != 3 {
 		t.Errorf("without ps: %d", len(rs))
 	}
 	if rs, err := (&Pi{Dir: filepath.Join(t.TempDir(), "none")}).Sessions(); len(rs) != 0 || err != nil {
@@ -115,15 +132,16 @@ func TestPlaceByPID(t *testing.T) {
 	table := procs{parent: map[int]int{10: 20, 20: 30, 30: 100, 11: 200, 12: 300, 300: 200, 50: 51, 51: 1, 70: 71, 71: 70}}
 	asked := 0
 	raw := []Raw{
-		{ID: "deep", PID: 10},     // 10 → 20 → 30 → 100: %1
-		{ID: "nearest", PID: 12},  // 12 → 300: %3, not 200's
-		{ID: "own", PID: 11},      // 11 → 200
-		{ID: "none", PID: 50},     // 50 → 51 → 1: no pane
-		{ID: "unknown", PID: 777}, // not in the table
-		{ID: "cycle", PID: 70},    // a table that goes round
-		{ID: "claude", PID: 10, Pane: "%9", TmuxSession: "x"},
-		{ID: "bg", PID: 10, Background: true},
-		{ID: "nopid"},
+		{ID: "deep", AgentType: "pi", PID: 10},     // 10 → 20 → 30 → 100: %1
+		{ID: "nearest", AgentType: "pi", PID: 12},  // 12 → 300: %3, not 200's
+		{ID: "own", AgentType: "pi", PID: 11},      // 11 → 200
+		{ID: "none", AgentType: "pi", PID: 50},     // 50 → 51 → 1: no pane
+		{ID: "unknown", AgentType: "pi", PID: 777}, // not in the table
+		{ID: "cycle", AgentType: "pi", PID: 70},    // a table that goes round
+		{ID: "claude", AgentType: "claude", PID: 10, Pane: "%9", TmuxSession: "x"},
+		{ID: "claude-no-pane", AgentType: "claude", PID: 10}, // its register says: no tmux
+		{ID: "bg", AgentType: "claude", PID: 10, Background: true},
+		{ID: "nopid", AgentType: "pi"},
 	}
 	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(),
 		Panes: func() (string, error) { return listing, nil },
@@ -131,7 +149,7 @@ func TestPlaceByPID(t *testing.T) {
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string][2]string{"deep": {"%1", "main"}, "nearest": {"%3", "other"}, "own": {"%2", "main"}, "none": {"", ""}, "unknown": {"", ""}, "cycle": {"", ""}, "claude": {"%9", "x"}, "bg": {"", ""}, "nopid": {"", ""}}
+	want := map[string][2]string{"deep": {"%1", "main"}, "nearest": {"%3", "other"}, "own": {"%2", "main"}, "none": {"", ""}, "unknown": {"", ""}, "cycle": {"", ""}, "claude": {"%9", "x"}, "claude-no-pane": {"", ""}, "bg": {"", ""}, "nopid": {"", ""}}
 	for _, s := range p.Sessions() {
 		if w := want[s.ID]; s.TmuxPane != w[0] || s.TmuxSession != w[1] {
 			t.Errorf("%s: pane %q session %q, want %v", s.ID, s.TmuxPane, s.TmuxSession, w)
@@ -145,12 +163,12 @@ func TestPlaceByPID(t *testing.T) {
 	}
 	// nothing to place, no ps; a failing ps places nothing
 	asked = 0
-	raw = []Raw{{ID: "x", PID: 10, Pane: "%1"}}
+	raw = []Raw{{ID: "x", AgentType: "pi", PID: 10, Pane: "%1"}, {ID: "y", AgentType: "claude", PID: 10}}
 	p.Refresh()
 	if asked != 0 {
 		t.Errorf("read the process table with nothing to place: %d", asked)
 	}
-	raw = []Raw{{ID: "deep", PID: 10}}
+	raw = []Raw{{ID: "deep", AgentType: "pi", PID: 10}}
 	p.Procs = func() (procs, error) { return procs{}, fmt.Errorf("no ps") }
 	if err := p.Refresh(); err != nil || p.Sessions()[0].TmuxPane != "" {
 		t.Errorf("failing ps: %v %q", err, p.Sessions()[0].TmuxPane)
@@ -193,8 +211,9 @@ func TestPiHint(t *testing.T) {
 		t.Errorf("the path of a pi: %q", got)
 	}
 	installed = true
-	if got := hint(); got != "" {
-		t.Errorf("installed: %q", got)
+	now = now.Add(time.Minute)
+	if got := hint(); got != PiRestartHint {
+		t.Errorf("installed, and a pi that was started before it: %q", got)
 	}
 	installed = false
 	now = now.Add(time.Minute)

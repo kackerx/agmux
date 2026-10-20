@@ -87,7 +87,7 @@ func (p *Poller) paneListing(raw []Raw) paneListing {
 	var pl paneListing
 	need := false
 	for _, r := range raw {
-		need = need || r.Pane != "" || r.Background || r.PID > 0 // a pid is looked up in the panes
+		need = need || r.Pane != "" || r.Background || r.AgentType == "pi" // a pi's pid is looked up in the panes
 	}
 	if p.Panes == nil || !need {
 		return pl
@@ -137,16 +137,15 @@ func psProcs() (procs, error) {
 	return t, nil
 }
 
-// placeByPID gives the sessions that are in no pane the register knows of (pi has no tmux field)
-// the pane their process runs under: the first ancestor that is a pane's process. A background
-// session has none: it is not in a terminal.
+// placeByPID gives the pi sessions (the extension does not know the pane; Claude Code's register
+// does) the pane their process runs under: the first ancestor that is a pane's process.
 func (p *Poller) placeByPID(raw []Raw, pl paneListing) {
 	if len(pl.byPID) == 0 || p.Procs == nil {
 		return
 	}
 	var t procs
 	for i := range raw {
-		if raw[i].Pane != "" || raw[i].PID <= 0 || raw[i].Background {
+		if raw[i].AgentType != "pi" || raw[i].Pane != "" || raw[i].PID <= 0 {
 			continue
 		}
 		if t.parent == nil {

@@ -4638,4 +4638,10 @@ func TestSourceHintOnTheMessageLine(t *testing.T) {
 	if got := line(""); strings.Contains(got, "pi:") {
 		t.Errorf("no hint: %q", got)
 	}
+	// after the note on the card with no pane: the line is cut from the right, and the hint is there for good
+	m, _ := press(t, psized(hintSrc{staticSrc: staticSrc(sessions), hint: "pi: run agmux setup --write"}, 120, 30), "j")
+	v := strings.Split(ansi.Strip(m.View()), "\n")
+	if got := v[len(v)-2]; !strings.Contains(got, noPane) || strings.Index(got, noPane) > strings.Index(got, "pi: run") {
+		t.Errorf("order: %q", got)
+	}
 }

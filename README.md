@@ -56,6 +56,8 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 
 后台会话（`claude --bg` 起的）没有 tmux pane：在它的卡片上按 `enter` / `i` / `tab`，看板先在 tmux session `agmux-bg` 里开一个窗口跑 `claude attach <id>`（session 不在就新建，窗口名是卡片名、目录是会话的 cwd，不抢你的当前窗口），再照常跳过去（`enter`）或在预览里进直通（`i` / `tab`），之后预览、直通、光标都和普通会话一样；`p` 只看，不 attach，预览区写 `background session · enter or i attaches it`。看板每次轮询用 `tmux list-panes -a` 按启动命令 `claude attach <id>` 认出这个 pane（不存状态文件，重启看板、开多块看板都一致；attach 退出、窗口关掉，卡片就回到没有 pane，再按再开）。直通里 `←` 回 claude 的 agent 视图、`Ctrl+Z` 退出 attach 都是 claude 自己的行为。`H`（发 /handoff）在后台会话上也是先 attach、等窗口出画面再发。新窗口没有 client 时按预览框的大小开（不是 manual，`enter` 跳过去就跟着你的终端变大）。没有 pane 的非后台会话仍然不能跳转和发送，底栏对应键变暗。`x` / `r` 对后台会话是 `claude stop` / `claude respawn`。claude daemon 预热的备用进程（登记里 `spare: true`）不是会话，看板和 `agmux show` 都不显示；对它 `claude attach` 会让 daemon 把它认领成一个 fork 当前会话的新会话。
 
+卡片上的分支：transcript 尾部最后一条不是 `HEAD`（游离 HEAD）的 gitBranch；没有（pi，或刚开、还没写进 transcript 的 Claude 会话）就问 `git branch --show-current`，每 10 秒问一次。
+
 卡片上的名字，按这个顺序取第一个有的：会话登记里用户或同伴给的 `name`（`/rename`、`claude -n`、后台 `-n`）→ 会话 jsonl 里最后一条 `custom-title`（文件每个字节最多读一次，之后只看新增的部分，所以改名也跟得上）→ pane 标题里的摘要（去掉 ✳ / 盲文转圈前缀，`Claude Code` 不算）→ 登记里 Claude 自己编的名字（`nameSource` 为 `derived`）→ 项目名。后台会话的卡片第二行右端有灰色的 `bg`，预览标题里 pane 的位置写 `bg`（有 pane 时 `bg · %id`）；`agmux show` 的最后一列是 `bg`（后台会话）或空。
 
 ### tmux 浮窗绑定
@@ -111,7 +113,7 @@ agmux setup --write   # 改 ~/.claude/settings.json 的 statusLine.command，原
 
 ### pi
 
-pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi 扩展知道有哪些会话。`agmux setup --write`（上面那条）在改状态栏之后顺手把扩展装到 `~/.pi/agent/extensions/agmux.js`（`$PI_CODING_AGENT_DIR` 优先；没有这个目录就跳过；已经一样就不动；你改过的或是别的版本不覆盖，只提示，删掉再装即可；不带 `--write` 只打印会做什么）。**已经在跑的 pi 会话要重启才会加载扩展**，之后每个有界面的 pi 会话在 `~/.pi/agent/agmux-sessions/<pid>.json` 里写自己的状态（idle / working / waiting：在等你回答对话框、正在跑的工具、名字），退出时删掉；`pi -p` 这类没有界面的不写。pi 会话按进程树找到所在的 tmux pane，卡片上没有模型和上下文（pi 没有状态栏数据）。没装扩展、但 ps 里有 `pi` 进程时，底栏提示一句 `pi: run agmux setup --write`。
+pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi 扩展知道有哪些会话。`agmux setup --write`（上面那条）在改状态栏之后顺手把扩展装到 `~/.pi/agent/extensions/agmux.js`（`$PI_CODING_AGENT_DIR` 优先；没有这个目录就跳过；已经一样就不动；你改过的或是别的版本不覆盖，只提示，删掉再装即可；不带 `--write` 只打印会做什么）。**已经在跑的 pi 会话要重启才会加载扩展**，之后每个有界面的 pi 会话在 `~/.pi/agent/agmux-sessions/<pid>.json` 里写自己的状态（idle / working / waiting：在等你回答对话框、正在跑的工具、名字），退出时删掉；`pi -p` 这类没有界面的不写。pi 会话按进程树找到所在的 tmux pane，卡片上没有模型和上下文（pi 没有状态栏数据）。ps 里有 `pi` 进程、却一个 pi 会话也没显示时，底栏提示一句：没装扩展是 `pi: run agmux setup --write`，装了是 `pi: restart the running pi sessions to show them`（每 30 秒看一次）；扩展留下的已退出会话的文件会被自动清掉。
 
 ### 看过的 done 算已读
 

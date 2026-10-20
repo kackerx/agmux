@@ -1259,15 +1259,15 @@ func (m Model) msgLine(focused store.Session) string {
 	if err := m.src.Err(); err != nil {
 		parts = append(parts, fg(cRed, " "+firstLine(err.Error()))) // or the hint after it is cut off
 	}
-	if h, ok := m.src.(hinter); ok && h.Hint() != "" {
-		parts = append(parts, fg(cMuted, " "+h.Hint()))
-	}
 	if focused.ID != "" && focused.TmuxPane == "" {
 		note := noPane
 		if focused.Background {
 			note = bgNote
 		}
 		parts = append(parts, fg(cMuted, " "+note))
+	}
+	if h, ok := m.src.(hinter); ok && h.Hint() != "" { // last: it is there for good, and the line cuts from the right
+		parts = append(parts, fg(cMuted, " "+h.Hint()))
 	}
 	return strings.Join(parts, fg(cMuted, " ·"))
 }

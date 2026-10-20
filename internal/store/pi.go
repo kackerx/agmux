@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ func (c *Pi) Sessions() ([]Raw, error) {
 	}
 	files, _ := filepath.Glob(filepath.Join(c.Dir, "*.json"))
 	var es []piEntry
+	file := map[int]string{} // pid → its file
 	for _, f := range files {
 		var e piEntry
 		if data, err := os.ReadFile(f); err != nil || json.Unmarshal(data, &e) != nil || e.PID <= 0 || e.SessionID == "" {
@@ -50,8 +52,12 @@ func (c *Pi) Sessions() ([]Raw, error) {
 		}
 		if c.Alive == nil || c.Alive(e.PID) {
 			es = append(es, e)
+			file[e.PID] = f
+		} else {
+			c.forget(f)
 		}
 	}
+	c.sweep()
 	if c.StartsOf != nil && len(es) > 0 {
 		pids := make([]int, len(es))
 		for i, e := range es {
@@ -63,6 +69,8 @@ func (c *Pi) Sessions() ([]Raw, error) {
 				// a process that started after the file was last written is not the one that wrote it (the pid was used again)
 				if at, ok := parseStart(starts[e.PID]); ok && !at.After(time.UnixMilli(e.UpdatedAt)) {
 					kept = append(kept, e)
+				} else {
+					c.forget(file[e.PID])
 				}
 			}
 			es = kept
@@ -95,4 +103,18 @@ func (c *Pi) Sessions() ([]Raw, error) {
 func parseStart(s string) (time.Time, bool) {
 	t, err := time.Parse("Mon Jan _2 15:04:05 2006", strings.Join(strings.Fields(s), " "))
 	return t, err == nil
+}
+
+// forget removes the file of a pi that is gone: it is the extension's own, and nothing else will.
+func (c *Pi) forget(f string) { os.Remove(f) }
+
+// sweep removes what a pi that is gone left of a write that was not finished.
+func (c *Pi) sweep() {
+	left, _ := filepath.Glob(filepath.Join(c.Dir, "*.json.tmp.*"))
+	for _, t := range left {
+		pid, err := strconv.Atoi(strings.SplitN(filepath.Base(t), ".", 2)[0])
+		if err == nil && pid > 0 && c.Alive != nil && !c.Alive(pid) {
+			os.Remove(t)
+		}
+	}
 }

@@ -127,25 +127,27 @@ func (p *Poller) Sessions() []Session {
 	return p.sessions
 }
 
-// PiHint is what the board says when a pi runs that it can't see.
-const PiHint = "pi: run agmux setup --write"
+// What the board says when a pi runs that it can't see: the extension is not installed, or is and
+// the pi was started before it was.
+const (
+	PiHint        = "pi: run agmux setup --write"
+	PiRestartHint = "pi: restart the running pi sessions to show them"
+)
 
 // piHintEvery is how often the process table is asked about pi when no extension is there to tell.
 const piHintEvery = 30 * time.Second
 
-// checkPiHint sets the hint when a process called pi runs, no pi session is known and the extension
-// is not installed (the ones that are not shown, are not shown because of that).
+// checkPiHint sets the hint when a process called pi runs and no pi session is known: the one that
+// installs the extension, or the one that says the running pis have to be started again.
 func (p *Poller) checkPiHint(raw []Raw) {
 	if p.Procs == nil || p.PiInstalled == nil {
 		return
 	}
-	known := false
 	for _, r := range raw {
-		known = known || r.AgentType == "pi"
-	}
-	if known || p.PiInstalled() {
-		p.hintNow = ""
-		return
+		if r.AgentType == "pi" {
+			p.hintNow = ""
+			return
+		}
 	}
 	if now := p.now(); !p.hintAt.IsZero() && now.Sub(p.hintAt) < piHintEvery {
 		return
@@ -157,6 +159,9 @@ func (p *Poller) checkPiHint(raw []Raw) {
 		for _, c := range t.comm {
 			if filepath.Base(c) == "pi" {
 				p.hintNow = PiHint
+				if p.PiInstalled() {
+					p.hintNow = PiRestartHint
+				}
 				return
 			}
 		}
