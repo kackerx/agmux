@@ -488,3 +488,4 @@
 - 定稿：store 里过滤：Background 且 logPath 为空且 lastPrompt / prompts 都为空的记录是备用进程，不进 Sessions（show 列表也不列）。其余不动。README 后台会话段加一句：daemon 的备用进程不显示。
 - 验收：单测 ccmux 记录 background + 无 logPath + 无 prompt → 不出现；有 prompt 无 logPath（刚起的真后台会话）→ 出现；有 logPath 无 prompt → 出现；native 记录不受影响。黑盒 假 ccmux 混一条备用记录 → 看板无此卡、show 无此行、不会对它跑 attach。
 - 备忘：这是 ccmux / Claude Code 侧的问题（备用进程不该当会话列出来；attach 备用进程会 fork 当前会话），可以给 ccmux 提 issue。用户现在机器上多出的副本：63498847（waiting）和被认领的 dce23d2f，`claude stop` + `claude rm` 清掉即可，agmux 不代做。
+- dev 646ae71（T64）：view.go bgHomes 只在 session 分组时用，候选 = 同 cwd 有 pane 的前台会话，退同 mainRepoRoot；数量 → 最近活动 → 名字排序（确定性）；Session 加 MainRepoRoot；README g 行补规则；TestBgGroupFollowsForeground 全覆盖验收 + 三种其他分组键不变；变异 10 杀 10（1 等价）。边界（照准）：候选必须有 pane。T65 进行中。
