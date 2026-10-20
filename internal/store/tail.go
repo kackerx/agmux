@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // branchIn is the gitBranch of the last entry of the tail that has one; "HEAD" is what Claude Code
@@ -74,6 +75,35 @@ type repoInfo struct{ project, root string }
 // gitCommonDir asks git for the absolute path of the repo's .git of a directory; the tests count the calls.
 var gitCommonDir = func(cwd string) ([]byte, error) {
 	return exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+}
+
+type branchInfo struct {
+	name string
+	at   time.Time
+}
+
+// branchEvery is how long the branch git said of a directory is believed.
+const branchEvery = 10 * time.Second
+
+// gitBranch is the branch checked out in a directory ("" outside git or on a detached HEAD): for the
+// sessions whose transcript does not say (pi's does not). Asked again every branchEvery.
+func (p *Poller) gitBranch(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	now := p.now()
+	if b, ok := p.branches[cwd]; ok && now.Sub(b.at) < branchEvery {
+		return b.name
+	}
+	var name string
+	if out, err := exec.Command("git", "-C", cwd, "branch", "--show-current").Output(); err == nil {
+		name = strings.TrimSpace(string(out))
+	}
+	if p.branches == nil {
+		p.branches = map[string]branchInfo{}
+	}
+	p.branches[cwd] = branchInfo{name, now}
+	return name
 }
 
 // repo is the project and the main repo root of a directory: git's common dir is the main repo's

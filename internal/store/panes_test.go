@@ -38,18 +38,21 @@ func TestPaneLine(t *testing.T) {
 		line                string
 		ok, dead            bool
 		pane, sess, cmd, ti string
+		pid                 int
 	}{
-		{"%1\tmain\t0\tzsh", true, false, "%1", "main", "zsh", ""},
-		{"%1\tmain\t0\tzsh\t✳ Title", true, false, "%1", "main", "zsh", "✳ Title"},
-		{"%1\tmain\t1\ta\tb\tTitle", true, true, "%1", "main", "a\tb", "Title"},
-		{"%1\tmain\t0\tzsh\t", true, false, "%1", "main", "zsh", ""},
-		{"%1\tmain\t0", false, false, "", "", "", ""},
-		{"\tmain\t0\tzsh", false, false, "", "", "", ""},
-		{"", false, false, "", "", "", ""},
+		{"%1\tmain\t0\tzsh", true, false, "%1", "main", "zsh", "", 0},
+		{"%1\tmain\t0\tzsh\t✳ Title", true, false, "%1", "main", "zsh", "✳ Title", 0},
+		{"%1\tmain\t0\tzsh\t✳ Title\t4242", true, false, "%1", "main", "zsh", "✳ Title", 4242},
+		{"%1\tmain\t1\ta\tb\tTitle\t77", true, true, "%1", "main", "a\tb", "Title", 77}, // a command with a tab
+		{"%1\tmain\t0\tzsh\t\t5", true, false, "%1", "main", "zsh", "", 5},
+		{"%1\tmain\t0\tzsh\t", true, false, "%1", "main", "zsh", "", 0},
+		{"%1\tmain\t0", false, false, "", "", "", "", 0},
+		{"\tmain\t0\tzsh", false, false, "", "", "", "", 0},
+		{"", false, false, "", "", "", "", 0},
 	} {
-		pane, sess, dead, cmd, title, ok := paneLine(c.line)
-		if ok != c.ok || ok && (pane != c.pane || sess != c.sess || dead != c.dead || cmd != c.cmd || title != c.ti) {
-			t.Errorf("%q: %v %q %q %v %q %q", c.line, ok, pane, sess, dead, cmd, title)
+		pane, sess, dead, cmd, title, pid, ok := paneLine(c.line)
+		if ok != c.ok || ok && (pane != c.pane || sess != c.sess || dead != c.dead || cmd != c.cmd || title != c.ti || pid != c.pid) {
+			t.Errorf("%q: %v %q %q %v %q %q %d", c.line, ok, pane, sess, dead, cmd, title, pid)
 		}
 	}
 	for in, want := range map[string]string{"agmux # main": "agmux", "my session": "my session", "a # b # c": "a", "": "", " # x": ""} {

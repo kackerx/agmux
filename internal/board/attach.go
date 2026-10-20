@@ -102,6 +102,17 @@ type attachedPane struct {
 
 const attachedGrace = 10 * time.Second
 
+// hinter is a Source that has something to tell the user that is no error (the store's PiHint).
+type hinter interface{ Hint() string }
+
+// Hint passes the wrapped source's on.
+func (a *attachedSrc) Hint() string {
+	if h, ok := a.Source.(hinter); ok {
+		return h.Hint()
+	}
+	return ""
+}
+
 func (a *attachedSrc) clock() time.Time {
 	if a.now != nil {
 		return a.now()

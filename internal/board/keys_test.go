@@ -4612,3 +4612,24 @@ func TestGroupDirectKeys(t *testing.T) {
 		t.Errorf("default keys changed the grouping: %s %q", m.groupMode(), titles(m))
 	}
 }
+
+type hintSrc struct {
+	staticSrc
+	hint string
+}
+
+func (h hintSrc) Hint() string { return h.hint }
+
+// A source's hint (pi: run agmux setup --write) is on the message line, muted, and only while it has one.
+func TestSourceHintOnTheMessageLine(t *testing.T) {
+	line := func(h string) string {
+		v := strings.Split(ansi.Strip(psized(hintSrc{staticSrc: staticSrc(sessions), hint: h}, 120, 30).View()), "\n")
+		return v[len(v)-2]
+	}
+	if got := line("pi: run agmux setup --write"); !strings.Contains(got, "pi: run agmux setup --write") {
+		t.Errorf("hint: %q", got)
+	}
+	if got := line(""); strings.Contains(got, "pi:") {
+		t.Errorf("no hint: %q", got)
+	}
+}

@@ -19,6 +19,7 @@ import (
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
+	"github.com/kackerx/agmux/internal/pi"
 	"github.com/kackerx/agmux/internal/xdg"
 )
 
@@ -73,11 +74,16 @@ type Poller struct {
 	AvatarBind    map[string]string // config.toml's [avatars.bind]
 	AvatarDefault string            // config.toml's [avatars] default; "" = hash
 
-	Seen  *avatar.FileBindings   // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
-	Now   func() time.Time       // nil = time.Now; tests set it
-	Pins  *avatar.FileBindings   // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
-	Panes func() (string, error) // tmux's pane listing (see TmuxPanes), for the panes of the sessions: their tmux session, and where background sessions are attached; nil = none
+	Seen        *avatar.FileBindings   // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
+	Now         func() time.Time       // nil = time.Now; tests set it
+	Pins        *avatar.FileBindings   // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
+	Procs       func() (procs, error)  // the process table, for the pane of a process; nil = no climbing
+	PiInstalled func() bool            // whether the pi extension is installed, for the hint; nil = no hint
+	Panes       func() (string, error) // tmux's pane listing (see TmuxPanes), for the panes of the sessions: their tmux session, and where background sessions are attached; nil = none
 
+	hint       string                // PiHint while there is a pi that the extension does not tell of (mu)
+	hintNow    string                // the same as of the last look (refreshMu)
+	hintAt     time.Time             // when that was last looked at
 	refreshMu  sync.Mutex            // serializes Refresh; guards models
 	pinGone    map[string]time.Time  // pinned name → when no session had it any more (see prunePins)
 	models     map[string]string     // session ID → last model found in its jsonl
@@ -87,6 +93,7 @@ type Poller struct {
 	titles     map[string]titleState // session ID → its custom title and how far its transcript was scanned for one
 	worked     map[string]bool       // session ID → seen not idle by this poller: only such a session can be done
 	repos      map[string]repoInfo   // cwd → what git says of it, asked once
+	branches   map[string]branchInfo // cwd → the branch git said, and when
 
 	avatarErr, seenErr, pinsErr error // avatars.json / seen.json / pins.json could not be read, as of the last poll or bind
 
@@ -104,13 +111,56 @@ func NewPoller() (*Poller, error) {
 	b, err := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
 	seen, serr := avatar.LoadBindings(filepath.Join(dir, "seen.json")) // likewise: a corrupt one means nothing is seen
 	pins, perr := avatar.LoadBindings(filepath.Join(dir, "pins.json"))
-	return &Poller{Sources: []Source{NewClaude(dir)}, StateDir: dir, Avatars: b, avatarErr: err, Seen: seen, seenErr: serr, Pins: pins, pinsErr: perr, Panes: TmuxPanes}, nil
+	return &Poller{Sources: []Source{NewClaude(dir), NewPi()}, StateDir: dir, Avatars: b, avatarErr: err, Seen: seen, seenErr: serr, Pins: pins, pinsErr: perr, Panes: TmuxPanes, Procs: psProcs, PiInstalled: pi.Installed}, nil
 }
 
 func (p *Poller) Sessions() []Session {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.sessions
+}
+
+// PiHint is what the board says when a pi runs that it can't see.
+const PiHint = "pi: run agmux setup --write"
+
+// piHintEvery is how often the process table is asked about pi when no extension is there to tell.
+const piHintEvery = 30 * time.Second
+
+// checkPiHint sets the hint when a process called pi runs, no pi session is known and the extension
+// is not installed (the ones that are not shown, are not shown because of that).
+func (p *Poller) checkPiHint(raw []Raw) {
+	if p.Procs == nil || p.PiInstalled == nil {
+		return
+	}
+	known := false
+	for _, r := range raw {
+		known = known || r.AgentType == "pi"
+	}
+	if known || p.PiInstalled() {
+		p.hintNow = ""
+		return
+	}
+	if now := p.now(); !p.hintAt.IsZero() && now.Sub(p.hintAt) < piHintEvery {
+		return
+	} else {
+		p.hintAt = now
+	}
+	p.hintNow = ""
+	if t, err := p.Procs(); err == nil {
+		for _, c := range t.comm {
+			if filepath.Base(c) == "pi" {
+				p.hintNow = PiHint
+				return
+			}
+		}
+	}
+}
+
+// Hint is a line for the user that is not an error, "" when there is none.
+func (p *Poller) Hint() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.hint
 }
 
 // Err is the last poll's error (the previous sessions are kept when it fails),
@@ -316,10 +366,12 @@ func (p *Poller) Refresh() error {
 		}
 		ss = make([]Session, len(raw))
 		pl := p.paneListing(raw)
+		p.placeByPID(raw, pl)
 		for i, r := range raw {
 			ss[i] = p.convert(r, pl)
 		}
 		fillPanes(ss, pl)
+		p.checkPiHint(raw)
 		if p.Pins != nil {
 			if e := p.prunePins(ss); perr == nil {
 				perr = e
@@ -330,6 +382,7 @@ func (p *Poller) Refresh() error {
 	defer p.mu.Unlock()
 	p.err, p.avatarErr, p.seenErr, p.pinsErr = err, aerr, serr, perr
 	if err == nil {
+		p.hint = p.hintNow
 		p.sessions = ss
 	}
 	return err
@@ -365,6 +418,9 @@ func (p *Poller) convert(r Raw, pl paneListing) Session {
 	}
 	if s.Branch == "" {
 		s.Branch = branchIn(tail)
+	}
+	if s.Branch == "" {
+		s.Branch = p.gitBranch(r.CWD)
 	}
 	if s.PendingTool == "" && s.Status != "idle" {
 		s.PendingTool = pendingIn(tail)
@@ -417,7 +473,7 @@ func (p *Poller) name(r Raw, pl paneListing, tail [][]byte, project string) stri
 			return t
 		}
 	}
-	if t := paneSummary(pl.title[r.Pane]); t != "" {
+	if t := paneSummary(pl.title[r.Pane]); t != "" && r.AgentType != "pi" { // pi's title is "π - <dir>", not a summary
 		return t
 	}
 	if r.Name != "" {

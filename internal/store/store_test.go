@@ -950,14 +950,15 @@ func TestNameLevels(t *testing.T) {
 		{ID: "derived", Name: "made-up", NameDerived: true, Pane: "%2", Project: "proj"},                // "Claude Code" is no summary
 		{ID: "derived-nopane", Name: "made-up", NameDerived: true, Project: "proj"},                     // 4
 		{ID: "pane-nameless", Pane: "%1", Project: "proj"},                                              // no name at all: the pane's
-		{ID: "project", Project: "proj"},                                                                // 5
+		{ID: "project", Project: "proj"},
+		{ID: "pi", AgentType: "pi", Pane: "%1", Project: "proj"}, // pi's pane title is not a summary                                                                // 5
 	}
 	p := &Poller{StateDir: t.TempDir(), Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, Panes: func() (string, error) { return panes, nil }}
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"user": "given", "title": "titled", "pane": "From the pane", "pane-spinner": "Working title", "derived": "made-up", "derived-nopane": "made-up", "pane-nameless": "From the pane", "project": "proj"}
+	want := map[string]string{"user": "given", "title": "titled", "pane": "From the pane", "pane-spinner": "Working title", "derived": "made-up", "derived-nopane": "made-up", "pane-nameless": "From the pane", "project": "proj", "pi": "proj"}
 	for _, s := range p.Sessions() {
 		if s.Name != want[s.ID] {
 			t.Errorf("%s: %q, want %q", s.ID, s.Name, want[s.ID])
