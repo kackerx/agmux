@@ -516,7 +516,7 @@
 - 验收：单测 扩展文件内容包含 7 个事件名；setup dry-run / write / 不覆盖；pi 文件夹具 → Sessions；ppid 爬 pane（三层、找不到 → 无 pane）；底栏提示条件。真机：dev 装扩展后起一个一次性 pi 会话（`pi` 在临时目录，问一句退出），看板出现 / 状态变化 / 退出消失；装的扩展文件事后留着（用户要用），一次性会话的 jsonl 删掉。
 
 ### T69 r / x / d 不走 ccmux
-- r：Claude 前台 = SIGTERM pid，等 ≤5 s 退出，`tmux send-keys -t <pane> 'claude --resume <sessionId>' Enter`；Claude 后台 = `claude respawn <jobId>`；pi = SIGTERM 后 `pi -c`（或按 id 恢复，dev 查）。x：前台 SIGTERM（等 ≤2 s，不行 SIGKILL）；Claude 后台 `claude stop <jobId>`（输出含 No job matching 视为成功）。d：`git -C <cwd> rev-parse --show-toplevel` 到仓库根 exec `hunk diff --watch`；没有 hunk → `git diff` 走 `$PAGER`/less。pin 跨重启靠名字（T53）不变。
+- r：Claude 前台 = SIGTERM pid，等 ≤5 s 退出，`tmux send-keys -t <pane> 'claude --resume <sessionId>' Enter`；Claude 后台 = `claude respawn <jobId>`；pi = SIGTERM 后在 pane 里 `pi --session <transcript 路径>`（pi 1.1.0 支持 --session <path|id>；-c 不指定哪个、-r 弹选择器，都不用）。x：前台 SIGTERM（等 ≤2 s，不行 SIGKILL）；Claude 后台 `claude stop <jobId>`（输出含 No job matching 视为成功）。d：`git -C <cwd> rev-parse --show-toplevel` 到仓库根 exec `hunk diff --watch`；没有 hunk → `git diff` 走 `$PAGER`/less。pin 跨重启靠名字（T53）不变。
 - 验收：单测 假 runner 记 argv / 信号；三类会话三种动作；hunk 缺失回退。真机 dev 用自己的一次性会话各做一遍 r / x。
 
 ### T70 e2e 夹具换登记目录（tester，与 T67 并行起步）
