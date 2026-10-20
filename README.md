@@ -1,11 +1,13 @@
 # agmux
 
-在 tmux 浮窗里用卡片看板查看和管理正在跑的 coding agent（Claude Code、Codex…）：谁在干活、谁在等你、上下文用了多少，一键跳过去或直接回一句。会话列表来自 Claude Code 自己的会话登记（`~/.claude/sessions/*.json`，思路参考 [ccmux](https://github.com/epilande/ccmux)），跳转、发送、预览都直接走 tmux。
+在 tmux 浮窗里用卡片看板查看和管理正在跑的 coding agent（Claude Code、pi）：谁在干活、谁在等你、上下文用了多少，一键跳过去或直接回一句。Claude 的会话来自 Claude Code 自己的会话登记（`~/.claude/sessions/*.json`），pi 的来自 agmux 装进 pi 的一个扩展；跳转、发送、预览都直接走 tmux。不依赖别的工具，思路改编自 [ccmux](https://github.com/epilande/ccmux)，见 [CREDITS.md](CREDITS.md)。
 
 ## 前置
 
 - tmux 3.x
 - Claude Code 2.1.296 或更新（它才写会话登记；旧版本的会话不显示）
+- 可选：pi 1.1 或更新，用 `agmux setup --write` 装一个扩展，pi 会话才会出现在看板上（见「pi」一节）
+- 可选：`hunk`，`d` 用它看改动；没有就用 `git diff`
 - Nerd Font（分支图标 nf-dev-git_branch U+E725）
 - 真彩终端
 
@@ -23,7 +25,7 @@ go install github.com/kackerx/agmux@latest
 
 ```sh
 agmux board     # 全屏看板，建议开在 tmux 浮窗里
-agmux show      # 每个会话一行：id、名字、分组、状态、模型、上下文%、agent 定义（没有就空）、bg（后台会话，否则空）
+agmux show      # 每个会话一行，制表符分隔：id、名字、分组（目录）、状态、模型、上下文%（没有是 --）、agent 定义（没有就空）、bg（后台会话，否则空）；接管道时就是这行纯文本，可以 cut / awk
 agmux avatars   # 打印全部头像：先是图片集（id、来源、各状态帧数），再是像素头像
 agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 sheet 切成图片集（见「头像图片」）
 ```

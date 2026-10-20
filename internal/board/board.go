@@ -83,7 +83,7 @@ type Model struct {
 	w, h    int
 	frame   int
 	focus   string // session ID; follows the session across polls
-	msg     string // one line above the footer: ccmux stderr, hints
+	msg     string // one line above the footer: what a command said, errors, hints
 	mode    mode
 	target  store.Session   // what the open x prompt / avatar list acts on, fixed when it opened
 	pick    int             // the avatar grid's cursor, an index into avatar.Listing()
@@ -173,7 +173,7 @@ type frameMsg struct{}
 // popupMsg answers whether a popup (a tmux client) is attached to the board's session now (--stay).
 type popupMsg struct{ yes bool }
 
-// doneMsg reports a finished ccmux or tmux command.
+// doneMsg reports a finished action (restart, kill, tmux).
 type doneMsg struct {
 	ok      string // message on success
 	err     error
@@ -921,7 +921,7 @@ func nearest(rects []rect, id string, d [2]int) string {
 }
 
 // enterDelay separates the text from its Enter: an Enter that lands in the same read as the text
-// can be taken as part of a paste and not submit (ccmux waits the same).
+// can be taken as part of a paste and not submit (a short wait is what other tools do too).
 var enterDelay = 150 * time.Millisecond
 
 const noPane = "no tmux pane: can't jump or send"

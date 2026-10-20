@@ -13,7 +13,7 @@ import (
 	"github.com/kackerx/agmux/internal/store"
 )
 
-// What r, x and d do to a session, without ccmux. A foreground agent is a process: it is sent
+// What r, x and d do to a session. A foreground agent is a process: it is sent
 // SIGTERM, and when it has gone the pane's shell is told to start it again. A background Claude
 // session is the daemon's: claude stop and claude respawn.
 

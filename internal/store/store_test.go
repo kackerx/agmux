@@ -775,7 +775,7 @@ func TestTogglePin(t *testing.T) {
 	if got := seenFile(t, path); got != "{}" {
 		t.Errorf("pins.json %s, want the gone session dropped", got)
 	}
-	// ... but not while ccmux fails
+	// ... but not while a source fails
 	raw = append(raw, Raw{ID: "d", Status: "idle"})
 	p.Refresh()
 	p.TogglePin(byID(t, p.Sessions(), "d"))
@@ -826,7 +826,7 @@ func TestPinSurvivesNewID(t *testing.T) {
 	if got := seenFile(t, path); !strings.HasPrefix(got, `{"agmux-dev":"`) {
 		t.Errorf("pins.json %s, want it keyed by name", got)
 	}
-	raw[0].ID = "a2" // ccmux restart: same name, new ID
+	raw[0].ID = "a2" // a restart: same name, new ID
 	p.Refresh()
 	if a := byID(t, p.Sessions(), "a2"); !a.Pinned || byID(t, p.Sessions(), "b1").Pinned {
 		t.Errorf("after the restart: %+v", p.Sessions())
@@ -849,7 +849,7 @@ func TestPinSurvivesNewID(t *testing.T) {
 	}
 }
 
-// A session restarted by ccmux is out of its list for a few seconds, and a daemon just started
+// A session being restarted is out of the list for a few seconds, and a daemon just started
 // answers with none: a pin survives that, and goes only when no session has had the name for pinGrace.
 func TestPinGrace(t *testing.T) {
 	raw := []Raw{{ID: "a1", Name: "agmux-dev", Status: "idle"}, {ID: "b1", Name: "other", Status: "idle"}}

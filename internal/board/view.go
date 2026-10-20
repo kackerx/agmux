@@ -39,7 +39,7 @@ var stackFlow bool
 // ends it; set when a poll finds the popup, false in an ordinary pane (there q quits).
 var stayFooter bool
 
-// Colors; defaults match claude-hud's segments (ANSI slots) and ccmux's palette, and
+// Colors; defaults match claude-hud's segments (ANSI slots), and
 // useConfig replaces them with config.toml's [colors].
 var (
 	cName     = lipgloss.Color("5")
@@ -101,7 +101,7 @@ func (g group) title() string {
 }
 
 // groups splits sessions by GroupKey. The order comes only from the data (groups by key, cards
-// pinned first in the order they were pinned, then by name then id), never from ccmux's array
+// pinned first in the order they were pinned, then by name then id), never from the order a source lists them in
 // order, so polls don't shuffle the board.
 func groups(ss []store.Session) []group {
 	var gs []group
@@ -151,7 +151,7 @@ func stateOf(s store.Session) string {
 }
 
 // regroup gives every session the group key and title of the grouping mode (one of
-// config.GroupModes): cwd (the path), project (ccmux's project, "" is "(no project)"), session
+// config.GroupModes): cwd (the path), project (the project, "" is "(no project)"), session
 // (the tmux session; "(no pane)" last) or state (the order of stateGroups). Groups sort by key, so
 // project and session go by name, state in its order. The sessions are copies.
 func regroup(ss []store.Session, mode string) []store.Session {
@@ -188,7 +188,7 @@ func regroup(ss []store.Session, mode string) []store.Session {
 
 // bgHomes names the tmux session each background session is grouped in: the one of the foreground
 // sessions in its directory (else in its main repo, for a worktree), the one with the most of them,
-// then the one with the latest activity. ccmux does not say which pane started a background
+// then the one with the latest activity. no source says which pane started a background
 // session, so the directory is what is known; with no such session it has no entry.
 func bgHomes(ss []store.Session) map[string]string {
 	var homes map[string]string
@@ -1031,7 +1031,7 @@ func joinClusters(cs []cluster) string {
 
 func abs(n int) int { return max(n, -n) }
 
-// footer is ccmux's key line; keys that need a tmux pane go dark for background sessions.
+// footer is the key line; keys that need a tmux pane go dark for background sessions.
 func footer(noPane bool, w int, group string) string {
 	parts := make([]string, len(footerKeys))
 	for i, k := range footerKeys {
@@ -1069,7 +1069,7 @@ func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, 
 		}
 	}
 	out := append([]string{top}, vis...)
-	// ccmux stderr is often multi-line; one line keeps the screen exactly h tall
+	// what a command said is often multi-line; one line keeps the screen exactly h tall
 	out = append(out, ansi.Truncate(firstLine(msg), w, "…"), footer(noPane, w, group))
 	return strings.Join(out, "\n"), rects, off
 }

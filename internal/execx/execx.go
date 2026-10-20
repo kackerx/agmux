@@ -1,4 +1,4 @@
-// Package execx runs the external tools agmux drives (ccmux, tmux) with a timeout and errors
+// Package execx runs the external tools agmux drives (tmux, ps, claude) with a timeout and errors
 // that carry the tool's own stderr, ready for the board's message line.
 package execx
 

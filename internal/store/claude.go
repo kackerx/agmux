@@ -127,7 +127,7 @@ func tmuxField(s string) (pane, session string) {
 	return pane, shortSession(s)
 }
 
-// jobState reads what the daemon keeps of a background job, as ccmux does: tempo blocked is
+// jobState reads what the daemon keeps of a background job, as ccmux does (github.com/epilande/ccmux, see CREDITS.md): tempo blocked is
 // waiting (with a question, or what it needs: permission), done / stopped / failed is idle, the
 // rest is working; the job's name and transcript beat the register's.
 func (c *Claude) jobState(r *Raw) {

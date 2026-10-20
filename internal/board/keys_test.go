@@ -232,9 +232,9 @@ func TestKeys(t *testing.T) {
 }
 
 func TestErrorsGoToMessageLine(t *testing.T) {
-	r := &fakeRunner{err: errors.New("ccmux restart a1: session not found\nmore")}
+	r := &fakeRunner{err: errors.New("restart a1: session not found\nmore")}
 	m, quit := press(t, newModel(r), "r")
-	if quit || !strings.Contains(m.View(), "ccmux restart a1: session not found") || strings.Contains(m.View(), "more") {
+	if quit || !strings.Contains(m.View(), "restart a1: session not found") || strings.Contains(m.View(), "more") {
 		t.Errorf("want the first stderr line in the message line")
 	}
 	r.err = errors.New("tmux switch-client -c /dev/c -t %1: can't find pane: %1")
@@ -352,17 +352,17 @@ type errSrc struct {
 func (s errSrc) Err() error { return s.err }
 
 func TestPollErrorOnBoard(t *testing.T) {
-	m := New(errSrc{sessions, errors.New("ccmux show --json: boom\n  at x\n  at y")}, &fakeRunner{})
+	m := New(errSrc{sessions, errors.New("poll: boom\n  at x\n  at y")}, &fakeRunner{})
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	v := tm.(Model).View()
-	if n := len(strings.Split(v, "\n")); n != 30 || !strings.Contains(v, "ccmux show --json: boom") {
+	if n := len(strings.Split(v, "\n")); n != 30 || !strings.Contains(v, "poll: boom") {
 		t.Errorf("poll error: %d lines (want 30), shown=%v", n, strings.Contains(v, "boom"))
 	}
 }
 
 // A multi-line poll error must not swallow what follows it on the message line.
 func TestPollErrorKeepsBackgroundHint(t *testing.T) {
-	m := New(errSrc{sessions, errors.New("ccmux show --json: boom\n  at x")}, &fakeRunner{})
+	m := New(errSrc{sessions, errors.New("poll: boom\n  at x")}, &fakeRunner{})
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: 200, Height: 30})
 	m, _ = press(t, tm.(Model), "j") // a2: background
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "boom") || !strings.Contains(v, noPane) || strings.Contains(v, "at x") {
@@ -1284,7 +1284,7 @@ func sentKeys(r *fakeRunner) []string {
 	return out
 }
 
-// The target misses one poll (ccmux restarting returns nothing): the focus falls back to the first
+// The target misses one poll (a restart returns nothing for a poll): the focus falls back to the first
 // card. When it is back, the preview shows that first card, so keys must not go to the target.
 func TestLockedOutAfterTargetReappears(t *testing.T) {
 	all := append([]store.Session(nil), sessions...)
@@ -4018,7 +4018,7 @@ func TestStackNav(t *testing.T) {
 	}
 }
 
-// Locked on a session's pane; ccmux returns [] for a poll (a frame and a key pass), then the same
+// Locked on a session's pane; the source returns [] for a poll (a frame and a key pass), then the same
 // sessions come back. T21: "session is gone" holds until tab, and keys never reach the pane.
 func relock(t *testing.T, all []store.Session, pre ...string) (Model, *fakeRunner) {
 	t.Helper()

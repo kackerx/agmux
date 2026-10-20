@@ -1,5 +1,5 @@
-// Package store holds the sessions agmux shows: ccmux polled every 2s,
-// merged with the HUD state file and the jsonl model fallback.
+// Package store holds the sessions agmux shows: what the Sources (Claude Code's register, pi's
+// extension) list every 2s, merged with the HUD state file and what the transcript's tail says.
 package store
 
 import (
@@ -32,11 +32,11 @@ type Subagent struct {
 type Session struct {
 	ID, Name, AgentType, CWD, GroupKey, Branch string
 	Status, Attention, PendingTool, TmuxPane   string
-	Background                                 bool // a background session (claude --bg): ccmux tracks it without a tmux pane
-	Done                                       bool // ccmux's "done": idle, no subagent running, attentionState set, and not seen on the board
+	Background                                 bool // a background session (claude --bg): it has no tmux pane of its own
+	Done                                       bool // done: idle after this poller saw it work, and not seen on the board (see Poller.convert)
 	AgentsWorking                              bool // Status is "working" only because subagents are
 	Model, Effort                              string
-	Project, TmuxSession                       string // ccmux's project (worktrees under their main repo); the tmux session the pane is in, "" with no pane
+	Project, TmuxSession                       string // the project (worktrees under their main repo); the tmux session the pane is in, "" with no pane
 	MainRepoRoot                               string // the main repo of a worktree, "" outside git
 	PID                                        int    // the agent's process, 0 if not known (restart and kill signal it)
 	SessionID, Transcript                      string // what the agent itself calls the session, and its jsonl: to resume it ("" if not known)
@@ -197,7 +197,7 @@ func seenKey(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 
 // MarkSeen records that the user saw s's done on the board: from now on it is idle, until its status changes.
 func (p *Poller) MarkSeen(s Session) error {
-	if p.Seen == nil || s.StatusChangedAt.IsZero() { // no time, no telling this done from the next: it stays until ccmux clears it
+	if p.Seen == nil || s.StatusChangedAt.IsZero() { // no time, no telling this done from the next: it is never done
 		return nil
 	}
 	p.refreshMu.Lock() // a poll in flight was built without it; it must not land after this
@@ -283,9 +283,8 @@ func (p *Poller) TogglePin(s Session) (pinned bool, err error) {
 	return pinned, nil
 }
 
-// pinGrace is how long no session may have a pinned name before the pin goes: ccmux restart
-// leaves the session out of ccmux's list for a few seconds, a daemon just started answers with
-// none.
+// pinGrace is how long no session may have a pinned name before the pin goes: a restart
+// leaves the session out of the list for a few seconds, and so does a source that has just started.
 const pinGrace = 60 * time.Second
 
 func (p *Poller) now() time.Time {

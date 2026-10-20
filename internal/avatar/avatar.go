@@ -75,7 +75,7 @@ const eyeColor = lipgloss.Color("#221e1e") // popup background: eyes read as hol
 // AlertColor is what the eyes blink in when a session needs attention (config colors.attention).
 var AlertColor = lipgloss.Color("#ff6188")
 
-// BandColor is the agentType color (ccmux's agent label colors).
+// BandColor is the agentType color.
 func BandColor(agentType string) lipgloss.Color {
 	switch agentType {
 	case "claude":
