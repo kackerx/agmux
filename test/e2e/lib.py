@@ -890,7 +890,7 @@ def build_group_fixture(env):
         S.append(dict(id=f"g{i:02d}", summary=name, agentType="claude", cwd=f"{h}/work/{cwd}", project=proj, mainRepoRoot=f"{h}/work/{proj}", isWorktree=wt, worktreeRoot=f"{h}/work/{cwd}" if wt else None,
                       gitBranch=br, status=status, attentionType=None, pendingTool=None, tmuxPane=f"%{401 + i}" if target else None, tmuxTarget=target, trackingMode="native" if target else "background",
                       subagents=[], nativeSessionId=f"n-g{i:02d}", logPath=None, lastActivityAt=iso(now - datetime.timedelta(seconds=90)), updatedAt=iso(now), backgroundDetail=None,
-                      lastPrompt=None, attentionState=att))
+                      lastPrompt=None if target else "a first prompt", attentionState=att))  # T65: a background record with no transcript and no prompt is a daemon's spare process, not a session
     env.write_show(S); env.pane_ids = {s["tmuxPane"]: s["id"] for s in S if s["tmuxPane"]}
     state_of = lambda r: "done" if r[5] == ("idle", "unread") else r[5][0]
     by = {"cwd": {}, "project": {}, "session": {}, "state": {}}

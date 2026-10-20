@@ -68,8 +68,8 @@ class Builds(Base):
         r = subprocess.run(["git", "clone", "-q", str(SRC), str(clone)], capture_output=True, text=True); self.assertEqual(r.returncode, 0, r.stderr); subprocess.run(["git", "-C", str(clone), "checkout", "-q", head], check=True, capture_output=True)
         gobin = self.tmp / "gobin"; r = self.go(["install", "."], clone, {"GOBIN": str(gobin), "GOMODCACHE": subprocess.run(["go", "env", "GOMODCACHE"], capture_output=True, text=True).stdout.strip()}); self.assertEqual(r.returncode, 0, r.stderr)
         line = self.run_bin(["--version"], binary=str(gobin / "agmux")).stdout.strip(); m = LINE.match(line); self.assertTrue(m, line); v, c, d = m.groups()
-        self.assertRegex(v, r"^v0\.0\.0-\d{14}-[0-9a-f]{12}$", "a pseudo-version, not dev"); self.assertEqual(c, head[:7]); self.assertEqual(v.split("-")[-1], head[:12]); self.assertRegex(d, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
-        self.assertEqual(d.replace("-", "").replace(":", "").replace("T", "").rstrip("Z"), v.split("-")[1], "the time in the pseudo-version is the commit's")
+        self.assertRegex(v, r"^v\d+\.\d+\.\d+-(0\.)?\d{14}-[0-9a-f]{12}$", "a pseudo-version (vX.Y.Z-yyyymmddhhmmss-rev; after a release tag: vX.Y.(Z+1)-0.yyyymmddhhmmss-rev), not dev"); self.assertEqual(c, head[:7]); self.assertEqual(v.split("-")[-1], head[:12]); self.assertRegex(d, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertEqual(d.replace("-", "").replace(":", "").replace("T", "").rstrip("Z"), re.search(r"(\d{14})-[0-9a-f]{12}$", v).group(1), "the time in the pseudo-version is the commit's")
 
     def test_a_tag_on_the_commit_is_the_version_and_a_change_is_marked_dirty(self):
         clone = self.tmp / "clone2"; head = subprocess.run(["git", "-C", str(SRC), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
