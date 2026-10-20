@@ -489,3 +489,10 @@
 - 验收：单测 ccmux 记录 background + 无 logPath + 无 prompt → 不出现；有 prompt 无 logPath（刚起的真后台会话）→ 出现；有 logPath 无 prompt → 出现；native 记录不受影响。黑盒 假 ccmux 混一条备用记录 → 看板无此卡、show 无此行、不会对它跑 attach。
 - 备忘：这是 ccmux / Claude Code 侧的问题（备用进程不该当会话列出来；attach 备用进程会 fork 当前会话），可以给 ccmux 提 issue。用户现在机器上多出的副本：63498847（waiting）和被认领的 dce23d2f，`claude stop` + `claude rm` 清掉即可，agmux 不代做。
 - dev 646ae71（T64）：view.go bgHomes 只在 session 分组时用，候选 = 同 cwd 有 pane 的前台会话，退同 mainRepoRoot；数量 → 最近活动 → 名字排序（确定性）；Session 加 MainRepoRoot；README g 行补规则；TestBgGroupFollowsForeground 全覆盖验收 + 三种其他分组键不变；变异 10 杀 10（1 等价）。边界（照准）：候选必须有 pane。T65 进行中。
+- 2026-10-20 npm 首版发出：用户开 2FA 后重新 `npm login`，手跑脚本把五个包发到 registry（@kackerx/agmux 0.1.0 + 4 平台包；脚本中途 403「不能覆盖已发布版本」是因为前一次已成功，已改成跳过已发布的）。验证：临时 prefix `npm install -g @kackerx/agmux` → `agmux v0.1.0 (7b1b625, 2026-10-17T12:17:27Z)`，只装了 darwin-arm64 平台包。三条安装路径（brew / npm / go install）全部可用。
+
+### T66 npm 改 Trusted Publishing（OIDC），不再用 token
+- 为什么：bypass-2FA 的 granular token 在 npm 侧已不可用（三次 403），且 2027-01 停用；包现在存在了，可以配信任发布。
+- 定稿：release.yml 的 npm job 加 `permissions: id-token: write`（contents: read 保留给 gh release download），删掉 `NODE_AUTH_TOKEN` / `secrets.NPM_TOKEN`；setup-node 用 node 24（自带 npm ≥ 11.5，OIDC 需要）；`npm publish` 加 `--provenance`（可选但顺手）。其它不动。README 不用改。
+- 用户要做的（代码之外，发下一个版本前）：npmjs.com 上五个包各自 Settings → Trusted Publisher → GitHub Actions：Organization or user `kackerx`、Repository `agmux`、Workflow filename `release.yml`、Environment 留空。配完可以删掉所有 npm token 和仓库 secret NPM_TOKEN。
+- 验收：actionlint；yaml 解析；本地无法验 OIDC，真验收 = 下一个 tag 的 npm job 绿。reviewer 核对字段与 npm 官方文档一致。
