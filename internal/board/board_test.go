@@ -1,6 +1,7 @@
 package board
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
@@ -23,21 +24,15 @@ var now = time.Date(2026, 10, 12, 4, 0, 0, 0, time.UTC)
 
 func fixture(t *testing.T) []store.Session {
 	t.Helper()
-	data, err := os.ReadFile("../../testdata/show.json")
+	data, err := os.ReadFile("../../testdata/sessions.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := ccmux.Parse(data)
-	if err != nil {
+	var raw []store.Raw
+	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for i := range raw {
-		raw[i].LogPath = ""
-		if raw[i].TrackingMode == "background" {
-			raw[i].LastPrompt = "x" // without a transcript it would be taken for a daemon's spare process
-		}
-	}
-	p := &store.Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir()}
+	p := &store.Poller{Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}

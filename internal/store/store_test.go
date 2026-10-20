@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"encoding/json"
 	"hash/fnv"
 	"image"
 	"image/color"
@@ -15,30 +16,23 @@ import (
 	"time"
 
 	"github.com/kackerx/agmux/internal/avatar"
-	"github.com/kackerx/agmux/internal/ccmux"
 )
 
-func fixture(t *testing.T) []ccmux.Session {
+func fixture(t *testing.T) []Raw {
 	t.Helper()
-	data, err := os.ReadFile("../../testdata/show.json")
+	data, err := os.ReadFile("../../testdata/sessions.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := ccmux.Parse(data)
-	if err != nil {
+	var raw []Raw
+	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
-	}
-	for i := range raw {
-		raw[i].LogPath = "" // fixture points at real transcripts; keep the test hermetic
-		if raw[i].TrackingMode == "background" {
-			raw[i].LastPrompt = "x" // without a transcript it would be taken for a daemon's spare process
-		}
 	}
 	return raw
 }
 
-func poller(t *testing.T, raw []ccmux.Session) *Poller {
-	p := &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir()}
+func poller(t *testing.T, raw []Raw) *Poller {
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -70,12 +64,12 @@ func TestFixture(t *testing.T) {
 	if s.Name != "rename-flag" || s.GroupKey != s.CWD || s.GroupKey == "" || s.PendingTool != "Bash" || s.LastActivity.IsZero() {
 		t.Errorf("summary set: %+v", s)
 	}
-	// real captures: idle + unread = done; idle + unread + a working subagent = working · agents
+	// real captures: idle since a known time = done; a session working is not
 	if s := byID(t, ss, "bd8201ec-e255-4d0d-ba88-7413f3c10329"); !s.Done || s.Status != "idle" {
 		t.Errorf("sqlmux-test-engineer: done=%v status=%s, want done", s.Done, s.Status)
 	}
-	if s := byID(t, ss, "c8cbecee-e813-4fe4-b7ed-b971ef4878bc"); s.Done || s.Status != "working" || !s.AgentsWorking {
-		t.Errorf("agmux-orchestrator: done=%v status=%s agents=%v, want working · agents", s.Done, s.Status, s.AgentsWorking)
+	if s := byID(t, ss, "c8cbecee-e813-4fe4-b7ed-b971ef4878bc"); s.Done || s.Status != "working" {
+		t.Errorf("agmux-orchestrator: done=%v status=%s, want working", s.Done, s.Status)
 	}
 	for _, s := range ss {
 		if s.ContextPct != -1 {
@@ -86,8 +80,8 @@ func TestFixture(t *testing.T) {
 
 func TestHUD(t *testing.T) {
 	raw := fixture(t)[:1]
-	p := &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir()}
-	hud := filepath.Join(p.StateDir, raw[0].NativeSessionID+".json")
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
+	hud := filepath.Join(p.StateDir, raw[0].SessionID+".json")
 	for _, c := range []struct {
 		body   string
 		want   int
@@ -121,9 +115,9 @@ func TestHUDModelBeatsJSONL(t *testing.T) {
 	if err := os.WriteFile(log, []byte(`{"type":"assistant","message":{"model":"claude-opus-5-5"}}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	p := &Poller{Show: func() ([]ccmux.Session, error) {
-		return []ccmux.Session{{ID: "a", NativeSessionID: "n1", LogPath: log}}, nil
-	}, StateDir: dir}
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) {
+		return []Raw{{ID: "a", SessionID: "n1", Transcript: log}}, nil
+	})}, StateDir: dir}
 	p.Refresh()
 	if m := p.Sessions()[0].Model; m != "claude-opus-5-5" {
 		t.Fatalf("no HUD file: %q", m)
@@ -175,7 +169,7 @@ func TestLastModel(t *testing.T) {
 func TestRefreshErrorKeepsSessions(t *testing.T) {
 	p := poller(t, fixture(t))
 	n := len(p.Sessions())
-	p.Show = func() ([]ccmux.Session, error) { return nil, os.ErrDeadlineExceeded }
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}
 	if p.Refresh() == nil || p.Err() == nil || len(p.Sessions()) != n {
 		t.Fatalf("failed poll should keep %d sessions and expose the error", n)
 	}
@@ -184,8 +178,8 @@ func TestRefreshErrorKeepsSessions(t *testing.T) {
 func TestModelCache(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "s.jsonl")
-	raw := []ccmux.Session{{ID: "a", LogPath: log}}
-	p := &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: dir}
+	raw := []Raw{{ID: "a", Transcript: log}}
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: dir}
 	write := func(body string) {
 		if err := os.WriteFile(log, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
@@ -205,36 +199,23 @@ func TestModelCache(t *testing.T) {
 	}
 }
 
-// Effective status follows ccmux 1.4.3 getEffectiveStatus.
-func TestEffectiveStatus(t *testing.T) {
-	sub := func(st string) []ccmux.Subagent { return []ccmux.Subagent{{AgentID: "x", Status: st}} }
-	raw := []ccmux.Session{
-		{ID: "done-unread", Status: "idle", AttentionState: "unread"},
-		{ID: "done-read", Status: "idle", AttentionState: "read"},
-		{ID: "idle", Status: "idle"},
-		{ID: "idle+agent working", Status: "idle", AttentionState: "unread", Subagents: sub("working")},
-		{ID: "idle+agent waiting", Status: "idle", Subagents: sub("waiting")},
-		{ID: "idle+agent finished", Status: "idle", AttentionState: "unread", Subagents: sub("idle")},
-		{ID: "working+agent", Status: "working", Subagents: sub("working")},
-		{ID: "waiting", Status: "waiting", AttentionState: "unread"},
+// The status is the source's; an idle one is done unless its time is not known or the user has seen it.
+func TestStatusAndDone(t *testing.T) {
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	raw := []Raw{
+		{ID: "idle", Status: "idle", StatusChangedAt: at},
+		{ID: "idle, no time", Status: "idle"},
+		{ID: "working", Status: "working", StatusChangedAt: at},
+		{ID: "waiting", Status: "waiting", StatusChangedAt: at},
 	}
 	want := map[string]struct {
-		status       string
-		agents, done bool
-	}{
-		"done-unread":         {"idle", false, true},
-		"done-read":           {"idle", false, true},
-		"idle":                {"idle", false, false},
-		"idle+agent working":  {"working", true, false},
-		"idle+agent waiting":  {"working", true, false},
-		"idle+agent finished": {"idle", false, true},
-		"working+agent":       {"working", false, false},
-		"waiting":             {"waiting", false, false},
-	}
+		status string
+		done   bool
+	}{"idle": {"idle", true}, "idle, no time": {"idle", false}, "working": {"working", false}, "waiting": {"waiting", false}}
 	for _, s := range poller(t, raw).Sessions() {
 		w := want[s.ID]
-		if s.Status != w.status || s.AgentsWorking != w.agents || s.Done != w.done {
-			t.Errorf("%s: status %s agents %v done %v, want %s %v %v", s.ID, s.Status, s.AgentsWorking, s.Done, w.status, w.agents, w.done)
+		if s.Status != w.status || s.Done != w.done || s.AgentsWorking {
+			t.Errorf("%s: status %s done %v agents %v, want %s %v", s.ID, s.Status, s.Done, s.AgentsWorking, w.status, w.done)
 		}
 	}
 }
@@ -252,7 +233,7 @@ func TestCorruptAvatarsShownNotFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("corrupt avatars.json must not stop the board: %v", err)
 	}
-	p.Show = func() ([]ccmux.Session, error) { return []ccmux.Session{{ID: "a"}}, nil }
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return []Raw{{ID: "a"}}, nil })}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -271,9 +252,9 @@ func TestAvatarsByName(t *testing.T) {
 	b.Set("orch", "bot-01")
 	p := &Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-05",
 		AvatarBind: map[string]string{"orch": "bot-02", "dev": "bot-03", "id-3": "bot-04"},
-		Show: func() ([]ccmux.Session, error) {
-			return []ccmux.Session{{ID: "id-1", Summary: "orch"}, {ID: "id-2", Summary: "dev"}, {ID: "id-3"}, {ID: "id-4", Project: "proj"}}, nil
-		}}
+		Sources: []Source{SourceFunc(func() ([]Raw, error) {
+			return []Raw{{ID: "id-1", Name: "orch"}, {ID: "id-2", Name: "dev"}, {ID: "id-3"}, {ID: "id-4", Project: "proj"}}, nil
+		})}}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -294,9 +275,9 @@ func TestAvatarsByName(t *testing.T) {
 		t.Errorf("avatars.json: %s", data)
 	}
 	// no summary, same project: one name, one binding; both cards change at once
-	p.Show = func() ([]ccmux.Session, error) {
-		return []ccmux.Session{{ID: "p1", Project: "proj"}, {ID: "p2", Project: "proj"}, {ID: "id-3"}}, nil
-	}
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) {
+		return []Raw{{ID: "p1", Project: "proj"}, {ID: "p2", Project: "proj"}, {ID: "id-3"}}, nil
+	})}
 	p.Refresh()
 	if err := p.SetAvatar(byID(t, p.Sessions(), "p1"), "bot-04"); err != nil {
 		t.Fatal(err)
@@ -352,7 +333,7 @@ func TestPollFollowsAvatarsFile(t *testing.T) {
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	os.WriteFile(path, []byte("{oops"), 0o644)
 	p, _ := NewPoller()
-	p.Show = func() ([]ccmux.Session, error) { return []ccmux.Session{{ID: "a", Summary: "n"}}, nil }
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return []Raw{{ID: "a", Name: "n"}}, nil })}
 	p.Refresh()
 	if p.Err() == nil {
 		t.Fatal("broken file: error")
@@ -392,9 +373,9 @@ func TestAvatarImageSetIDs(t *testing.T) {
 	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
 	b.Set("orch", "kit")
 	p := &Poller{StateDir: dir, Avatars: b, AvatarDefault: "kit", AvatarBind: map[string]string{"dev": "kit", "gone": "no-such-set"},
-		Show: func() ([]ccmux.Session, error) {
-			return []ccmux.Session{{ID: "1", Summary: "orch"}, {ID: "2", Summary: "dev"}, {ID: "3", Summary: "gone"}}, nil
-		}}
+		Sources: []Source{SourceFunc(func() ([]Raw, error) {
+			return []Raw{{ID: "1", Name: "orch"}, {ID: "2", Name: "dev"}, {ID: "3", Name: "gone"}}, nil
+		})}}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -410,31 +391,30 @@ func TestAvatarImageSetIDs(t *testing.T) {
 func TestAvatarState(t *testing.T) {
 	for _, c := range []struct {
 		name string
-		r    ccmux.Session
+		r    Raw
 		want string
 	}{
-		{"idle", ccmux.Session{Status: "idle"}, "idle"},
-		{"done", ccmux.Session{Status: "idle", AttentionState: "read"}, "success"},
-		{"waiting", ccmux.Session{Status: "waiting"}, "hi"},
-		{"attention", ccmux.Session{Status: "working", AttentionType: "permission", PendingTool: "Bash"}, "hi"},
-		{"idle with attention", ccmux.Session{Status: "idle", AttentionType: "question", AttentionState: "read"}, "hi"},
-		{"working, no tool", ccmux.Session{Status: "working"}, "think"},
-		{"working on subagents", ccmux.Session{Status: "idle", Subagents: []ccmux.Subagent{{Status: "working"}}}, "think"},
-		{"Read", ccmux.Session{Status: "working", PendingTool: "Read"}, "read"},
-		{"Grep", ccmux.Session{Status: "working", PendingTool: "Grep"}, "read"},
-		{"Glob", ccmux.Session{Status: "working", PendingTool: "Glob"}, "read"},
-		{"WebFetch", ccmux.Session{Status: "working", PendingTool: "WebFetch"}, "read"},
-		{"WebSearch", ccmux.Session{Status: "working", PendingTool: "WebSearch"}, "read"},
-		{"Write", ccmux.Session{Status: "working", PendingTool: "Write"}, "write"},
-		{"Edit", ccmux.Session{Status: "working", PendingTool: "Edit"}, "write"},
-		{"MultiEdit", ccmux.Session{Status: "working", PendingTool: "MultiEdit"}, "write"},
-		{"NotebookEdit", ccmux.Session{Status: "working", PendingTool: "NotebookEdit"}, "write"},
-		{"Bash", ccmux.Session{Status: "working", PendingTool: "Bash"}, "tool"},
-		{"an MCP tool", ccmux.Session{Status: "working", PendingTool: "mcp__x__y"}, "tool"},
-		{"background", ccmux.Session{Status: "background"}, "idle"},
+		{"idle", Raw{Status: "idle"}, "idle"},
+		{"done", Raw{Status: "idle", StatusChangedAt: time.Unix(1, 0)}, "success"},
+		{"waiting", Raw{Status: "waiting"}, "hi"},
+		{"attention", Raw{Status: "working", Attention: "permission", PendingTool: "Bash"}, "hi"},
+		{"idle with attention", Raw{Status: "idle", Attention: "question", StatusChangedAt: time.Unix(1, 0)}, "hi"},
+		{"working, no tool", Raw{Status: "working"}, "think"},
+		{"Read", Raw{Status: "working", PendingTool: "Read"}, "read"},
+		{"Grep", Raw{Status: "working", PendingTool: "Grep"}, "read"},
+		{"Glob", Raw{Status: "working", PendingTool: "Glob"}, "read"},
+		{"WebFetch", Raw{Status: "working", PendingTool: "WebFetch"}, "read"},
+		{"WebSearch", Raw{Status: "working", PendingTool: "WebSearch"}, "read"},
+		{"Write", Raw{Status: "working", PendingTool: "Write"}, "write"},
+		{"Edit", Raw{Status: "working", PendingTool: "Edit"}, "write"},
+		{"MultiEdit", Raw{Status: "working", PendingTool: "MultiEdit"}, "write"},
+		{"NotebookEdit", Raw{Status: "working", PendingTool: "NotebookEdit"}, "write"},
+		{"Bash", Raw{Status: "working", PendingTool: "Bash"}, "tool"},
+		{"an MCP tool", Raw{Status: "working", PendingTool: "mcp__x__y"}, "tool"},
+		{"background", Raw{Status: "background"}, "idle"},
 	} {
 		c.r.ID = "id"
-		p := &Poller{StateDir: t.TempDir(), Show: func() ([]ccmux.Session, error) { return []ccmux.Session{c.r}, nil }}
+		p := &Poller{StateDir: t.TempDir(), Sources: []Source{SourceFunc(func() ([]Raw, error) { return []Raw{c.r}, nil })}}
 		if err := p.Refresh(); err != nil {
 			t.Fatal(err)
 		}
@@ -511,7 +491,7 @@ func TestAgentIn(t *testing.T) {
 func TestAgentSources(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "s.jsonl")
-	p := &Poller{Show: func() ([]ccmux.Session, error) { return []ccmux.Session{{ID: "a", LogPath: log}, {ID: "b"}}, nil }, StateDir: dir}
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return []Raw{{ID: "a", Transcript: log}, {ID: "b"}}, nil })}, StateDir: dir}
 	as := func(n string) string { return `{"type":"agent-setting","agentSetting":"` + n + `"}` + "\n" }
 	pad := `{"type":"user","pad":"` + strings.Repeat("x", tailBytes) + `"}` + "\n" // longer than the tail
 	write := func(body string) { os.WriteFile(log, []byte(body), 0o644) }
@@ -525,14 +505,14 @@ func TestAgentSources(t *testing.T) {
 		{"neither, a long file", pad + pad, ""},
 	} {
 		os.Remove(log)
-		p = &Poller{Show: p.Show, StateDir: dir}
+		p = &Poller{Sources: p.Sources, StateDir: dir}
 		write(c.body)
 		if got := agent(); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
 	}
 	// the head is kept per path; the tail is not: a later change shows
-	p = &Poller{Show: p.Show, StateDir: dir}
+	p = &Poller{Sources: p.Sources, StateDir: dir}
 	write(as("first") + pad + pad)
 	if a := agent(); a != "first" {
 		t.Fatalf("head: %q", a)
@@ -543,7 +523,7 @@ func TestAgentSources(t *testing.T) {
 	}
 	// a short file with none is not final: an agent set at 10KB (a late resume) that the file then
 	// grows past is in neither tail but still in the head, and must be found there
-	p = &Poller{Show: p.Show, StateDir: dir}
+	p = &Poller{Sources: p.Sources, StateDir: dir}
 	write(`{"type":"user"}` + "\n")
 	if a := agent(); a != "" {
 		t.Fatalf("none yet: %q", a)
@@ -556,7 +536,7 @@ func TestAgentSources(t *testing.T) {
 	if a := agent(); a != "late-resume" {
 		t.Errorf("scrolled out of the tail, still in the head: %q", a)
 	}
-	p = &Poller{Show: p.Show, StateDir: dir}
+	p = &Poller{Sources: p.Sources, StateDir: dir}
 	write(as("first") + pad + pad)
 	agent()
 	write(`{"type":"user"}` + "\n") // the head is remembered even if the file is replaced
@@ -568,37 +548,11 @@ func TestAgentSources(t *testing.T) {
 	}
 }
 
-// tmuxTarget is "<session> # <window>:<idx>.<pane>": the session is all before the first " # "
-// (spaces in a session name, "/" ":" and " # " in a window name stay out of it); null is no pane.
-func TestTmuxSession(t *testing.T) {
-	for target, want := range map[string]string{
-		"alpha # main:0.1":           "alpha",
-		"my session # build/api:3.0": "my session",
-		"s # a # b:c:1.2":            "s",
-		"fl-agmux # board:0.0":       "fl-agmux",
-		"":                           "",
-		"no-separator":               "no-separator",
-		"  # win:0.0":                " ",
-	} {
-		if got := tmuxSession(target); got != want {
-			t.Errorf("%q: %q, want %q", target, got, want)
-		}
-	}
-	raw, err := ccmux.Parse([]byte(`[{"id":"a","project":"shopcart","tmuxTarget":"dev # main:0.1"},{"id":"b","project":"shopcart","tmuxTarget":null}]`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ss := poller(t, raw).Sessions()
-	if a, b := byID(t, ss, "a"), byID(t, ss, "b"); a.Project != "shopcart" || a.TmuxSession != "dev" || b.Project != "shopcart" || b.TmuxSession != "" {
-		t.Errorf("a %+v b %+v", a, b)
-	}
-}
-
-func seenPoller(t *testing.T, raw *[]ccmux.Session) (*Poller, string) {
+func seenPoller(t *testing.T, raw *[]Raw) (*Poller, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "seen.json")
 	seen, _ := avatar.LoadBindings(path)
-	p := &Poller{Show: func() ([]ccmux.Session, error) { return *raw, nil }, StateDir: t.TempDir(), Seen: seen}
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return *raw, nil })}, StateDir: t.TempDir(), Seen: seen}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -614,13 +568,13 @@ func seenFile(t *testing.T, path string) string {
 	return strings.Join(strings.Fields(string(b)), "")
 }
 
-// A done the user has seen is idle until its status changes; a done ccmux has cleared, or whose session is gone, is forgotten.
+// A done the user has seen is idle until its status changes; the entry of a session that is gone is forgotten.
 func TestSeenDone(t *testing.T) {
 	t1 := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
-	raw := []ccmux.Session{
-		{ID: "a", Status: "idle", AttentionState: "unread", StatusChangedAt: t1},
-		{ID: "b", Status: "idle", AttentionState: "unread", StatusChangedAt: t1},
-		{ID: "c", Status: "idle", AttentionState: "unread", StatusChangedAt: t1},
+	raw := []Raw{
+		{ID: "a", Status: "idle", StatusChangedAt: t1},
+		{ID: "b", Status: "idle", StatusChangedAt: t1},
+		{ID: "c", Status: "idle", StatusChangedAt: t1},
 	}
 	p, path := seenPoller(t, &raw)
 	a := byID(t, p.Sessions(), "a")
@@ -644,50 +598,43 @@ func TestSeenDone(t *testing.T) {
 	}
 	// another board, same file: seen there is seen here
 	other, _ := avatar.LoadBindings(path)
-	p2 := &Poller{Show: p.Show, StateDir: t.TempDir(), Seen: other}
+	p2 := &Poller{Sources: p.Sources, StateDir: t.TempDir(), Seen: other}
 	p2.Refresh()
 	if byID(t, p2.Sessions(), "a").Done {
 		t.Error("a restart forgets what was seen")
 	}
 	// it works again and is done again: a new done
-	raw[0].Status, raw[0].AttentionState = "working", ""
+	raw[0].Status = "working"
 	p.Refresh()
-	raw[0].Status, raw[0].AttentionState, raw[0].StatusChangedAt = "idle", "unread", t1.Add(time.Minute)
+	raw[0].Status, raw[0].StatusChangedAt = "idle", t1.Add(time.Minute)
 	p.Refresh()
 	if !byID(t, p.Sessions(), "a").Done {
 		t.Error("a new done (statusChangedAt moved) is not seen")
 	}
-	// ccmux cleared b's attention (the pane was focused) and c's session is gone
-	raw[1].AttentionState = ""
-	raw = raw[:2]
+	// b's session is gone: its entry goes, a's stays
+	raw = raw[:1]
 	p.Refresh()
-	if got := seenFile(t, path); got != "{}" {
-		t.Errorf("seen.json %s, want every entry dropped", got)
+	if got := seenFile(t, path); got != `{"a":"2026-10-13T12:00:00Z"}` {
+		t.Errorf("seen.json %s, want b's entry dropped", got)
 	}
 }
 
-// A ccmux that fails, or a session working with a subagent, drops nothing.
+// A source that fails drops nothing.
 func TestSeenKeptWhenNotKnown(t *testing.T) {
 	t1 := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
-	raw := []ccmux.Session{{ID: "a", Status: "idle", AttentionState: "unread", StatusChangedAt: t1}}
+	raw := []Raw{{ID: "a", Status: "idle", StatusChangedAt: t1}}
 	p, path := seenPoller(t, &raw)
 	p.MarkSeen(p.Sessions()[0])
-	p.Show = func() ([]ccmux.Session, error) { return nil, os.ErrDeadlineExceeded }
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}
 	p.Refresh()
 	if got := seenFile(t, path); !strings.Contains(got, `"a"`) {
 		t.Errorf("a failed poll forgot: %s", got)
-	}
-	raw[0].Subagents = []ccmux.Subagent{{AgentID: "x", Status: "working"}} // idle with a subagent running: shown working, attentionState kept
-	p.Show = func() ([]ccmux.Session, error) { return raw, nil }
-	p.Refresh()
-	if got := seenFile(t, path); !strings.Contains(got, `"a"`) {
-		t.Errorf("working with a subagent forgot: %s", got)
 	}
 }
 
 // A seen.json that is not JSON means nothing is seen; the board says so, and the file is left for the user.
 func TestSeenCorruptFile(t *testing.T) {
-	raw := []ccmux.Session{{ID: "a", Status: "idle", AttentionState: "unread", StatusChangedAt: time.Now()}}
+	raw := []Raw{{ID: "a", Status: "idle", StatusChangedAt: time.Now()}}
 	p, path := seenPoller(t, &raw)
 	os.WriteFile(path, []byte("{oops"), 0o644)
 	os.Chtimes(path, time.Now(), time.Now().Add(time.Hour))
@@ -714,11 +661,11 @@ func TestSeenCorruptFile(t *testing.T) {
 	}
 }
 
-// A session ccmux gives no statusChangedAt for can't be told apart from its next done: never marked.
+// A session with no statusChangedAt can't be told apart from its next done: it is never done, and never marked.
 func TestSeenNeedsStatusChangedAt(t *testing.T) {
-	raw := []ccmux.Session{{ID: "a", Status: "idle", AttentionState: "unread"}}
+	raw := []Raw{{ID: "a", Status: "idle"}}
 	p, path := seenPoller(t, &raw)
-	if err := p.MarkSeen(p.Sessions()[0]); err != nil || !p.Sessions()[0].Done || seenFile(t, path) != "" {
+	if err := p.MarkSeen(p.Sessions()[0]); err != nil || p.Sessions()[0].Done || seenFile(t, path) != "" {
 		t.Errorf("err %v done %v file %q", err, p.Sessions()[0].Done, seenFile(t, path))
 	}
 }
@@ -737,11 +684,11 @@ func TestMarkSeenOldDone(t *testing.T) {
 	}
 }
 
-func pinPoller(t *testing.T, raw *[]ccmux.Session) (*Poller, string) {
+func pinPoller(t *testing.T, raw *[]Raw) (*Poller, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "pins.json")
 	pins, _ := avatar.LoadBindings(path)
-	p := &Poller{Show: func() ([]ccmux.Session, error) { return *raw, nil }, StateDir: t.TempDir(), Pins: pins}
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return *raw, nil })}, StateDir: t.TempDir(), Pins: pins}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -751,7 +698,7 @@ func pinPoller(t *testing.T, raw *[]ccmux.Session) (*Poller, string) {
 // TogglePin pins and unpins by name (here the ID: these sessions have none): at once on the sessions the board holds, in pins.json
 // (read back by another poller, a restart), and a session that is gone loses its pin.
 func TestTogglePin(t *testing.T) {
-	raw := []ccmux.Session{{ID: "a", Status: "idle"}, {ID: "b", Status: "idle"}, {ID: "c", Status: "idle"}}
+	raw := []Raw{{ID: "a", Status: "idle"}, {ID: "b", Status: "idle"}, {ID: "c", Status: "idle"}}
 	p, path := pinPoller(t, &raw)
 	if byID(t, p.Sessions(), "a").Pinned {
 		t.Fatal("pinned from the start")
@@ -772,7 +719,7 @@ func TestTogglePin(t *testing.T) {
 	}
 	// a restart: a new poller on the same file
 	other, _ := avatar.LoadBindings(path)
-	p2 := &Poller{Show: p.Show, StateDir: t.TempDir(), Pins: other}
+	p2 := &Poller{Sources: p.Sources, StateDir: t.TempDir(), Pins: other}
 	p2.Refresh()
 	if !byID(t, p2.Sessions(), "a").Pinned || !byID(t, p2.Sessions(), "b").Pinned || byID(t, p2.Sessions(), "c").Pinned {
 		t.Errorf("a restart forgets the pins: %+v", p2.Sessions())
@@ -801,10 +748,10 @@ func TestTogglePin(t *testing.T) {
 		t.Errorf("pins.json %s, want the gone session dropped", got)
 	}
 	// ... but not while ccmux fails
-	raw = append(raw, ccmux.Session{ID: "d", Status: "idle"})
+	raw = append(raw, Raw{ID: "d", Status: "idle"})
 	p.Refresh()
 	p.TogglePin(byID(t, p.Sessions(), "d"))
-	p.Show = func() ([]ccmux.Session, error) { return nil, os.ErrDeadlineExceeded }
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}
 	p.Refresh()
 	if got := seenFile(t, path); !strings.Contains(got, `"d"`) {
 		t.Errorf("a failed poll dropped the pin: %s", got)
@@ -813,7 +760,7 @@ func TestTogglePin(t *testing.T) {
 
 // A pins.json that is not JSON means nothing is pinned; the board says so and the file is left for the user.
 func TestPinsCorruptFile(t *testing.T) {
-	raw := []ccmux.Session{{ID: "a", Status: "idle"}}
+	raw := []Raw{{ID: "a", Status: "idle"}}
 	p, path := pinPoller(t, &raw)
 	os.WriteFile(path, []byte("{oops"), 0o644)
 	os.Chtimes(path, time.Now(), time.Now().Add(time.Hour))
@@ -843,7 +790,7 @@ func TestPinsCorruptFile(t *testing.T) {
 // A pin is kept by name: a session restarted or handed off (a new ID, the same name) is still
 // pinned, and unpinning it works from the new ID; it goes when no session has the name.
 func TestPinSurvivesNewID(t *testing.T) {
-	raw := []ccmux.Session{{ID: "a1", Summary: "agmux-dev", Status: "idle"}, {ID: "b1", Summary: "other", Status: "idle"}}
+	raw := []Raw{{ID: "a1", Name: "agmux-dev", Status: "idle"}, {ID: "b1", Name: "other", Status: "idle"}}
 	p, path := pinPoller(t, &raw)
 	if _, err := p.TogglePin(byID(t, p.Sessions(), "a1")); err != nil {
 		t.Fatal(err)
@@ -865,7 +812,7 @@ func TestPinSurvivesNewID(t *testing.T) {
 	p.TogglePin(byID(t, p.Sessions(), "a2"))
 	now := time.Now()
 	p.Now = func() time.Time { return now }
-	raw[0].Summary = "renamed" // no session has the name now
+	raw[0].Name = "renamed" // no session has the name now
 	p.Refresh()
 	now = now.Add(pinGrace + time.Second)
 	p.Refresh()
@@ -877,7 +824,7 @@ func TestPinSurvivesNewID(t *testing.T) {
 // A session restarted by ccmux is out of its list for a few seconds, and a daemon just started
 // answers with none: a pin survives that, and goes only when no session has had the name for pinGrace.
 func TestPinGrace(t *testing.T) {
-	raw := []ccmux.Session{{ID: "a1", Summary: "agmux-dev", Status: "idle"}, {ID: "b1", Summary: "other", Status: "idle"}}
+	raw := []Raw{{ID: "a1", Name: "agmux-dev", Status: "idle"}, {ID: "b1", Name: "other", Status: "idle"}}
 	p, path := pinPoller(t, &raw)
 	now := time.Now()
 	p.Now = func() time.Time { return now }
@@ -888,7 +835,7 @@ func TestPinGrace(t *testing.T) {
 	raw = raw[1:]
 	p.Refresh()
 	now = now.Add(5 * time.Second)
-	raw = append([]ccmux.Session{{ID: "a2", Summary: "agmux-dev", Status: "idle"}}, saved[1:]...)
+	raw = append([]Raw{{ID: "a2", Name: "agmux-dev", Status: "idle"}}, saved[1:]...)
 	p.Refresh()
 	if !byID(t, p.Sessions(), "a2").Pinned || !byID(t, p.Sessions(), "b1").Pinned {
 		t.Errorf("after the gap: %+v", p.Sessions())
@@ -899,7 +846,7 @@ func TestPinGrace(t *testing.T) {
 		p.Refresh()
 		now = now.Add(50 * time.Second)
 		p.Refresh()
-		raw = append([]ccmux.Session{{ID: "a2", Summary: "agmux-dev", Status: "idle"}}, raw...)
+		raw = append([]Raw{{ID: "a2", Name: "agmux-dev", Status: "idle"}}, raw...)
 		p.Refresh()
 	}
 	if !byID(t, p.Sessions(), "a2").Pinned {
@@ -923,7 +870,7 @@ func TestPinGrace(t *testing.T) {
 // What is pinned is what pins.json says now, not what the caller saw: two presses of t on one
 // snapshot pin and unpin; a pin made by another board is seen, and undone, without a poll between.
 func TestTogglePinReadsTheFile(t *testing.T) {
-	raw := []ccmux.Session{{ID: "a1", Summary: "x", Status: "idle"}}
+	raw := []Raw{{ID: "a1", Name: "x", Status: "idle"}}
 	p, path := pinPoller(t, &raw)
 	snap := byID(t, p.Sessions(), "a1") // what the board read for both key presses
 	on1, err1 := p.TogglePin(snap)
@@ -941,7 +888,7 @@ func TestTogglePinReadsTheFile(t *testing.T) {
 
 // Pinning one name leaves the others alone, and sessions of one name go together.
 func TestTogglePinByName(t *testing.T) {
-	raw := []ccmux.Session{{ID: "a1", Summary: "x", Status: "idle"}, {ID: "a2", Summary: "x", Status: "idle"}, {ID: "b1", Summary: "y", Status: "idle"}}
+	raw := []Raw{{ID: "a1", Name: "x", Status: "idle"}, {ID: "a2", Name: "x", Status: "idle"}, {ID: "b1", Name: "y", Status: "idle"}}
 	p, _ := pinPoller(t, &raw)
 	p.TogglePin(byID(t, p.Sessions(), "a1"))
 	if !byID(t, p.Sessions(), "a1").Pinned || !byID(t, p.Sessions(), "a2").Pinned || byID(t, p.Sessions(), "b1").Pinned {

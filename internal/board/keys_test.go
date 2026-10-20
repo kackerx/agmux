@@ -20,7 +20,6 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/kackerx/agmux/internal/avatar"
-	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
@@ -1648,12 +1647,13 @@ func TestAvatarPicker(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "avatars.json")
 	b, _ := avatar.LoadBindings(path)
-	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-04", Show: func() ([]ccmux.Session, error) {
-		return []ccmux.Session{{ID: "a1", Summary: "one", CWD: "/a", TmuxPane: "%1", Status: "idle"}, {ID: "a2", CWD: "/a", Status: "idle"}}, nil
-	}}
+	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-04", Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) {
+		return []store.Raw{{ID: "a1", Name: "one", CWD: "/a", Pane: "%1", Status: "idle"}, {ID: "a2", CWD: "/a", Status: "idle"}}, nil
+	})}}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
+	p.Sessions()[1].Name = "" // a card with no name: the Poller always has the project to fall back on, this makes one
 	av := func(id string) string {
 		for _, s := range p.Sessions() {
 			if s.ID == id {

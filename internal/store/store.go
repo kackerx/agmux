@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +63,7 @@ const PollInterval = 2 * time.Second
 
 // Poller is the in-memory Store.
 type Poller struct {
-	Show     func() ([]ccmux.Session, error)
+	Sources  []Source        // the agents' lists of live sessions, merged
 	StateDir string          // where HUD files <nativeSessionId>.json live
 	Avatars  avatar.Bindings // avatars.json; nil = none
 
@@ -74,7 +73,7 @@ type Poller struct {
 	Seen  *avatar.FileBindings   // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
 	Now   func() time.Time       // nil = time.Now; tests set it
 	Pins  *avatar.FileBindings   // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
-	Panes func() (string, error) // tmux's pane listing (see TmuxPanes), for the panes background sessions are attached in; nil = none
+	Panes func() (string, error) // tmux's pane listing (see TmuxPanes), for the panes of the sessions: their tmux session, and where background sessions are attached; nil = none
 
 	refreshMu  sync.Mutex            // serializes Refresh; guards models
 	pinGone    map[string]time.Time  // pinned name → when no session had it any more (see prunePins)
@@ -83,6 +82,7 @@ type Poller struct {
 	titleBytes int64                 // and the bytes they read
 	titleScans int                   // transcripts scanned for a title, the tests count them
 	titles     map[string]titleState // session ID → its custom title and how far its transcript was scanned for one
+	repos      map[string]repoInfo   // cwd → what git says of it, asked once
 
 	avatarErr, seenErr, pinsErr error // avatars.json / seen.json / pins.json could not be read, as of the last poll or bind
 
@@ -100,7 +100,7 @@ func NewPoller() (*Poller, error) {
 	b, err := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
 	seen, serr := avatar.LoadBindings(filepath.Join(dir, "seen.json")) // likewise: a corrupt one means nothing is seen
 	pins, perr := avatar.LoadBindings(filepath.Join(dir, "pins.json"))
-	return &Poller{Show: ccmux.Show, StateDir: dir, Avatars: b, avatarErr: err, Seen: seen, seenErr: serr, Pins: pins, pinsErr: perr, Panes: TmuxPanes}, nil
+	return &Poller{Sources: []Source{NewClaude(dir)}, StateDir: dir, Avatars: b, avatarErr: err, Seen: seen, seenErr: serr, Pins: pins, pinsErr: perr, Panes: TmuxPanes}, nil
 }
 
 func (p *Poller) Sessions() []Session {
@@ -271,15 +271,7 @@ func (p *Poller) pinnedAt(key string) (t time.Time, ok bool) {
 	return t, ok
 }
 
-// spare is a warmed-up spare process of the claude daemon (ps: --bg-spare), which ccmux lists as a
-// background session: no transcript and no prompt. It is no session, and claude attach on it makes
-// the daemon claim it as a fork of the session in its directory. Only ccmux's fields tell it from a
-// claimed one, which has a transcript or a prompt and the same ps arguments.
-func spare(r ccmux.Session) bool {
-	return r.TrackingMode == "background" && r.LogPath == "" && r.LastPrompt == "" && len(r.Prompts) == 0
-}
-
-// Refresh polls ccmux once.
+// Refresh polls the sources once.
 func (p *Poller) Refresh() error {
 	p.refreshMu.Lock()
 	defer p.refreshMu.Unlock()
@@ -293,16 +285,23 @@ func (p *Poller) Refresh() error {
 	if p.Pins != nil {
 		perr = p.Pins.Reload()
 	}
-	raw, err := p.Show()
+	var raw []Raw
+	var err error
+	for _, src := range p.Sources {
+		var rs []Raw
+		if rs, err = src.Sessions(); err != nil {
+			break
+		}
+		raw = append(raw, rs...)
+	}
 	var ss []Session
 	if err == nil {
-		raw = slices.DeleteFunc(raw, spare)
-		if p.Seen != nil { // a done ccmux has cleared (or a session that is gone) is not "seen" any more
-			attended := map[string]bool{}
+		if p.Seen != nil { // a session that is gone is not "seen" any more
+			live := map[string]bool{}
 			for _, r := range raw {
-				attended[r.ID] = r.AttentionState != ""
+				live[r.ID] = true
 			}
-			if perr := p.Seen.Prune(func(id string) bool { return attended[id] }); serr == nil {
+			if perr := p.Seen.Prune(func(id string) bool { return live[id] }); serr == nil {
 				serr = perr
 			}
 		}
@@ -310,7 +309,7 @@ func (p *Poller) Refresh() error {
 		for i, r := range raw {
 			ss[i] = p.convert(r)
 		}
-		p.fillAttached(ss)
+		p.fillPanes(ss)
 		if p.Pins != nil {
 			if e := p.prunePins(ss); perr == nil {
 				perr = e
@@ -340,45 +339,50 @@ func (p *Poller) Run(ctx context.Context) {
 	}
 }
 
-func (p *Poller) convert(r ccmux.Session) Session {
+func (p *Poller) convert(r Raw) Session {
 	s := Session{
-		ID: r.ID, Name: r.Summary, AgentType: r.AgentType, CWD: r.CWD, Branch: r.GitBranch,
-		Status: r.Status, Attention: r.AttentionType, PendingTool: r.PendingTool, TmuxPane: r.TmuxPane,
-		ContextPct: -1, Subagents: r.Subagents, LastActivity: r.LastActivityAt,
-		Project: r.Project, MainRepoRoot: r.MainRepoRoot, TmuxSession: tmuxSession(r.TmuxTarget), Background: r.TrackingMode == "background",
+		ID: r.ID, Name: r.Name, AgentType: r.AgentType, CWD: r.CWD, Branch: r.Branch,
+		Status: r.Status, Attention: r.Attention, PendingTool: r.PendingTool, TmuxPane: r.Pane,
+		ContextPct: -1, LastActivity: r.LastActivity, Project: r.Project, MainRepoRoot: r.MainRepoRoot,
+		TmuxSession: r.TmuxSession, Background: r.Background,
 	}
-	var tail [][]byte // the end of the transcript: the model, the agent and the title are looked for in it
-	if r.LogPath != "" {
-		tail = tailLines(r.LogPath)
+	var tail [][]byte // the end of the transcript: the model, the agent, the branch and the title are looked for in it
+	if r.Transcript != "" {
+		tail = tailLines(r.Transcript)
 	}
-	if s.Name == "" && r.LogPath != "" { // a background session: the name it was started with
-		s.Name = p.title(r.ID, r.LogPath, tail)
+	if s.Project == "" {
+		s.Project, s.MainRepoRoot = p.repo(r.CWD)
 	}
-	if s.Name == "" {
-		s.Name = r.Project
+	if s.Branch == "" {
+		s.Branch = branchIn(tail)
 	}
-	// ccmux 1.4.3 getEffectiveStatus: an idle session with a running subagent counts as working
-	if s.Status == "idle" {
-		for _, a := range r.Subagents {
-			if a.Status == "working" || a.Status == "waiting" {
-				s.Status, s.AgentsWorking = "working", true
-				break
-			}
+	if s.PendingTool == "" && s.Status != "idle" {
+		s.PendingTool = pendingIn(tail)
+	}
+	if s.Status == "waiting" && s.PendingTool == "ExitPlanMode" { // a plan to approve, not a question
+		s.Attention = "plan_approval"
+	}
+	if (s.Name == "" || r.NameDerived) && r.Transcript != "" { // the title it was given (the name it was started with)
+		if t := p.title(r.ID, r.Transcript, tail); t != "" {
+			s.Name = t
 		}
 	}
+	if s.Name == "" {
+		s.Name = s.Project
+	}
 	s.StatusChangedAt = r.StatusChangedAt
-	s.Done = s.Status == "idle" && r.AttentionState != "" && !p.seen(r)
+	s.Done = s.Status == "idle" && !r.StatusChangedAt.IsZero() && !p.seen(r)
 	s.PinnedAt, s.Pinned = p.pinnedAt(s.AvatarKey())
 	s.AvatarState = avatarState(s)
 	s.GroupKey = groupKey(s)
 	s.AvatarID = avatar.For(p.Avatars, p.AvatarBind, p.AvatarDefault, s.AvatarKey())
 	hudModel := ""
-	if r.NativeSessionID != "" {
-		s.ContextPct, hudModel, s.Effort = readHUD(filepath.Join(p.StateDir, r.NativeSessionID+".json"))
+	if r.SessionID != "" {
+		s.ContextPct, hudModel, s.Effort = readHUD(filepath.Join(p.StateDir, r.SessionID+".json"))
 	}
-	if r.LogPath != "" {
+	if r.Transcript != "" {
 		s.Model = modelIn(tail)
-		s.Agent = p.agent(r.LogPath, tail)
+		s.Agent = p.agent(r.Transcript, tail)
 	}
 	// ~8% of transcripts end in a big attachment / long line with no assistant entry in the tail
 	if p.models == nil {
@@ -396,19 +400,12 @@ func (p *Poller) convert(r ccmux.Session) Session {
 }
 
 // seen: the user already saw this very done on the board.
-func (p *Poller) seen(r ccmux.Session) bool {
+func (p *Poller) seen(r Raw) bool {
 	if p.Seen == nil {
 		return false
 	}
 	k, ok := p.Seen.Get(r.ID)
 	return ok && k == seenKey(r.StatusChangedAt)
-}
-
-// tmuxSession is the session name in a tmuxTarget "<session> # <window>:<idx>.<pane>": everything
-// before the first " # " (a session name may hold spaces, a window name " # " or "/" or ":").
-func tmuxSession(target string) string {
-	name, _, _ := strings.Cut(target, " # ")
-	return name
 }
 
 // avatarState is what an image avatar shows: hi when the session needs you, then for a working one

@@ -44,16 +44,28 @@ func attachPanes(listing string) map[string]attachedPane {
 	return panes
 }
 
-// fillAttached gives the background sessions that have no pane the one `claude attach` runs in, if
-// any. tmux is asked only when there is such a session, and not being able to is the same as
-// there being none.
-func (p *Poller) fillAttached(ss []Session) {
+// paneSessions maps each pane to the tmux session it is in.
+func paneSessions(listing string) map[string]string {
+	m := map[string]string{}
+	for _, line := range strings.Split(listing, "\n") {
+		if pane, rest, ok := strings.Cut(line, "\t"); ok && pane != "" {
+			m[pane], _, _ = strings.Cut(rest, "\t")
+		}
+	}
+	return m
+}
+
+// fillPanes takes from tmux what the sessions' own records get wrong or lack: the tmux session
+// of a pane (a record names it as it was when the process started), and for a background
+// session that has no pane the one `claude attach` runs in, if any. Not being able to ask is the
+// same as there being nothing to find.
+func (p *Poller) fillPanes(ss []Session) {
 	if p.Panes == nil {
 		return
 	}
 	need := false
 	for _, s := range ss {
-		need = need || s.Background && s.TmuxPane == ""
+		need = need || s.TmuxPane != "" || s.Background
 	}
 	if !need {
 		return
@@ -62,10 +74,15 @@ func (p *Poller) fillAttached(ss []Session) {
 	if err != nil {
 		return
 	}
-	panes := attachPanes(out)
+	attached, in := attachPanes(out), paneSessions(out)
 	for i := range ss {
-		if ss[i].Background && ss[i].TmuxPane == "" {
-			ss[i].TmuxPane, ss[i].TmuxSession = panes[ss[i].ID].pane, panes[ss[i].ID].session
+		switch {
+		case ss[i].TmuxPane != "":
+			if name, ok := in[ss[i].TmuxPane]; ok {
+				ss[i].TmuxSession = name
+			}
+		case ss[i].Background:
+			ss[i].TmuxPane, ss[i].TmuxSession = attached[ss[i].ID].pane, attached[ss[i].ID].session
 		}
 	}
 }

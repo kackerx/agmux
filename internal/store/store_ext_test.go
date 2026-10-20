@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -21,8 +20,8 @@ func write(t *testing.T, p string, lines ...string) {
 		t.Fatal(err)
 	}
 }
-func newP(t *testing.T, raw *[]ccmux.Session) *store.Poller {
-	return &store.Poller{Show: func() ([]ccmux.Session, error) { return *raw, nil }, StateDir: t.TempDir()}
+func newP(t *testing.T, raw *[]store.Raw) *store.Poller {
+	return &store.Poller{Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) { return *raw, nil })}, StateDir: t.TempDir()}
 }
 func model(p *store.Poller, id string) string {
 	for _, s := range p.Sessions() {
@@ -36,7 +35,7 @@ func model(p *store.Poller, id string) string {
 func TestExtModelCache(t *testing.T) {
 	d := t.TempDir()
 	la, lb := filepath.Join(d, "a.jsonl"), filepath.Join(d, "b.jsonl")
-	raw := []ccmux.Session{{ID: "a", LogPath: la}, {ID: "b", LogPath: lb}}
+	raw := []store.Raw{{ID: "a", Transcript: la}, {ID: "b", Transcript: lb}}
 	p := newP(t, &raw)
 	write(t, la, `{"type":"user"}`, asst("m-a1"), `{"type":"user"}`)
 	write(t, lb, bigAttachment()) // b never had a model
@@ -80,7 +79,7 @@ func TestExtBoundary(t *testing.T) {
 		pad := `{"type":"user","pad":"` + strings.Repeat("x", tail-1-len(`{"type":"user","pad":""}`)) + `"}`
 		write(t, lg, `{"type":"user"}`, `{"type":"user"}`, a, pad)
 		fi, _ := os.Stat(lg)
-		raw := []ccmux.Session{{ID: "x", LogPath: lg}}
+		raw := []store.Raw{{ID: "x", Transcript: lg}}
 		p := newP(t, &raw)
 		p.Refresh()
 		off := fi.Size() - int64(len(pad)+1) - int64(len(a)+1)
@@ -95,7 +94,7 @@ func TestExtConcurrentRefresh(t *testing.T) {
 	d := t.TempDir()
 	lg := filepath.Join(d, "s.jsonl")
 	write(t, lg, asst("m"))
-	raw := []ccmux.Session{{ID: "a", LogPath: lg}, {ID: "b", LogPath: lg}}
+	raw := []store.Raw{{ID: "a", Transcript: lg}, {ID: "b", Transcript: lg}}
 	p := newP(t, &raw)
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {

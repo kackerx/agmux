@@ -25,7 +25,6 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/kackerx/agmux/internal/avatar"
-	"github.com/kackerx/agmux/internal/ccmux"
 	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/store"
 )
@@ -231,17 +230,17 @@ func gridFixture(t *testing.T, nSets int, def string, names ...string) (*store.P
 	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
 	dir := t.TempDir()
 	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
-	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: def, Show: func() ([]ccmux.Session, error) {
-		var ss []ccmux.Session
+	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: def, Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) {
+		var ss []store.Raw
 		for i, n := range names {
 			name, cwd, ok := strings.Cut(n, "@") // "name@/dir": its own group
 			if !ok {
 				cwd = "/a"
 			}
-			ss = append(ss, ccmux.Session{ID: fmt.Sprintf("a%d", i), Summary: name, CWD: cwd, TmuxPane: fmt.Sprintf("%%%d", i), Status: "idle"})
+			ss = append(ss, store.Raw{ID: fmt.Sprintf("a%d", i), Name: name, CWD: cwd, Pane: fmt.Sprintf("%%%d", i), Status: "idle"})
 		}
 		return ss, nil
-	}}
+	})}}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -546,9 +545,9 @@ func TestBlinksAreStaggered(t *testing.T) {
 func TestAvatarGridNamesKeepApart(t *testing.T) {
 	avatar.UseSets(fstest.MapFS{"aaaaaaaa/idle/1.png": pngFile("a"), "bbbbbbbb/idle/1.png": pngFile("b"), "cccccccc/idle/1.png": pngFile("c")})
 	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
-	p := &store.Poller{StateDir: t.TempDir(), Show: func() ([]ccmux.Session, error) {
-		return []ccmux.Session{{ID: "a1", Summary: "one", CWD: "/a", TmuxPane: "%1", Status: "idle"}}, nil
-	}}
+	p := &store.Poller{StateDir: t.TempDir(), Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) {
+		return []store.Raw{{ID: "a1", Name: "one", CWD: "/a", Pane: "%1", Status: "idle"}}, nil
+	})}}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}

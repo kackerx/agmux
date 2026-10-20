@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/kackerx/agmux/internal/ccmux"
 )
 
 const titleLine = `{"type":"custom-title","customTitle":"%s"}` + "\n"
@@ -21,8 +19,8 @@ func titled(t *testing.T, content string) (*Poller, string) {
 	if err := os.WriteFile(log, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	raw := []ccmux.Session{{ID: "a", Project: "proj", LogPath: log}}
-	return &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir()}, log
+	raw := []Raw{{ID: "a", Project: "proj", Transcript: log}}
+	return &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}, log
 }
 
 func nameOf(t *testing.T, p *Poller) string {
@@ -101,8 +99,8 @@ func TestTitleEdges(t *testing.T) {
 	}
 	// a summary is the name, and the transcript is not looked at; without a transcript, the project
 	p, log = titled(t, strings.Replace(titleLine, "%s", "from-jsonl", 1)+filler(200<<10))
-	raw := []ccmux.Session{{ID: "a", Summary: "the summary", Project: "proj", LogPath: log}, {ID: "b", Project: "other"}, {ID: "c", Project: "gone", LogPath: log + ".missing"}}
-	p.Show = func() ([]ccmux.Session, error) { return raw, nil }
+	raw := []Raw{{ID: "a", Name: "the summary", Project: "proj", Transcript: log}, {ID: "b", Project: "other"}, {ID: "c", Project: "gone", Transcript: log + ".missing"}}
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +112,7 @@ func TestTitleEdges(t *testing.T) {
 
 // Background is trackingMode "background", nothing else.
 func TestBackgroundFlag(t *testing.T) {
-	raw := []ccmux.Session{{ID: "a", TrackingMode: "background", LastPrompt: "x"}, {ID: "b", TrackingMode: "native"}, {ID: "c"}}
+	raw := []Raw{{ID: "a", Background: true}, {ID: "b"}, {ID: "c"}}
 	ss := poller(t, raw).Sessions()
 	if !ss[0].Background || ss[1].Background || ss[2].Background {
 		t.Errorf("%v %v %v", ss[0].Background, ss[1].Background, ss[2].Background)
@@ -179,9 +177,9 @@ func TestTitleOtherFile(t *testing.T) {
 	}
 	other := filepath.Join(t.TempDir(), "b.jsonl")
 	os.WriteFile(other, []byte(strings.Replace(titleLine, "%s", "elsewhere", 1)+filler(300<<10)), 0o644) // longer than the first
-	p.Show = func() ([]ccmux.Session, error) {
-		return []ccmux.Session{{ID: "a", Project: "proj", LogPath: other}}, nil
-	}
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) {
+		return []Raw{{ID: "a", Project: "proj", Transcript: other}}, nil
+	})}
 	if got := nameOf(t, p); got != "elsewhere" {
 		t.Errorf("another path: %q", got)
 	}

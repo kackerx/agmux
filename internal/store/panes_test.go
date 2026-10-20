@@ -3,10 +3,7 @@ package store
 import (
 	"errors"
 	"reflect"
-	"slices"
 	"testing"
-
-	"github.com/kackerx/agmux/internal/ccmux"
 )
 
 // The pane of a background session is the one `claude attach <id>` was started in; quotes and a
@@ -33,21 +30,24 @@ func TestAttachPanes(t *testing.T) {
 	}
 }
 
-// A background session with no pane gets the attached one and is still background; an ordinary
-// one, or one ccmux gave a pane, is left alone; tmux is asked only when it matters, and failing
+// A background session with no pane gets the attached one and is still background; a session
+// with a pane is in the tmux session tmux says (its record names it as it was at start); one that
+// has no pane and is not background is left alone; tmux is asked only when it matters, and failing
 // is the same as there being nothing.
-func TestFillAttached(t *testing.T) {
+func TestFillPanes(t *testing.T) {
 	asked, fail := 0, error(nil)
-	raw := []ccmux.Session{
-		{ID: "a7", TrackingMode: "background", LastPrompt: "hi"},
-		{ID: "b2", TrackingMode: "background", LastPrompt: "hi", TmuxPane: "%1"},
-		{ID: "c3", TrackingMode: "native"},
-		{ID: "d4", TrackingMode: "background", LastPrompt: "hi"},
+	raw := []Raw{
+		{ID: "a7", Background: true},
+		{ID: "b2", Background: true, Pane: "%1", TmuxSession: "stale"},
+		{ID: "c3"},
+		{ID: "d4", Background: true},
+		{ID: "e5", Pane: "%9", TmuxSession: "old name"},
+		{ID: "f6", Pane: "%77", TmuxSession: "as recorded"}, // not in the listing
 	}
-	p := &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir(),
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(),
 		Panes: func() (string, error) {
 			asked++
-			return "%3\tagmux-bg\t0\tclaude attach a7\n%4\tagmux-bg\t0\tclaude attach b2\n%5\tagmux-bg\t0\tclaude attach c3\n", fail
+			return "%1\tmain\t0\tzsh\n%3\tagmux-bg\t0\tclaude attach a7\n%4\tagmux-bg\t0\tclaude attach b2\n%5\tagmux-bg\t0\tclaude attach c3\n%9\tnew name\t0\tclaude\n", fail
 		}}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
@@ -56,48 +56,20 @@ func TestFillAttached(t *testing.T) {
 	if got := []string{ss[0].TmuxPane, ss[1].TmuxPane, ss[2].TmuxPane, ss[3].TmuxPane}; !reflect.DeepEqual(got, []string{"%3", "%1", "", ""}) {
 		t.Errorf("panes %q", got)
 	}
-	if ss[0].TmuxSession != "agmux-bg" || ss[1].TmuxSession != "" || ss[2].TmuxSession != "" {
-		t.Errorf("sessions %q %q %q: the attached card is in agmux-bg, the others as ccmux said", ss[0].TmuxSession, ss[1].TmuxSession, ss[2].TmuxSession)
+	if got := []string{ss[0].TmuxSession, ss[1].TmuxSession, ss[2].TmuxSession, ss[4].TmuxSession, ss[5].TmuxSession}; !reflect.DeepEqual(got, []string{"agmux-bg", "main", "", "new name", "as recorded"}) {
+		t.Errorf("sessions %q: the attached card is in agmux-bg, the others where tmux has their pane", got)
 	}
 	if !ss[0].Background || asked != 1 {
 		t.Errorf("background %v, asked %d times", ss[0].Background, asked)
 	}
 	fail = errors.New("tmux: no server")
-	if err := p.Refresh(); err != nil || p.Sessions()[0].TmuxPane != "" || p.Err() != nil {
+	if err := p.Refresh(); err != nil || p.Sessions()[0].TmuxPane != "" || p.Sessions()[4].TmuxSession != "old name" || p.Err() != nil {
 		t.Errorf("tmux failing: pane %q, err %v", p.Sessions()[0].TmuxPane, p.Err())
 	}
-	raw = raw[1:3] // nothing in it needs a pane any more
+	raw = raw[2:3] // no pane, not background: nothing to ask
 	asked = 0
 	p.Refresh()
 	if asked != 0 {
-		t.Errorf("asked tmux %d times with no background session without a pane", asked)
-	}
-}
-
-// ccmux's mainRepoRoot reaches the session: the board groups a background session by it.
-func TestMainRepoRootConverted(t *testing.T) {
-	p := poller(t, []ccmux.Session{{ID: "a", MainRepoRoot: "/w/main"}})
-	if got := p.Sessions()[0].MainRepoRoot; got != "/w/main" {
-		t.Errorf("MainRepoRoot %q", got)
-	}
-}
-
-// A background record with no transcript and no prompt is a spare process of the claude daemon,
-// not a session; a record with a prompt or a transcript is one, and so is a native one without.
-func TestSpareProcessesAreNoSessions(t *testing.T) {
-	p := poller(t, []ccmux.Session{
-		{ID: "spare", TrackingMode: "background", Prompts: []string{}},
-		{ID: "new", TrackingMode: "background", LastPrompt: "hi"},
-		{ID: "listed", TrackingMode: "background", Prompts: []string{"hi"}},
-		{ID: "logged", TrackingMode: "background", LogPath: "/nope/x.jsonl"},
-		{ID: "native", TrackingMode: "native"},
-		{ID: "pane", TrackingMode: "pane"},
-	})
-	var got []string
-	for _, s := range p.Sessions() {
-		got = append(got, s.ID)
-	}
-	if want := []string{"new", "listed", "logged", "native", "pane"}; !slices.Equal(got, want) {
-		t.Errorf("sessions %v, want %v", got, want)
+		t.Errorf("asked tmux %d times with nothing that has or needs a pane", asked)
 	}
 }
