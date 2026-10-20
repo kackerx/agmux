@@ -60,3 +60,8 @@
 - 子代理在跑时登记是否 busy：T67 先在真机只读验（找一个正在跑子代理的会话对比）；不是就 stat `subagents/agent-*.jsonl` 的 mtime。
 - T65 的 spare() 和 ccmux.Session 的 LastPrompt / Prompts 随 T67 一起删；testdata/show.json 换成登记文件格式的夹具。
 - pid 存活检查：每 2 s 约 30 次 kill(pid,0) + 读 JSON，可忽略。
+
+## 8. 用户决定（2026-10-20）：codex 不要，pi 必须保留；来源做成策略抽象
+- 用户主用 Claude Code + pi。ccmux 现在列出的 34 个会话里 32 claude、2 pi。
+- 结构：store 里一个 `Source` 接口（列出该 agent 的活会话：id、pid、cwd、pane、name、status、attention、statusChangedAt、transcript、Background），两个实现 `claude`（登记文件）和 `pi`（待调查：ccmux 的 PiHookAdapter 怎么做、pi 的扩展 API 能否自己写一个登记文件）。Poller 把各 Source 的结果合并。codex / opencode 不实现，接口留着就是扩展点，不预埋代码。
+- pi 调查进行中，结果补在第 9 节。
