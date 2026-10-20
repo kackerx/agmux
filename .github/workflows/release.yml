@@ -67,16 +67,19 @@ jobs:
           git push
 
   # the npm packages: the binaries of the Release's archives under
-  # @kackerx/agmux-<os>-<arch>, and agmux that runs them (NPM_TOKEN)
+  # @kackerx/agmux-<os>-<arch>, and agmux that runs them (Trusted Publishing: no token)
   npm:
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read # gh release download
+      id-token: write # the OIDC token npm trusts
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24 # npm 11.5.1 or later publishes with OIDC
           registry-url: https://registry.npmjs.org
       - name: the archives of the Release
         env:
@@ -86,8 +89,6 @@ jobs:
       - name: the binary of this runner says the tag
         run: out/agmux-linux-x64/bin/agmux --version | grep -F "agmux $GITHUB_REF_NAME "
       - name: publish the platform packages, then the shell package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          for d in out/agmux-*; do npm publish "./$d" --access public; done # ./: a bare out/x is a GitHub user/repo to npm
-          npm publish ./out/agmux --access public
+          for d in out/agmux-*; do npm publish "./$d" --access public --provenance; done # ./: a bare out/x is a GitHub user/repo to npm
+          npm publish ./out/agmux --access public --provenance
