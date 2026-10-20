@@ -31,6 +31,8 @@ type Session struct {
 	Subagents       []Subagent `json:"subagents"`
 	NativeSessionID string     `json:"nativeSessionId"`
 	LogPath         string     `json:"logPath"`
+	LastPrompt      string     `json:"lastPrompt"`
+	Prompts         []string   `json:"prompts"`
 	LastActivityAt  time.Time  `json:"lastActivityAt"`
 	StatusChangedAt time.Time  `json:"statusChangedAt"` // when Status last changed: a new done is a new time
 	UpdatedAt       time.Time  `json:"updatedAt"`

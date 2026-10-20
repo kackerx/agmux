@@ -33,6 +33,9 @@ func fixture(t *testing.T) []store.Session {
 	}
 	for i := range raw {
 		raw[i].LogPath = ""
+		if raw[i].TrackingMode == "background" {
+			raw[i].LastPrompt = "x" // without a transcript it would be taken for a daemon's spare process
+		}
 	}
 	p := &store.Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir()}
 	if err := p.Refresh(); err != nil {

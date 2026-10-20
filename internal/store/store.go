@@ -271,6 +271,14 @@ func (p *Poller) pinnedAt(key string) (t time.Time, ok bool) {
 	return t, ok
 }
 
+// spare is a warmed-up spare process of the claude daemon (ps: --bg-spare), which ccmux lists as a
+// background session: no transcript and no prompt. It is no session, and claude attach on it makes
+// the daemon claim it as a fork of the session in its directory. Only ccmux's fields tell it from a
+// claimed one, which has a transcript or a prompt and the same ps arguments.
+func spare(r ccmux.Session) bool {
+	return r.TrackingMode == "background" && r.LogPath == "" && r.LastPrompt == "" && len(r.Prompts) == 0
+}
+
 // Refresh polls ccmux once.
 func (p *Poller) Refresh() error {
 	p.refreshMu.Lock()
@@ -288,6 +296,7 @@ func (p *Poller) Refresh() error {
 	raw, err := p.Show()
 	var ss []Session
 	if err == nil {
+		raw = slices.DeleteFunc(raw, spare)
 		if p.Seen != nil { // a done ccmux has cleared (or a session that is gone) is not "seen" any more
 			attended := map[string]bool{}
 			for _, r := range raw {

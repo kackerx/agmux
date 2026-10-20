@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/kackerx/agmux/internal/ccmux"
@@ -38,10 +39,10 @@ func TestAttachPanes(t *testing.T) {
 func TestFillAttached(t *testing.T) {
 	asked, fail := 0, error(nil)
 	raw := []ccmux.Session{
-		{ID: "a7", TrackingMode: "background"},
-		{ID: "b2", TrackingMode: "background", TmuxPane: "%1"},
+		{ID: "a7", TrackingMode: "background", LastPrompt: "hi"},
+		{ID: "b2", TrackingMode: "background", LastPrompt: "hi", TmuxPane: "%1"},
 		{ID: "c3", TrackingMode: "native"},
-		{ID: "d4", TrackingMode: "background"},
+		{ID: "d4", TrackingMode: "background", LastPrompt: "hi"},
 	}
 	p := &Poller{Show: func() ([]ccmux.Session, error) { return raw, nil }, StateDir: t.TempDir(),
 		Panes: func() (string, error) {
@@ -78,5 +79,25 @@ func TestMainRepoRootConverted(t *testing.T) {
 	p := poller(t, []ccmux.Session{{ID: "a", MainRepoRoot: "/w/main"}})
 	if got := p.Sessions()[0].MainRepoRoot; got != "/w/main" {
 		t.Errorf("MainRepoRoot %q", got)
+	}
+}
+
+// A background record with no transcript and no prompt is a spare process of the claude daemon,
+// not a session; a record with a prompt or a transcript is one, and so is a native one without.
+func TestSpareProcessesAreNoSessions(t *testing.T) {
+	p := poller(t, []ccmux.Session{
+		{ID: "spare", TrackingMode: "background", Prompts: []string{}},
+		{ID: "new", TrackingMode: "background", LastPrompt: "hi"},
+		{ID: "listed", TrackingMode: "background", Prompts: []string{"hi"}},
+		{ID: "logged", TrackingMode: "background", LogPath: "/nope/x.jsonl"},
+		{ID: "native", TrackingMode: "native"},
+		{ID: "pane", TrackingMode: "pane"},
+	})
+	var got []string
+	for _, s := range p.Sessions() {
+		got = append(got, s.ID)
+	}
+	if want := []string{"new", "listed", "logged", "native", "pane"}; !slices.Equal(got, want) {
+		t.Errorf("sessions %v, want %v", got, want)
 	}
 }

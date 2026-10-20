@@ -132,7 +132,7 @@ func TestShowAgentColumn(t *testing.T) {
 	log := filepath.Join(dir, "s.jsonl")
 	os.WriteFile(log, []byte(`{"type":"agent-setting","agentSetting":"orchestrator"}`+"\n"), 0o644)
 	p := &store.Poller{StateDir: dir, Show: func() ([]ccmux.Session, error) {
-		return []ccmux.Session{{ID: "a", Summary: "one", LogPath: log}, {ID: "b", Summary: "two"}, {ID: "c", Summary: "three", TrackingMode: "background"}}, nil
+		return []ccmux.Session{{ID: "a", Summary: "one", LogPath: log}, {ID: "b", Summary: "two"}, {ID: "c", Summary: "three", TrackingMode: "background", LastPrompt: "x"}}, nil
 	}}
 	var out bytes.Buffer
 	if err := show(&out, p); err != nil {

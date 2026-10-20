@@ -30,6 +30,9 @@ func fixture(t *testing.T) []ccmux.Session {
 	}
 	for i := range raw {
 		raw[i].LogPath = "" // fixture points at real transcripts; keep the test hermetic
+		if raw[i].TrackingMode == "background" {
+			raw[i].LastPrompt = "x" // without a transcript it would be taken for a daemon's spare process
+		}
 	}
 	return raw
 }
