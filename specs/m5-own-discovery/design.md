@@ -54,3 +54,9 @@
 - T68 r / x / d 不走 ccmux。
 - T69 e2e 夹具从假 ccmux 二进制改成假 `$HOME/.claude/sessions` 目录 + 假 jobs（23 个文件要改，tester 的大头）。
 - T70 删 internal/ccmux、README 前置条件去掉 ccmux、CREDITS 保留对 ccmux 实现的致谢；ccmux 的 hook 脚本留在用户 settings.json 里由用户自己卸。
+
+## 7. dev 预读提出的点（2026-10-20，T67 定稿时要落实）
+- done 的来源：现在是 ccmux 的 attentionState（working→idle 且未在看那个 pane 时置 unread）。换登记后没有这个字段，done = status idle 且 statusUpdatedAt 新于 seen.json 里的已读记录（key 仍是 id + statusChangedAt → 改用 statusUpdatedAt）。这是最容易出行为差异的地方，T67 验收要单列：working→idle 变 done；预览 / 直通 / enter / m 之后变 idle；再次 working→idle 又 done；后台会话同样适用（ccmux 以前对后台从不置 unread，这是一个改善）。
+- 子代理在跑时登记是否 busy：T67 先在真机只读验（找一个正在跑子代理的会话对比）；不是就 stat `subagents/agent-*.jsonl` 的 mtime。
+- T65 的 spare() 和 ccmux.Session 的 LastPrompt / Prompts 随 T67 一起删；testdata/show.json 换成登记文件格式的夹具。
+- pid 存活检查：每 2 s 约 30 次 kill(pid,0) + 读 JSON，可忽略。
