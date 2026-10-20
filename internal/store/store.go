@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -72,13 +73,11 @@ type Poller struct {
 	AvatarBind    map[string]string // config.toml's [avatars.bind]
 	AvatarDefault string            // config.toml's [avatars] default; "" = hash
 
-	Seen     *avatar.FileBindings   // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
-	Now      func() time.Time       // nil = time.Now; tests set it
-	Pins     *avatar.FileBindings   // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
-	Baseline bool                   // the first poll takes the sessions that are idle and have no seen record as seen: not a done the board never saw happen (the board sets it, show does not)
-	Panes    func() (string, error) // tmux's pane listing (see TmuxPanes), for the panes of the sessions: their tmux session, and where background sessions are attached; nil = none
+	Seen  *avatar.FileBindings   // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
+	Now   func() time.Time       // nil = time.Now; tests set it
+	Pins  *avatar.FileBindings   // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
+	Panes func() (string, error) // tmux's pane listing (see TmuxPanes), for the panes of the sessions: their tmux session, and where background sessions are attached; nil = none
 
-	baselined  bool                  // Baseline is done
 	refreshMu  sync.Mutex            // serializes Refresh; guards models
 	pinGone    map[string]time.Time  // pinned name → when no session had it any more (see prunePins)
 	models     map[string]string     // session ID → last model found in its jsonl
@@ -86,6 +85,7 @@ type Poller struct {
 	titleBytes int64                 // and the bytes they read
 	titleScans int                   // transcripts scanned for a title, the tests count them
 	titles     map[string]titleState // session ID → its custom title and how far its transcript was scanned for one
+	worked     map[string]bool       // session ID → seen not idle by this poller: only such a session can be done
 	repos      map[string]repoInfo   // cwd → what git says of it, asked once
 
 	avatarErr, seenErr, pinsErr error // avatars.json / seen.json / pins.json could not be read, as of the last poll or bind
@@ -300,11 +300,16 @@ func (p *Poller) Refresh() error {
 	}
 	var ss []Session
 	if err == nil {
+		live := map[string]bool{}
+		if p.worked == nil {
+			p.worked = map[string]bool{}
+		}
+		for _, r := range raw {
+			live[r.ID] = true
+			p.worked[r.ID] = p.worked[r.ID] || r.Status != "idle"
+		}
+		maps.DeleteFunc(p.worked, func(id string, _ bool) bool { return !live[id] })
 		if p.Seen != nil { // a session that is gone is not "seen" any more
-			live := map[string]bool{}
-			for _, r := range raw {
-				live[r.ID] = true
-			}
 			if perr := p.Seen.Prune(func(id string) bool { return live[id] }); serr == nil {
 				serr = perr
 			}
@@ -315,12 +320,6 @@ func (p *Poller) Refresh() error {
 			ss[i] = p.convert(r, pl)
 		}
 		fillPanes(ss, pl)
-		if p.Baseline && !p.baselined {
-			p.baselined = true
-			if e := p.baseline(ss); serr == nil {
-				serr = e
-			}
-		}
 		if p.Pins != nil {
 			if e := p.prunePins(ss); perr == nil {
 				perr = e
@@ -375,7 +374,7 @@ func (p *Poller) convert(r Raw, pl paneListing) Session {
 	}
 	s.Name = p.name(r, pl, tail, s.Project)
 	s.StatusChangedAt = r.StatusChangedAt
-	s.Done = s.Status == "idle" && !r.StatusChangedAt.IsZero() && !p.seen(r)
+	s.Done = s.Status == "idle" && p.worked[r.ID] && !r.StatusChangedAt.IsZero() && !p.seen(r)
 	s.PinnedAt, s.Pinned = p.pinnedAt(s.AvatarKey())
 	s.AvatarState = avatarState(s)
 	s.GroupKey = groupKey(s)
@@ -404,30 +403,6 @@ func (p *Poller) convert(r Raw, pl paneListing) Session {
 		s.Model = hudModel
 	}
 	return s
-}
-
-// baseline marks as seen every done session (idle) that seen.json has no record of, so that the
-// first board of a machine does not show everything idle as done: a done is what is seen happening
-// from here on. A session with an older record is left: it worked and finished since the user saw it.
-func (p *Poller) baseline(ss []Session) error {
-	if p.Seen == nil {
-		return nil
-	}
-	var err error
-	for i := range ss {
-		if _, ok := p.Seen.Get(ss[i].ID); !ss[i].Done || ok {
-			continue
-		}
-		if err = p.Seen.Set(ss[i].ID, seenKey(ss[i].StatusChangedAt)); err != nil {
-			break
-		}
-		ss[i].Done = false
-		ss[i].AvatarState = avatarState(ss[i])
-	}
-	if rerr := p.Seen.Reload(); err == nil {
-		err = rerr
-	}
-	return err
 }
 
 // name is what the card is called: the name the user (or a peer) gave it in the register, else the

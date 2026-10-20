@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-// branchIn is the gitBranch of the last entry of the tail that has one.
+// branchIn is the gitBranch of the last entry of the tail that has one; "HEAD" is what Claude Code
+// writes on a detached HEAD, which is no branch: the one before it, if there is.
 func branchIn(lines [][]byte) string {
 	for i := len(lines) - 1; i >= 0; i-- {
 		if !bytes.Contains(lines[i], []byte(`"gitBranch"`)) {
@@ -17,7 +18,7 @@ func branchIn(lines [][]byte) string {
 		var e struct {
 			GitBranch string `json:"gitBranch"`
 		}
-		if json.Unmarshal(lines[i], &e) == nil && e.GitBranch != "" {
+		if json.Unmarshal(lines[i], &e) == nil && e.GitBranch != "" && e.GitBranch != "HEAD" {
 			return e.GitBranch
 		}
 	}
@@ -70,6 +71,11 @@ func pendingIn(lines [][]byte) string {
 
 type repoInfo struct{ project, root string }
 
+// gitCommonDir asks git for the absolute path of the repo's .git of a directory; the tests count the calls.
+var gitCommonDir = func(cwd string) ([]byte, error) {
+	return exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+}
+
 // repo is the project and the main repo root of a directory: git's common dir is the main repo's
 // .git, also from a worktree; outside git the project is the directory's name and there is no
 // root. Asked once per directory (the answer is kept until the board restarts).
@@ -81,7 +87,7 @@ func (p *Poller) repo(cwd string) (project, root string) {
 		return r.project, r.root
 	}
 	r := repoInfo{project: filepath.Base(cwd)}
-	if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
+	if out, err := gitCommonDir(cwd); err == nil {
 		if common := strings.TrimSpace(string(out)); common != "" {
 			r.root = filepath.Dir(common)
 			r.project = filepath.Base(r.root)

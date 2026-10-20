@@ -57,8 +57,8 @@ func rawsByID(t *testing.T, c *Claude) map[string]Raw {
 func TestClaudeDiscovery(t *testing.T) {
 	c := claudeDir(t, map[string]string{
 		"1.json":       reg(1, ""),
-		"2.json":       reg(2, `,"procStart":"Tue Oct  6 07:34:09 2026"`), // ps pads the day, the register may not
-		"3.json":       reg(3, `,"procStart":"Mon Jan 1 00:00:00 2024"`),  // pid reused
+		"2.json":       reg(2, `,"procStart":"Tue Oct 6 07:34:09 2026"`), // the register does not pad the day, ps does (below)
+		"3.json":       reg(3, `,"procStart":"Mon Jan 1 00:00:00 2024"`), // pid reused
 		"4.json":       reg(4, `,"spare":true`),
 		"999.json":     reg(999, ""), // dead
 		"5.json":       `{"pid":5,"sessionId":`,
@@ -208,6 +208,9 @@ func TestPsStarts(t *testing.T) {
 	if !alive(os.Getpid()) || alive(99998) {
 		t.Error("alive")
 	}
+	if !alive(1) { // launchd / init: ours to see, not to signal (EPERM) — and there
+		t.Error("a process of someone else is alive")
+	}
 }
 
 // The name is the register's, else the title the session was given (the transcript's custom-title), else the project; the pane's session is tmux's.
@@ -268,6 +271,14 @@ func TestBranchIn(t *testing.T) {
 	lines := [][]byte{[]byte(`{"gitBranch":"old"}`), []byte(`{"type":"user"}`), []byte(`{"gitBranch":"feat/x","message":"gitBranch"}`), []byte(`{"type":"x"}`)}
 	if got := branchIn(lines); got != "feat/x" {
 		t.Errorf("%q", got)
+	}
+	// a detached HEAD is "HEAD": the branch before it, or none
+	detached := append(lines[:3:3], []byte(`{"gitBranch":"HEAD"}`))
+	if got := branchIn(detached); got != "feat/x" {
+		t.Errorf("after a detach: %q", got)
+	}
+	if got := branchIn([][]byte{[]byte(`{"gitBranch":"HEAD"}`), []byte(`{"gitBranch":"HEAD"}`)}); got != "" {
+		t.Errorf("only HEAD: %q", got)
 	}
 	if got := branchIn(lines[1:2]); got != "" {
 		t.Errorf("none: %q", got)
@@ -330,6 +341,21 @@ func TestRepo(t *testing.T) {
 	}
 	if !reflect.DeepEqual(len(p.repos), 4) {
 		t.Errorf("asked once per directory: %d kept", len(p.repos))
+	}
+	// asked once per directory: the second time git is not run
+	defer func(f func(string) ([]byte, error)) { gitCommonDir = f }(gitCommonDir)
+	calls := 0
+	gitCommonDir = func(cwd string) ([]byte, error) { calls++; return nil, fmt.Errorf("no git") }
+	for i := 0; i < 3; i++ {
+		if project, root := p.repo(main); project != "shopcart" || root != main {
+			t.Errorf("a cached directory: %q %q", project, root)
+		}
+		if project, _ := p.repo(filepath.Join(dir, "other")); project != "other" {
+			t.Errorf("a new directory without git: %q", project)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("git ran %d times for one new directory and one known", calls)
 	}
 }
 

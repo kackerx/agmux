@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -29,6 +30,22 @@ func fixture(t *testing.T) []Raw {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+// settle polls with every session working, then as they are: only a session this poller saw working can be done.
+func settle(t *testing.T, raw []Raw, p *Poller) {
+	t.Helper()
+	was := slices.Clone(raw)
+	for i := range raw {
+		raw[i].Status = "working"
+	}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	copy(raw, was)
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func poller(t *testing.T, raw []Raw) *Poller {
@@ -53,7 +70,9 @@ func byID(t *testing.T, ss []Session, id string) Session {
 
 func TestFixture(t *testing.T) {
 	raw := fixture(t)
-	ss := poller(t, raw).Sessions()
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
+	settle(t, raw, p)
+	ss := p.Sessions()
 	if len(ss) != len(raw) || len(ss) == 0 {
 		t.Fatalf("got %d sessions, want %d", len(ss), len(raw))
 	}
@@ -206,14 +225,25 @@ func TestStatusAndDone(t *testing.T) {
 	raw := []Raw{
 		{ID: "idle", Status: "idle", StatusChangedAt: at},
 		{ID: "idle, no time", Status: "idle"},
+		{ID: "idle, never seen working", Status: "idle", StatusChangedAt: at},
 		{ID: "working", Status: "working", StatusChangedAt: at},
 		{ID: "waiting", Status: "waiting", StatusChangedAt: at},
 	}
 	want := map[string]struct {
 		status string
 		done   bool
-	}{"idle": {"idle", true}, "idle, no time": {"idle", false}, "working": {"working", false}, "waiting": {"waiting", false}}
-	for _, s := range poller(t, raw).Sessions() {
+	}{"idle": {"idle", true}, "idle, no time": {"idle", false}, "idle, never seen working": {"idle", false}, "working": {"working", false}, "waiting": {"waiting", false}}
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
+	was := slices.Clone(raw)
+	for i := range raw {
+		if raw[i].ID != "idle, never seen working" {
+			raw[i].Status = "working"
+		}
+	}
+	p.Refresh()
+	copy(raw, was)
+	p.Refresh()
+	for _, s := range p.Sessions() {
 		w := want[s.ID]
 		if s.Status != w.status || s.Done != w.done || s.AgentsWorking {
 			t.Errorf("%s: status %s done %v agents %v, want %s %v", s.ID, s.Status, s.Done, s.AgentsWorking, w.status, w.done)
@@ -415,10 +445,9 @@ func TestAvatarState(t *testing.T) {
 		{"background", Raw{Status: "background"}, "idle"},
 	} {
 		c.r.ID = "id"
-		p := &Poller{StateDir: t.TempDir(), Sources: []Source{SourceFunc(func() ([]Raw, error) { return []Raw{c.r}, nil })}}
-		if err := p.Refresh(); err != nil {
-			t.Fatal(err)
-		}
+		raw := []Raw{c.r}
+		p := &Poller{StateDir: t.TempDir(), Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}}
+		settle(t, raw, p)
 		if got := p.Sessions()[0].AvatarState; got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
@@ -554,9 +583,7 @@ func seenPoller(t *testing.T, raw *[]Raw) (*Poller, string) {
 	path := filepath.Join(t.TempDir(), "seen.json")
 	seen, _ := avatar.LoadBindings(path)
 	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return *raw, nil })}, StateDir: t.TempDir(), Seen: seen}
-	if err := p.Refresh(); err != nil {
-		t.Fatal(err)
-	}
+	settle(t, *raw, p)
 	return p, path
 }
 
@@ -938,51 +965,42 @@ func TestNameLevels(t *testing.T) {
 	}
 }
 
-// With Baseline the first poll takes the idle sessions with no seen record as seen (and writes seen.json);
-// a later poll does not: a session that finishes after that is done. A record that is there is left alone.
-func TestBaseline(t *testing.T) {
-	t1 := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
-	raw := []Raw{
-		{ID: "idle", Status: "idle", StatusChangedAt: t1},
-		{ID: "old", Status: "idle", StatusChangedAt: t1},
-		{ID: "work", Status: "working", StatusChangedAt: t1},
-		{ID: "late", Status: "working", StatusChangedAt: t1},
+// A session is done only after this poller saw it work: one that is idle when the board starts, new, cleared into
+// a new ID or restarted is not; one that works and stops is; one that goes and comes back idle is not.
+func TestDoneNeedsAWorkingSession(t *testing.T) {
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	raw := []Raw{{ID: "a", Status: "idle", StatusChangedAt: at}, {ID: "b", Status: "idle", StatusChangedAt: at}}
+	p := poller(t, raw)
+	done := func() bool { p.Refresh(); return byID(t, p.Sessions(), "a").Done }
+	if p.Sessions()[0].Done {
+		t.Error("idle from the start")
 	}
-	path := filepath.Join(t.TempDir(), "seen.json")
-	seen, _ := avatar.LoadBindings(path)
-	seen.Set("old", seenKey(t1.Add(-time.Hour))) // seen once, finished again since
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(), Seen: seen, Baseline: true}
-	if err := p.Refresh(); err != nil {
-		t.Fatal(err)
+	raw[0].Status = "working"
+	if done() {
+		t.Error("working")
 	}
-	for id, done := range map[string]bool{"idle": false, "old": true, "work": false, "late": false} {
-		if byID(t, p.Sessions(), id).Done != done {
-			t.Errorf("first poll: %s done %v, want %v", id, !done, done)
-		}
+	raw[0].Status, raw[0].StatusChangedAt = "idle", at.Add(time.Minute)
+	if !done() {
+		t.Error("worked and stopped")
 	}
-	if got := seenFile(t, path); !strings.Contains(got, `"idle":"2026-10-20T12:00:00Z"`) || strings.Contains(got, `"work"`) || !strings.Contains(got, `"old":"2026-10-20T11:00:00Z"`) {
-		t.Errorf("seen.json %s", got)
+	raw[0].Status = "waiting"
+	done()
+	raw[0].Status, raw[0].StatusChangedAt = "idle", at.Add(2*time.Minute)
+	if !done() {
+		t.Error("waited and stopped")
 	}
-	raw[3].Status, raw[3].StatusChangedAt = "idle", t1.Add(time.Minute) // finishes after the baseline
-	raw = append(raw, Raw{ID: "new", Status: "idle", StatusChangedAt: t1})
+	raw[1].Status = "waiting" // b only waits
 	p.Refresh()
-	if !byID(t, p.Sessions(), "late").Done || !byID(t, p.Sessions(), "new").Done {
-		t.Error("what is idle after the first poll is done")
+	raw[1].Status, raw[1].StatusChangedAt = "idle", at.Add(time.Minute)
+	p.Refresh()
+	if !byID(t, p.Sessions(), "b").Done {
+		t.Error("only waited, and stopped")
 	}
-	// without Baseline (agmux show): nothing is written
-	path2 := filepath.Join(t.TempDir(), "seen.json")
-	seen2, _ := avatar.LoadBindings(path2)
-	p2 := &Poller{Sources: p.Sources, StateDir: t.TempDir(), Seen: seen2}
-	p2.Refresh()
-	if !byID(t, p2.Sessions(), "idle").Done || seenFile(t, path2) != "" {
-		t.Error("no Baseline, no baseline")
-	}
-	// a poll that failed is not the first one
-	p3 := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}, StateDir: t.TempDir(), Seen: seen2, Baseline: true}
-	p3.Refresh()
-	p3.Sources = p.Sources
-	p3.Refresh()
-	if byID(t, p3.Sessions(), "idle").Done || !strings.Contains(seenFile(t, path2), `"idle"`) {
-		t.Error("the first good poll is the baseline")
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return nil, nil })}
+	p.Refresh()
+	raw[0].Status = "idle" // as it was when it went
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}
+	if done() {
+		t.Error("gone and back idle: not seen working by this run")
 	}
 }

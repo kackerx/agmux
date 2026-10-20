@@ -200,7 +200,7 @@ func psStarts(pids []int) (map[int]string, error) {
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC") // the register's procStart is in English and UTC, as ps prints it so
 	out, err := cmd.Output()
 	var ee *exec.ExitError
-	if err != nil && !errors.As(err, &ee) { // ps exits 1 when some pid is gone, and still prints the others
+	if err != nil && !errors.As(err, &ee) { // ps exits 1 when none of the pids is there (with one it exits 0), with nothing printed
 		return nil, err
 	}
 	m := map[int]string{}

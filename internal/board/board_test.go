@@ -6,6 +6,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,14 @@ func fixture(t *testing.T) []store.Session {
 		t.Fatal(err)
 	}
 	p := &store.Poller{Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
+	was := slices.Clone(raw) // a session is done only after the poller saw it work
+	for i := range raw {
+		raw[i].Status = "working"
+	}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	copy(raw, was)
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
