@@ -896,3 +896,93 @@ func TestTogglePinByName(t *testing.T) {
 		t.Errorf("same name pinned together, the other left alone: %+v", p.Sessions())
 	}
 }
+
+func TestPaneSummary(t *testing.T) {
+	for in, want := range map[string]string{
+		"✳ Send接口卡片模板映射": "Send接口卡片模板映射", "⠂ Fix the build": "Fix the build", "⠐Fix": "Fix", "✳  ⠂ x": "x",
+		"Claude Code": "", "✳ Claude Code": "", "⠂ Claude Code": "", "": "", "  ": "", "✳": "", "plain title": "plain title",
+		"my-host.local": "my-host.local",
+	} {
+		if got := paneSummary(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The name of a card: the register's name when the user or a peer gave it, else the title the session was given,
+// else the summary in its pane's title, else the name Claude made up, else the project.
+func TestNameLevels(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "s.jsonl")
+	os.WriteFile(log, []byte(`{"type":"custom-title","customTitle":"titled"}`+"\n"), 0o644)
+	panes := "%1\ts\t0\tclaude\t✳ From the pane\n%2\ts\t0\tclaude\t⠂ Claude Code\n%3\ts\t0\tclaude\t⠂ Working title\n"
+	raw := []Raw{
+		{ID: "user", Name: "given", Pane: "%1", Transcript: log, Project: "proj"},                       // 1
+		{ID: "title", Name: "made-up", NameDerived: true, Pane: "%1", Transcript: log, Project: "proj"}, // 2 beats 3, 4
+		{ID: "pane", Name: "made-up", NameDerived: true, Pane: "%1", Project: "proj"},                   // 3 beats 4
+		{ID: "pane-spinner", Name: "made-up", NameDerived: true, Pane: "%3", Project: "proj"},           // the braille mark is stripped
+		{ID: "derived", Name: "made-up", NameDerived: true, Pane: "%2", Project: "proj"},                // "Claude Code" is no summary
+		{ID: "derived-nopane", Name: "made-up", NameDerived: true, Project: "proj"},                     // 4
+		{ID: "pane-nameless", Pane: "%1", Project: "proj"},                                              // no name at all: the pane's
+		{ID: "project", Project: "proj"},                                                                // 5
+	}
+	p := &Poller{StateDir: t.TempDir(), Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, Panes: func() (string, error) { return panes, nil }}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"user": "given", "title": "titled", "pane": "From the pane", "pane-spinner": "Working title", "derived": "made-up", "derived-nopane": "made-up", "pane-nameless": "From the pane", "project": "proj"}
+	for _, s := range p.Sessions() {
+		if s.Name != want[s.ID] {
+			t.Errorf("%s: %q, want %q", s.ID, s.Name, want[s.ID])
+		}
+	}
+}
+
+// With Baseline the first poll takes the idle sessions with no seen record as seen (and writes seen.json);
+// a later poll does not: a session that finishes after that is done. A record that is there is left alone.
+func TestBaseline(t *testing.T) {
+	t1 := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	raw := []Raw{
+		{ID: "idle", Status: "idle", StatusChangedAt: t1},
+		{ID: "old", Status: "idle", StatusChangedAt: t1},
+		{ID: "work", Status: "working", StatusChangedAt: t1},
+		{ID: "late", Status: "working", StatusChangedAt: t1},
+	}
+	path := filepath.Join(t.TempDir(), "seen.json")
+	seen, _ := avatar.LoadBindings(path)
+	seen.Set("old", seenKey(t1.Add(-time.Hour))) // seen once, finished again since
+	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(), Seen: seen, Baseline: true}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	for id, done := range map[string]bool{"idle": false, "old": true, "work": false, "late": false} {
+		if byID(t, p.Sessions(), id).Done != done {
+			t.Errorf("first poll: %s done %v, want %v", id, !done, done)
+		}
+	}
+	if got := seenFile(t, path); !strings.Contains(got, `"idle":"2026-10-20T12:00:00Z"`) || strings.Contains(got, `"work"`) || !strings.Contains(got, `"old":"2026-10-20T11:00:00Z"`) {
+		t.Errorf("seen.json %s", got)
+	}
+	raw[3].Status, raw[3].StatusChangedAt = "idle", t1.Add(time.Minute) // finishes after the baseline
+	raw = append(raw, Raw{ID: "new", Status: "idle", StatusChangedAt: t1})
+	p.Refresh()
+	if !byID(t, p.Sessions(), "late").Done || !byID(t, p.Sessions(), "new").Done {
+		t.Error("what is idle after the first poll is done")
+	}
+	// without Baseline (agmux show): nothing is written
+	path2 := filepath.Join(t.TempDir(), "seen.json")
+	seen2, _ := avatar.LoadBindings(path2)
+	p2 := &Poller{Sources: p.Sources, StateDir: t.TempDir(), Seen: seen2}
+	p2.Refresh()
+	if !byID(t, p2.Sessions(), "idle").Done || seenFile(t, path2) != "" {
+		t.Error("no Baseline, no baseline")
+	}
+	// a poll that failed is not the first one
+	p3 := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}, StateDir: t.TempDir(), Seen: seen2, Baseline: true}
+	p3.Refresh()
+	p3.Sources = p.Sources
+	p3.Refresh()
+	if byID(t, p3.Sessions(), "idle").Done || !strings.Contains(seenFile(t, path2), `"idle"`) {
+		t.Error("the first good poll is the baseline")
+	}
+}

@@ -112,11 +112,11 @@ func TestClaudeStatusMapping(t *testing.T) {
 
 func TestTmuxField(t *testing.T) {
 	for in, want := range map[string][2]string{
-		"agmux # main:@14.%37":              {"%37", "agmux # main"}, // a session may be named with " # ", spaces, ":" and "/"
+		"agmux # main:@14.%37":              {"%37", "agmux"}, // short: up to the first " # "; a session may be named with spaces, ":" and "/" too
 		"8:@14.%38":                         {"%38", "8"},
-		"my:proj # build/api:@3.%10":        {"%10", "my:proj # build/api"},
+		"my:proj # build/api:@3.%10":        {"%10", "my:proj"},
 		"my session:@3.%10":                 {"%10", "my session"},
-		"doraemon-dsl # feature/x-y:@7.%10": {"%10", "doraemon-dsl # feature/x-y"},
+		"doraemon-dsl # feature/x-y:@7.%10": {"%10", "doraemon-dsl"},
 		"":                                  {"", ""},
 		"no pane here":                      {"", ""},
 	} {

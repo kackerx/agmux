@@ -244,6 +244,7 @@ func runBoard(stay bool) error {
 		return err
 	}
 	p.AvatarBind, p.AvatarDefault = cfg.AvatarBind, cfg.AvatarDefault
+	p.Baseline = true              // a done is what happens from now on, not what was idle already
 	img := board.DetectImages(cfg) // before the first poll: it decides what a hash may pick
 	if err := p.Refresh(); err != nil {
 		return err

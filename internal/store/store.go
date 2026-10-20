@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/ccmux"
@@ -71,11 +72,13 @@ type Poller struct {
 	AvatarBind    map[string]string // config.toml's [avatars.bind]
 	AvatarDefault string            // config.toml's [avatars] default; "" = hash
 
-	Seen  *avatar.FileBindings   // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
-	Now   func() time.Time       // nil = time.Now; tests set it
-	Pins  *avatar.FileBindings   // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
-	Panes func() (string, error) // tmux's pane listing (see TmuxPanes), for the panes of the sessions: their tmux session, and where background sessions are attached; nil = none
+	Seen     *avatar.FileBindings   // seen.json: session ID → seenKey of the done the board showed it at; nil = nothing is seen
+	Now      func() time.Time       // nil = time.Now; tests set it
+	Pins     *avatar.FileBindings   // pins.json: session name (AvatarKey) → when it was pinned (RFC 3339); nil = nothing is pinned
+	Baseline bool                   // the first poll takes the sessions that are idle and have no seen record as seen: not a done the board never saw happen (the board sets it, show does not)
+	Panes    func() (string, error) // tmux's pane listing (see TmuxPanes), for the panes of the sessions: their tmux session, and where background sessions are attached; nil = none
 
+	baselined  bool                  // Baseline is done
 	refreshMu  sync.Mutex            // serializes Refresh; guards models
 	pinGone    map[string]time.Time  // pinned name → when no session had it any more (see prunePins)
 	models     map[string]string     // session ID → last model found in its jsonl
@@ -307,10 +310,17 @@ func (p *Poller) Refresh() error {
 			}
 		}
 		ss = make([]Session, len(raw))
+		pl := p.paneListing(raw)
 		for i, r := range raw {
-			ss[i] = p.convert(r)
+			ss[i] = p.convert(r, pl)
 		}
-		p.fillPanes(ss)
+		fillPanes(ss, pl)
+		if p.Baseline && !p.baselined {
+			p.baselined = true
+			if e := p.baseline(ss); serr == nil {
+				serr = e
+			}
+		}
 		if p.Pins != nil {
 			if e := p.prunePins(ss); perr == nil {
 				perr = e
@@ -340,9 +350,9 @@ func (p *Poller) Run(ctx context.Context) {
 	}
 }
 
-func (p *Poller) convert(r Raw) Session {
+func (p *Poller) convert(r Raw, pl paneListing) Session {
 	s := Session{
-		ID: r.ID, Name: r.Name, AgentType: r.AgentType, CWD: r.CWD, Branch: r.Branch,
+		ID: r.ID, AgentType: r.AgentType, CWD: r.CWD, Branch: r.Branch,
 		Status: r.Status, Attention: r.Attention, PendingTool: r.PendingTool, TmuxPane: r.Pane,
 		ContextPct: -1, LastActivity: r.LastActivity, Project: r.Project, MainRepoRoot: r.MainRepoRoot,
 		TmuxSession: r.TmuxSession, Background: r.Background,
@@ -363,14 +373,7 @@ func (p *Poller) convert(r Raw) Session {
 	if s.Status == "waiting" && s.PendingTool == "ExitPlanMode" { // a plan to approve, not a question
 		s.Attention = "plan_approval"
 	}
-	if (s.Name == "" || r.NameDerived) && r.Transcript != "" { // the title it was given (the name it was started with)
-		if t := p.title(r.ID, r.Transcript, tail); t != "" {
-			s.Name = t
-		}
-	}
-	if s.Name == "" {
-		s.Name = s.Project
-	}
+	s.Name = p.name(r, pl, tail, s.Project)
 	s.StatusChangedAt = r.StatusChangedAt
 	s.Done = s.Status == "idle" && !r.StatusChangedAt.IsZero() && !p.seen(r)
 	s.PinnedAt, s.Pinned = p.pinnedAt(s.AvatarKey())
@@ -401,6 +404,61 @@ func (p *Poller) convert(r Raw) Session {
 		s.Model = hudModel
 	}
 	return s
+}
+
+// baseline marks as seen every done session (idle) that seen.json has no record of, so that the
+// first board of a machine does not show everything idle as done: a done is what is seen happening
+// from here on. A session with an older record is left: it worked and finished since the user saw it.
+func (p *Poller) baseline(ss []Session) error {
+	if p.Seen == nil {
+		return nil
+	}
+	var err error
+	for i := range ss {
+		if _, ok := p.Seen.Get(ss[i].ID); !ss[i].Done || ok {
+			continue
+		}
+		if err = p.Seen.Set(ss[i].ID, seenKey(ss[i].StatusChangedAt)); err != nil {
+			break
+		}
+		ss[i].Done = false
+		ss[i].AvatarState = avatarState(ss[i])
+	}
+	if rerr := p.Seen.Reload(); err == nil {
+		err = rerr
+	}
+	return err
+}
+
+// name is what the card is called: the name the user (or a peer) gave it in the register, else the
+// title the session was given (the last custom-title of the transcript), else the summary in its
+// pane's title (the text after Claude Code's spinner), else the name Claude made up for it, else the project.
+func (p *Poller) name(r Raw, pl paneListing, tail [][]byte, project string) string {
+	if r.Name != "" && !r.NameDerived {
+		return r.Name
+	}
+	if r.Transcript != "" {
+		if t := p.title(r.ID, r.Transcript, tail); t != "" {
+			return t
+		}
+	}
+	if t := paneSummary(pl.title[r.Pane]); t != "" {
+		return t
+	}
+	if r.Name != "" {
+		return r.Name
+	}
+	return project
+}
+
+// paneSummary is a pane title without Claude Code's status mark in front (✳ idle, a braille spinner
+// working); "Claude Code", which it is before the session has a summary, is none.
+func paneSummary(title string) string {
+	t := strings.TrimSpace(strings.TrimLeftFunc(strings.TrimSpace(title), func(r rune) bool { return r == '✳' || r >= 0x2800 && r <= 0x28FF || unicode.IsSpace(r) }))
+	if t == "Claude Code" {
+		return ""
+	}
+	return t
 }
 
 // seen: the user already saw this very done on the board.

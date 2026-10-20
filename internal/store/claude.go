@@ -113,8 +113,8 @@ func (c *Claude) raw(e entry) Raw {
 }
 
 // tmuxField reads the register's tmux field, "<session name>:<window id>.<pane id>" ("agmux # main:@14.%37":
-// the session is named "agmux # main"): the pane and the session. The session is as it was when
-// the process started; the Poller asks tmux for the one the pane is in now.
+// the session is named "agmux # main"): the pane and the session, short. The session is as it was
+// when the process started; the Poller asks tmux for the one the pane is in now.
 func tmuxField(s string) (pane, session string) {
 	i := strings.LastIndex(s, ".%")
 	if i < 0 {
@@ -124,7 +124,7 @@ func tmuxField(s string) (pane, session string) {
 	if j := strings.LastIndex(s, ":@"); j >= 0 {
 		s = s[:j]
 	}
-	return pane, s
+	return pane, shortSession(s)
 }
 
 // jobState reads what the daemon keeps of a background job, as ccmux does: tempo blocked is
