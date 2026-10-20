@@ -496,3 +496,5 @@
 - 定稿：release.yml 的 npm job 加 `permissions: id-token: write`（contents: read 保留给 gh release download），删掉 `NODE_AUTH_TOKEN` / `secrets.NPM_TOKEN`；setup-node 用 node 24（自带 npm ≥ 11.5，OIDC 需要）；`npm publish` 加 `--provenance`（可选但顺手）。其它不动。README 不用改。
 - 用户要做的（代码之外，发下一个版本前）：npmjs.com 上五个包各自 Settings → Trusted Publisher → GitHub Actions：Organization or user `kackerx`、Repository `agmux`、Workflow filename `release.yml`、Environment 留空。配完可以删掉所有 npm token 和仓库 secret NPM_TOKEN。
 - 验收：actionlint；yaml 解析；本地无法验 OIDC，真验收 = 下一个 tag 的 npm job 绿。reviewer 核对字段与 npm 官方文档一致。
+- dev 11fd25f（T65）：Refresh 里 spare() 过滤（background + 无 logPath + 无 lastPrompt + 无 prompts），show 同路径；ccmux.Session 加 LastPrompt / Prompts；旧夹具补 lastPrompt；TestSpareProcessesAreNoSessions 变异 5 杀 5；README 一句。
+- dev 12591e6（T66）：npm job permissions contents: read + id-token: write；node 24；删 NODE_AUTH_TOKEN / NPM_TOKEN；--provenance（官方说 OIDC 默认带，多余无害）。官方文档要点：npm ≥ 11.5.1；repository.url 须与仓库一致（我们是简写 github:kackerx/agmux，首次 OIDC 发布最可能的失败点，报错就改完整 URL）；Trusted Publisher 配置 **2 天内不发布会过期**，用户要在打下一个 tag 前再配；只支持 GitHub 托管 runner。第十三批目标 12591e6，送 reviewer。
