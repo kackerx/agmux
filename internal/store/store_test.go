@@ -966,6 +966,40 @@ func TestNameLevels(t *testing.T) {
 	}
 }
 
+// A short answer between two polls (idle, busy, idle) is seen in the time of the status: later than when the
+// session was first seen, it worked; the same, it did not.
+func TestDoneFromTheStatusTime(t *testing.T) {
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	raw := []Raw{{ID: "a", Status: "idle", StatusChangedAt: at}, {ID: "b", Status: "idle", StatusChangedAt: at}}
+	p := poller(t, raw)
+	if byID(t, p.Sessions(), "a").Done || byID(t, p.Sessions(), "b").Done {
+		t.Fatal("idle when first seen")
+	}
+	raw[0].StatusChangedAt = at.Add(30 * time.Second) // idle at both polls, worked in between
+	p.Refresh()
+	if !byID(t, p.Sessions(), "a").Done || byID(t, p.Sessions(), "b").Done {
+		t.Errorf("a changed, b did not: %v %v", byID(t, p.Sessions(), "a").Done, byID(t, p.Sessions(), "b").Done)
+	}
+	raw[1].StatusChangedAt = at.Add(-time.Hour) // a time before the first is no work
+	p.Refresh()
+	if byID(t, p.Sessions(), "b").Done {
+		t.Error("an older time")
+	}
+	raw[0].StatusChangedAt = at.Add(time.Hour) // and again: it stays one it worked
+	p.Refresh()
+	if !byID(t, p.Sessions(), "a").Done {
+		t.Error("a second change")
+	}
+	raw = raw[1:] // gone, back at an older time than the first: first seen anew
+	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}
+	p.Refresh()
+	raw = append(raw, Raw{ID: "a", Status: "idle", StatusChangedAt: at.Add(2 * time.Hour)})
+	p.Refresh()
+	if byID(t, p.Sessions(), "a").Done {
+		t.Error("a that went and came back is first seen at its new time")
+	}
+}
+
 // A session is done only after this poller saw it work: one that is idle when the board starts, new, cleared into
 // a new ID or restarted is not; one that works and stops is; one that goes and comes back idle is not.
 func TestDoneNeedsAWorkingSession(t *testing.T) {

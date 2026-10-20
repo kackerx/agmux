@@ -97,7 +97,8 @@ type Poller struct {
 	titleBytes int64                 // and the bytes they read
 	titleScans int                   // transcripts scanned for a title, the tests count them
 	titles     map[string]titleState // session ID → its custom title and how far its transcript was scanned for one
-	worked     map[string]bool       // session ID → seen not idle by this poller: only such a session can be done
+	worked     map[string]bool       // session ID → seen not idle by this poller, or its status changed since: only such a session can be done
+	firstAt    map[string]time.Time  // session ID → its StatusChangedAt when this poller first saw it
 	repos      map[string]repoInfo   // cwd → what git says of it, asked once
 	branches   map[string]branchInfo // cwd → the branch git said, and when
 
@@ -360,11 +361,19 @@ func (p *Poller) Refresh() error {
 		if p.worked == nil {
 			p.worked = map[string]bool{}
 		}
+		if p.firstAt == nil {
+			p.firstAt = map[string]time.Time{}
+		}
 		for _, r := range raw {
 			live[r.ID] = true
-			p.worked[r.ID] = p.worked[r.ID] || r.Status != "idle"
+			if _, ok := p.firstAt[r.ID]; !ok {
+				p.firstAt[r.ID] = r.StatusChangedAt
+			}
+			// worked: seen busy, or its status changed since it was first seen (a short answer between two polls)
+			p.worked[r.ID] = p.worked[r.ID] || r.Status != "idle" || r.StatusChangedAt.After(p.firstAt[r.ID])
 		}
 		maps.DeleteFunc(p.worked, func(id string, _ bool) bool { return !live[id] })
+		maps.DeleteFunc(p.firstAt, func(id string, _ time.Time) bool { return !live[id] })
 		if p.Seen != nil { // a session that is gone is not "seen" any more
 			if perr := p.Seen.Prune(func(id string) bool { return live[id] }); serr == nil {
 				serr = perr
