@@ -530,3 +530,8 @@
 - 背景（agent-builder 实测 2.1.301）：/clear、裸 resume 之后新 jsonl 没有 agent-setting 行，进程参数也看不到角色，handoff 每次交接都 /clear，所以常驻角色交接后按 transcript 判不出来。用户机器上 SessionStart hook `~/.config/bin/claude-agent-record` 把 hook 输入的 agent_type 写到 `${XDG_STATE_HOME:-~/.local/state}/claude-agent/<session_id>`（一行：角色名或 `-`），只增不删。我核过：48 个文件，内容如 `storefront-qa`；settings.json 第 75 行挂着；`~/.config/bin/claude-hud` 已这么读。
 - 定稿：Session.Agent 先读该文件（按 sessionId；trim；`-` 或不存在 → 退回现有 agent-setting 尾部读法）。文件小，每次 poll 直接读，不缓存。README agent 列说明加一句这个来源（hook 不是 agmux 的，不装）。排在 T67 之后（用 T67 的 SessionID）。
 - 验收：单测 文件有名 → 用它；`-` → 退回 tail；不存在 → 退回 tail；XDG_STATE_HOME 生效；空白 trim。
+
+### T73 底栏补 pin / mark_read 提示（用户 2026-10-20 问「置顶键是什么来着」）
+- 现状：footerFor 没列 pin 和 mark_read（T53 / T55 时我定的不加，错了）。
+- 定稿：footerFor 在 avatar 之后加 `%s pin`（pin）和 `%s read`（mark_read），都不要 pane；用配置里的第一个键（用户是 t / q）。底栏放不下时现有的截断逻辑照旧。
+- 验收：单测 默认配置底栏含 `t pin` 与 `m read`；配置 mark_read = ["q"] 时显示 `q read`；e2e 现有底栏断言跟着改。
