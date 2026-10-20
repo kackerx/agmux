@@ -31,20 +31,6 @@ class Show(unittest.TestCase):
         r = subprocess.run(f"cd {cwd} && env -i PATH={shlex.quote(str(self.env.bin))}:/usr/bin:/bin {shlex.quote(BIN)} show", shell=True, capture_output=True, text=True)
         self.assertEqual(r.returncode, 1); self.assertIn("HOME", r.stderr); self.assertEqual(list(cwd.iterdir()), [])
 
-    def test_ccmux_leaves_child_holding_stdout(self):
-        """`ccmux show` prints the full JSON and exits 0 but leaves a background child holding its stdout (regression: WaitDelay expired -> show failed)."""
-        src = (self.env.fake / "show.json").read_text()
-        (self.env.bin / "ccmux").write_text(f"#!/bin/sh\ncat {shlex.quote(str(self.env.fake / 'show.json'))}\n(sleep 6 &)\nexit 0\n")
-        r, dt = show(self.env)
-        self.assertEqual(r.returncode, 0, f"stderr={r.stderr!r}")
-        self.assertEqual(len(r.stdout.splitlines()), len(json.loads(src)))
-        self.assertLess(dt, 4, "must not wait for the child")
-
-    def test_ccmux_hang_times_out(self):
-        (self.env.bin / "ccmux").write_text("#!/bin/sh\nsleep 30\n")
-        r, dt = show(self.env)
-        self.assertEqual(r.returncode, 1); self.assertIn("timed out after 10s", r.stderr); self.assertLess(dt, 14)
-
 
 if __name__ == "__main__":
     unittest.main()

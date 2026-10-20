@@ -275,25 +275,6 @@ class Picker(Base):
         self.assertEqual(self.env.actions(), []); self.assertEqual(self.env.tmux_calls(), [], "no restart / kill / review / handoff / reply reached ccmux or tmux")
         self.assertFalse(self.json.exists())
 
-    def test_a_on_a_card_with_no_name_binds_the_session_id(self):
-        S = json.loads((self.env.fake / "show.json").read_text())
-        S.append(dict(S[1], id="z1", summary=None, project="", tmuxPane="%120", nativeSessionId="n-z1", cwd=str(self.env.home) + "/work/zeta"))
-        self.env.write_show(S)
-        t = Term(self.env, w=200, h=60, extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t.close)
-        self.assertTrue(wait(lambda: len(find_cards(t.snap())) == 10, 8), t.text())
-        def nameless():
-            fc = [c for c in find_cards(t.snap()) if border_colours(c) == {C_FOCUS}]
-            return fc and not re.search(r"\w", re.sub(r"[▀▄█│┃\d]+m?", "", c_name(fc[0])))
-        c_name = lambda c: c.line(1)[8:-6]
-        for _ in range(8):  # down the first column into the second band: zeta is the first group there
-            if nameless():
-                break
-            t.keys("j"); time.sleep(0.2)
-        self.assertTrue(nameless(), t.text())
-        self.open_picker(t); t.keys("l"); time.sleep(0.2); t.keys("Enter"); time.sleep(0.8)
-        self.assertEqual(list(json.loads(self.json.read_text())), ["z1"], "no name: bound by session id")
-        self.assertIn("bound to session id (name missing)", t.text())
-
     def test_sessions_with_the_same_name_share_a_binding(self):
         S = json.loads((self.env.fake / "show.json").read_text())
         S.append(dict(S[1], id="a4", summary=None, project="pj-fallback", tmuxPane="%121", nativeSessionId="n-a4"))

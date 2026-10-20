@@ -327,7 +327,7 @@ class PassthroughReview2(PreviewBase):
         real = shutil.which("tmux")
         self.log = self.env.tmp / "tmux-wrapper.log"
         wrapper = self.env.bin_real / "tmux"
-        wrapper.write_text(f"#!/bin/sh\nprintf '%s\\037' \"$@\" >> {shlex.quote(str(self.log))}; printf '\\n' >> {shlex.quote(str(self.log))}\nexec {shlex.quote(real)} \"$@\"\n")
+        wrapper.write_text(f"#!/bin/sh\nprintf '%s\\037' \"$@\" >> {shlex.quote(str(self.log))}; printf '\\n' >> {shlex.quote(str(self.log))}\ncase \"$1\" in list-panes) case \" $* \" in *\" -a \"*) date +%s >> {shlex.quote(str(self.env.fake))}/show.calls;; esac;; esac  # (a poll of the board: T70)\nexec {shlex.quote(real)} \"$@\"\n")
         wrapper.chmod(0o755)
         return super().board(w, h)
 
@@ -349,7 +349,7 @@ class PassthroughReview2(PreviewBase):
     def test_target_gone_for_one_poll_then_back_stays_locked(self):
         self.enter_passthrough_on_a3(); self.t.lit("ok"); time.sleep(0.4); self.assertEqual(self.cat("a3"), "ok")
         full = json.loads((self.env.fake / "show.json").read_text())
-        self.env.write_show([]); self.poll_twice()
+        self.env.write_show([]); time.sleep(4.5)  # (no session, no list-panes: the polls cannot be counted: two intervals
         self.env.write_show(full); self.poll_twice(); self.poll_twice()  # the same session, with the same pane, is listed again
         self.assertIn("session is gone · tab back to the cards", self.footer())
         rows = [r for r in self.t.snap() if "session is gone" in r.text]

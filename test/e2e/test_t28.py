@@ -76,7 +76,7 @@ class Fixtures(unittest.TestCase):
         for name, state in exp.items():
             c = [x for x in cs if name in x.line(1)]; self.assertEqual(len(c), 1, name); l3 = c[0].line(3)
             if name == "s-waiting": self.assertIn("waiting", l3)
-            elif name == "s-attention": self.assertIn("working", l3)
+            elif name == "s-attention": self.assertIn("waiting", l3)  # (the register says waiting for a session that needs you)
             else: self.assertIn(word[state], l3, f"{name}: {l3}")
         for tool in ("s-read:Read", "s-write:Write", "s-bash:Bash"):
             n, tl = tool.split(":"); self.assertIn(tl, [x for x in cs if n in x.line(1)][0].line(3), "the pending tool is on the card's third line")
@@ -112,7 +112,7 @@ BUILTIN_LINE = avatars_line("aza_choi", {k: len(v) for k, v in BUILTIN.items()})
 IMG_DIMS = lambda data: __import__("struct").unpack(">II", data[16:24])  # (width, height) from a PNG's IHDR
 # fixture (test_t3), T30 states: alpha-main working on Bash -> tool, bravo-29 raw idle but a subagent works -> think, a3 / d1 need you -> hi, c2 / e1 done -> success
 MOOD = {"alpha-main": "tool", "bravo-29": "think", "charlie-30": "idle", "pj-fallback": "idle", "bravo-bg": "idle", "delta-60": "hi", "告警会话": "hi",
-        "charlie-59": "success", "echo-long": "success"}
+        "charlie-59": "success", "echo-long": "idle"}  # (e1 is `read`: idle since T67)
 
 
 def builtin_frames(env, cfg):
@@ -205,7 +205,7 @@ class Kitty(Base):
         for n, state in MOOD.items():
             ids, shown = frames_for(frames, state); seq = [s[n] for _, s in seen]; order = [seq[i + 1] for i in range(len(seq) - 1) if seq[i] != seq[i + 1]]
             if shown == "idle":  # the calm face, plus a blink of one tick every 8 ticks (tests/test_t30 times it)
-                self.assertTrue(set(seq) <= set(ids), f"{n}: only idle frames: {set(seq)}"); self.assertEqual(seq[0], ids[0], f"{n}: starts on the calm face"); continue
+                self.assertTrue(set(seq) <= set(ids), f"{n}: only idle frames: {set(seq)}"); self.assertGreater(seq.count(ids[0]), len(seq) * 0.7, f"{n}: the calm face is what it shows (a blink is one tick in eight)"); continue  # (was: starts on the calm face; since T67 a board with a `done` card waits for it at start, so the first sample can fall on a blink)
             self.assertEqual(set(seq), set(ids), f"{n} ({state} -> {shown}): every frame of its state appears")
             for a, b in zip([seq[0]] + order, order): self.assertEqual(b, ids[(ids.index(a) + 1) % len(ids)], f"{n}: frames advance in file-name order and wrap: {order}")
         w = [s[1]["alpha-main"] for s in seen]; ts = [s[0] for s in seen]

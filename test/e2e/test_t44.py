@@ -32,10 +32,12 @@ class Real(unittest.TestCase):
 
     # ---- the layout ---------------------------------------------------------------------------------------------------------------------
     def start_board(self, args="--stay", config=None, session="agboard", w=100):
+        self.env.rearm()
         if config is not None: (self.cfg / "agmux" / "config.toml").write_text(config)
         cmd = f'{self.env.prefix_real} TMUX="$TMUX" TMUX_PANE="$TMUX_PANE" XDG_CONFIG_HOME={self.cfg} {BIN} board {args}'
         r = tm("new-session", "-d", "-s", session, "-x", str(w), "-y", "40", cmd); self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(wait(lambda: len(find_cards(self.screen(session))) >= 5, 10), tm("capture-pane", "-p", "-t", session).stdout); time.sleep(0.3)
+        if self.env._pending: self.env.flip(); wait(lambda: "● done" in tm("capture-pane", "-p", "-t", session).stdout, 6)  # T67: a session is done after the board saw it work
 
     def terminal(self, name="u", session="work", w=150):
         """a user terminal: a pane of the second server running `tmux attach -t session` on the first; returns its client's name"""

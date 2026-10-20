@@ -191,7 +191,9 @@ class Statusline(Base):
 
 class Setup(Base):
     def lines(self, r):
-        return r.stdout.decode().splitlines()
+        """the statusLine part of the output: since T68 `agmux setup` goes on, after a blank line, with what it did about pi's extension (test_t68 has that part)"""
+        out = r.stdout.decode().splitlines()
+        return out[:out.index("")] if "" in out and out[out.index("") + 1:][:1] and out[out.index("") + 1].startswith("pi:") else out
 
     def test_no_statusline_dry_run(self):
         raw = self.sb.write_settings({"theme": "dark"})
@@ -250,7 +252,7 @@ class Setup(Base):
     def test_write_creates_missing_file(self):
         self.assertFalse(self.sb.settings.exists())
         r = self.sb.run("setup", "--write"); self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
-        self.assertEqual(r.stdout.decode().splitlines()[-1], f"written (new file: {self.sb.settings})", "no backup line for a brand-new file")
+        self.assertEqual(self.lines(r)[-1], f"written (new file: {self.sb.settings})", "no backup line for a brand-new file")
         self.assertEqual(list(json.loads(self.sb.settings.read_text())), ["statusLine"], "new file holds only statusLine")
         self.assertEqual(self.sb.run("setup").stdout.decode().splitlines()[0], "already set: agmux statusline")
 

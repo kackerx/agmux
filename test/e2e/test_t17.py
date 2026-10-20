@@ -144,8 +144,8 @@ class KeysReview(Base):
         self.assertEqual(self.env.actions(), [], "y is not the confirm key any more: it cancels")
         t.keys("x"); time.sleep(0.3); t.keys("Enter")
         self.assertTrue(wait(lambda: self.env.actions(), 3), t.text()); self.assertEqual(self.env.actions(), [["kill", "a1"]], "enter confirms the kill")
-        t.close(); self.env.calls() and (self.env.fake / "calls.log").unlink()
-        t = self.board(); self.assertEqual(self.jump_target(t), ["switch", "a1"], "outside the prompt enter is still jump")
+        t.close(); t = Term(self.env, w=200, h=50, extra_env=f"XDG_CONFIG_HOME={self.cfg}"); self.addCleanup(t.close); self.assertTrue(wait(lambda: len(find_cards(t.snap())) == 8, 10), t.text()); n = len(self.env.tmux_calls())  # a1 is gone: its process was ended
+        t.keys("Enter"); self.assertTrue(wait(lambda: any(c[0] == "switch-client" for c in self.env.tmux_calls()[n:]), 5), self.env.tmux_calls()); self.assertEqual([c for c in self.env.tmux_calls()[n:] if c[0] == "switch-client"][0][-1], "%102", "outside the prompt enter is still jump (to the first card now: a2)")
 
     def test_alt_space_binding_folds(self):
         self.write('[keys]\nfold = ["alt+space"]\n')

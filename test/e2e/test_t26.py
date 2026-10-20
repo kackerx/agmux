@@ -4,8 +4,8 @@ from lib import *
 from test_t3 import ready, by_name, NAMES, border_colours, STATUS_COLOUR, C_FOCUS
 
 BLUE = ("rgb", 18, 52, 86)  # #123456
-# the fixture: a1 focused (working); a2 idle, a3 alert(+working), b1 working, b2 idle, c1 idle, c2 done, d1 alert (waiting), e1 done
-WANT = {"a2": "idle", "a3": "alert", "b1": "working", "b2": "idle", "c1": "idle", "c2": "done", "d1": "alert", "e1": "done"}
+# the fixture: a1 focused (working); a2 idle, a3 alert(+working), b1 working, b2 idle, c1 idle, c2 done, d1 alert (waiting), e1 idle (read)
+WANT = {"a2": "idle", "a3": "alert", "b1": "working", "b2": "idle", "c1": "idle", "c2": "done", "d1": "alert", "e1": "idle"}  # (e1 is `read`: idle since T67)
 
 
 class Base(unittest.TestCase):

@@ -334,13 +334,18 @@ class FakeTmux(unittest.TestCase):
         self.assertNotIn("second tmux line", self.t.text())
         self.assertEqual(len(self.env.tmux_calls()), 1, "if the text did not go, Enter must not be sent either"); self.assertTrue(self.t.alive())
 
-    def test_r_x_d_still_go_through_ccmux(self):
+    def test_r_ends_the_process_and_types_the_resume_command_into_its_pane(self):
         self.start()
-        self.t.keys("r"); time.sleep(0.4)
-        self.t.keys("x"); time.sleep(0.25); self.t.keys("y"); time.sleep(0.4)
-        self.t.keys("d"); time.sleep(1.0)
-        self.assertEqual(self.env.calls(), [["restart", "a1"], ["kill", "a1"], ["review", "a1"]])
-        self.assertEqual(self.env.tmux_calls(), [], "restart / kill / review never touch tmux")
+        self.t.keys("r"); self.assertTrue(wait(lambda: ["send-keys", "-t", "%101", "Enter"] in self.env.tmux_calls(), 8), self.env.tmux_calls())
+        self.assertEqual(self.env.tmux_calls(), [["send-keys", "-t", "%101", "-l", "--", "claude --resume a1"], ["send-keys", "-t", "%101", "Enter"]]); self.assertEqual(self.env.killed(), ["a1"]); self.assertEqual(self.env.calls(), [])
+
+    def test_x_ends_the_process_and_touches_neither_tmux_nor_anything_else(self):
+        self.start(); self.t.keys("x"); time.sleep(0.25); self.t.keys("y"); self.assertTrue(wait(lambda: self.env.killed() == ["a1"], 5), self.env.killed())
+        time.sleep(0.5); self.assertEqual(self.env.tmux_calls(), [], "x signals the process: tmux is not asked"); self.assertEqual(self.env.calls(), [])
+
+    def test_d_runs_hunk_at_the_root_of_the_repo_and_touches_neither_tmux_nor_a_signal(self):
+        self.start(); self.env.git_repo(self.env.home / "work" / "alpha"); self.t.keys("d"); self.assertTrue(wait(lambda: self.env.calls() == [["hunk", "diff", "--watch"]], 5), self.env.calls())
+        self.assertEqual(os.path.realpath((self.env.fake / "hunk.cwd").read_text().strip()), os.path.realpath(self.env.home / "work" / "alpha")); self.assertEqual(self.env.tmux_calls(), []); self.assertEqual(self.env.killed(), [])
 
     def test_burst_keys_keep_their_order_with_tmux_calls(self):
         self.start()

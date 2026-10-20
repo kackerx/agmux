@@ -30,7 +30,7 @@ class Base(unittest.TestCase):
 
 class Show(Base):
     def test_effort_level_shows_after_the_model_in_the_effort_colour(self):
-        self.feed("n-b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "high"}, "context_window": {"used_percentage": 40}})
+        self.feed("b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "high"}, "context_window": {"used_percentage": 40}})
         t, cs = self.board(); c = self.b1(cs); row = c.rows[3]
         self.assertRegex(c.line(3), r"Fancy Model 9·high[│┃]$", c.line(3))
         i = row.find("high"); self.assertGreaterEqual(i, 0)
@@ -42,7 +42,7 @@ class Show(Base):
 
     def test_colors_effort_changes_the_escape_code(self):
         self.config('[colors]\neffort = "#010203"\n')
-        self.feed("n-b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "xhigh"}})
+        self.feed("b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "xhigh"}})
         t, cs = self.board(); row = self.b1(cs).rows[3]; i = row.find("xhigh")
         self.assertGreaterEqual(i, 0, row.text)
         self.assertEqual({row.cells[i + k][1] for k in range(5)}, {PINK})
@@ -52,15 +52,15 @@ class Show(Base):
     def test_each_value_is_shown_verbatim(self):
         for lvl in ("low", "medium", "max"):
             with self.subTest(lvl):
-                self.setUp(); self.feed("n-b1", {"model": {"display_name": "M"}, "effort": {"level": lvl}})
+                self.setUp(); self.feed("b1", {"model": {"display_name": "M"}, "effort": {"level": lvl}})
                 t, cs = self.board(); self.assertIn("M·" + lvl, self.b1(cs).line(3)); t.close(); self.env.cleanup()
 
     def test_live_update_and_removal(self):
-        self.feed("n-b1", {"model": {"display_name": "Fancy Model 9"}})
+        self.feed("b1", {"model": {"display_name": "Fancy Model 9"}})
         t, cs = self.board(); self.assertNotIn("9·", self.b1(cs).line(3))
-        self.feed("n-b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "high"}})
+        self.feed("b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "high"}})
         self.assertTrue(wait(lambda: "·high" in by_name(find_cards(t.snap()), "bravo-29").line(3), 8), t.text())
-        self.feed("n-b1", {"model": {"display_name": "Fancy Model 9"}})
+        self.feed("b1", {"model": {"display_name": "Fancy Model 9"}})
         self.assertTrue(wait(lambda: "9·" not in by_name(find_cards(t.snap()), "bravo-29").line(3), 8), t.text())
 
 
@@ -68,7 +68,7 @@ class Absent(Base):
     """No usable effort.level: no `·effort`, and everything else the payload carried (model name, 60% bar) stays."""
 
     def healthy(self, payload):
-        self.feed("n-b1", {"model": {"display_name": "Fancy Model 9"}, "context_window": {"used_percentage": 60}, **payload})
+        self.feed("b1", {"model": {"display_name": "Fancy Model 9"}, "context_window": {"used_percentage": 60}, **payload})
         t, cs = self.board(); c = self.b1(cs); self.assertTrue(t.alive())
         self.assertNotRegex(c.line(3), r"Fancy Model 9·|high|null", c.line(3))
         self.assertIn("Fancy Model 9", c.line(3), "model name lost:\n" + c.text)
@@ -92,7 +92,7 @@ class Absent(Base):
     def test_effort_array(self): self.healthy({"effort": ["high"]})
 
     def test_no_model_in_payload_does_not_crash(self):  # effort rides on the model; nothing to attach it to
-        self.feed("n-b1", {"effort": {"level": "high"}})
+        self.feed("b1", {"effort": {"level": "high"}})
         t, cs = self.board(); self.assertTrue(t.alive())
         self.assertNotRegex(self.b1(cs).line(3), r"·high")
 
@@ -108,7 +108,7 @@ class Narrow(Base):
         t.close(); return c.line(3)
 
     def test_model_and_effort_are_cut_together_from_the_right(self):
-        self.feed("n-b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "xhigh"}})
+        self.feed("b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "xhigh"}})
         full = "Fancy Model 9·xhigh"; seen = {}
         for w in range(90, 201, 10): seen[w] = self.l3(w)
         self.assertTrue(any(full in l for l in seen.values()), f"never wide enough to show it whole: {seen}")
@@ -122,7 +122,7 @@ class Narrow(Base):
                 self.assertIn("Fancy Model 9", l)
 
     def test_effort_never_shows_without_the_model(self):
-        self.feed("n-b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "xhigh"}})
+        self.feed("b1", {"model": {"display_name": "Fancy Model 9"}, "effort": {"level": "xhigh"}})
         for w in range(90, 201, 10):
             tail = self.l3(w).split("working")[-1]
             self.assertFalse("xhigh" in tail and "Fancy" not in tail, f"w={w}: {tail!r}")

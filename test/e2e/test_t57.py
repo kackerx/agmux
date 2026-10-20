@@ -111,14 +111,13 @@ class Exit(Real):
 
 
 class Review(Real):
-    """`d` runs `ccmux review` with the board's terminal as its stdin / stdout (stderr is captured on purpose: the board shows its last line when the review fails) (T57 broke that once: bubbletea gave the child a pipe); the board's cursor logic survives the round trip"""
+    """`d` runs `hunk diff --watch` (T69; ccmux review before) with the board's terminal as its stdin / stdout (stderr is captured on purpose: the board shows its last line when the review fails) (T57 broke that once: bubbletea gave the child a pipe); the board's cursor logic survives the round trip"""
     def hook(self):
-        f = self.env.bin / "ccmux"; src = f.read_text(); out = self.env.fake / "review.tty"
-        probe = f'if [ "$1" = review ]; then i=no; o=no; [ -t 0 ] && i=tty; [ -t 1 ] && o=tty; printf "in=$i out=$o" > {out}; sleep 0.5; exit 0; fi\n'
-        f.write_text(src.replace("if [ \"$1\" = show ]", probe + "if [ \"$1\" = show ]", 1)); return out
+        out = self.env.fake / "review.tty"; self.env.git_repo(self.env.home / "work" / "alpha")  # (d runs hunk at the root of the repo of the card's cwd)
+        f = self.env.bin_real / "hunk"; f.write_text(f'#!/bin/sh\ni=no; o=no; [ -t 0 ] && i=tty; [ -t 1 ] && o=tty; printf "in=$i out=$o" > {out}; sleep 0.5; exit 0\n'); f.chmod(0o755); return out
 
     def test_the_review_child_has_a_terminal_for_stdin_and_stdout(self):
-        out = self.hook(); self.press("d"); self.assertTrue(wait(out.exists, 5), "ccmux review was run"); time.sleep(0.8); self.assertEqual(out.read_text(), "in=tty out=tty", "T57: [ -t 1 ] is true")
+        out = self.hook(); self.press("d"); self.assertTrue(wait(out.exists, 5), "hunk was run"); time.sleep(0.8); self.assertEqual(out.read_text(), "in=tty out=tty", "T57: [ -t 1 ] is true")
         self.assertTrue(self.t.alive()); self.assertTrue(wait(lambda: self.pv() is None and len(find_cards(self.t.snap())) >= 5, 5), self.t.text())
 
     def test_after_a_review_the_pass_through_cursor_still_works(self):

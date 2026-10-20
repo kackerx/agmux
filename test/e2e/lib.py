@@ -3,7 +3,7 @@
 Isolation: each Env has its own HOME / XDG_STATE_HOME / fake `ccmux` on PATH (logs argv, serves show.json).
 Runs are serialised by a lock file because the tmux socket name is fixed.
 """
-import atexit, datetime, fcntl, json, os, pathlib, re, shlex, shutil, subprocess, tempfile, time, unicodedata, uuid
+import atexit, datetime, fcntl, json, os, pathlib, re, shlex, shutil, subprocess, tempfile, threading, time, unicodedata, uuid
 
 BIN = os.environ.get("AGMUX_BIN") or os.path.expanduser("~/go/bin/agmux")
 SOCK = os.environ.get("AGMUX_TEST_SOCK", "agmux-test")  # convention: agmux-test; override when another session shares the machine
@@ -39,8 +39,13 @@ class Env:
         self.home, self.state, self.bin, self.fake = (self.tmp / n for n in ("home", "state", "bin", "fake"))
         for d in (self.home, self.state, self.bin, self.fake):
             d.mkdir()
+        (self.fake / "tmuxlog").mkdir()
         (self.fake / "show.json").write_text("[]")
         self.pane_ids = {}
+        self.claude = self.home / ".claude"  # T70: the sessions are Claude Code's own register (no ccmux): <home>/.claude/{sessions,jobs,projects}
+        for d in ("sessions", "jobs", "projects"): (self.claude / d).mkdir(parents=True)
+        self._procs, self._repos, self._written, self._last, self._proj, self._tp, self._tpn, self._proj0 = {}, set(), {}, {}, {}, {}, {}, {}
+        self._pending, self._flipped, self._boards, self._lock = {}, set(), 0, threading.RLock()  # T67: a session is done only after the board saw it work: records that say "done" (idle + unread) are written busy until a board runs, then flipped to idle
         (self.fake / "tmux.clients").write_text("1\tc-test\tmain\n")  # one outer client: enter can switch; T10 tests override with set_tmux()
         d = shlex.quote(str(self.fake))
         script = f"""#!/bin/sh
@@ -64,8 +69,9 @@ exit 0
         # fake `tmux` (T10: agmux calls tmux straight from $PATH): records argv, answers display-message / list-clients from files
         tmux = f"""#!/bin/sh
 d={d}
-printf '%s\\037' "$@" >> "$d/tmux.log"; printf '\\n' >> "$d/tmux.log"
-perl -MTime::HiRes=time -e 'printf "%.3f\\n", time' >> "$d/tmux.times"
+ts=$(perl -MTime::HiRes=time -e 'printf "%.6f", time'); line=$(printf '%s\\037' "$@")  # one file per call, written in one go: the polls of the board (list-panes) run at the same time as the calls a test looks at
+printf '%s\\n' "$line" > "$d/tmuxlog/$ts.$$"
+case "$1" in list-panes) case " $* " in *" -a "*) date +%s >> "$d/show.calls";; esac;; esac  # T70: a poll of the board asks list-panes -a: the poll counter (there is no ccmux show to count any more)
 if [ -e "$d/tmux.fail" ] && [ "$(cat "$d/tmux.fail")" = "$1" ]; then printf 'tmux: boom from fake tmux\\nsecond tmux line\\n' >&2; exit 1; fi
 case "$1" in
   display-message) case " $* " in *" ; "*) echo "0 0 0 default 50"; exit 0;; esac
@@ -83,12 +89,47 @@ exit 0
 """
         (self.bin / "tmux").write_text(tmux)
         (self.bin / "tmux").chmod(0o755)
+        # T69: what r / x / d run besides signals and tmux: `claude stop|respawn <job id>` for a background session, `hunk diff --watch` for a review
+        (self.bin / "claude").write_text(f"""#!/bin/sh
+d={d}
+printf '%s\\037' "$@" >> "$d/calls.log"; printf '\\n' >> "$d/calls.log"
+if [ -e "$d/nojob" ]; then printf 'No job matching %s\\n' "$2" >&2; exit 1; fi
+if [ -e "$d/fail" ]; then printf 'boom from fake claude\\nsecond stderr line\\nthird stderr line\\n' >&2; exit 1; fi
+exit 0
+""")
+        (self.bin / "claude").chmod(0o755)
+        (self.bin / "hunk").write_text(f"""#!/bin/sh
+d={d}
+{{ printf 'hunk\\037'; printf '%s\\037' "$@"; printf '\\n'; }} >> "$d/calls.log"; pwd > "$d/hunk.cwd"
+if [ -e "$d/review.fail" ]; then printf 'review: first stderr line\\nreview exploded: the last word\\n' >&2; exit 1; fi
+printf 'REVIEW-RUNNING\\n'; [ -e "$d/review.hold" ] && sleep 2; printf 'REVIEW-DONE\\n'
+exit 0
+""")
+        (self.bin / "hunk").chmod(0o755)
+        # the process table the board reads (the pi hint looks for a process called pi; the machine's own pi sessions must not show in a test): the real ps without them, plus the rows of $d/ps.extra ("pid ppid comm")
+        (self.bin / "ps").write_text(f"""#!/bin/sh
+d={d}
+case " $* " in
+  *" -axo "*) /bin/ps "$@" | awk '{{ n = split($3, a, "/"); if (a[n] != "pi") print }}'; [ -e "$d/ps.extra" ] && cat "$d/ps.extra"; exit 0;;
+esac
+exec /bin/ps "$@"
+""")
+        (self.bin / "ps").chmod(0o755)
         # PATH for the REAL-tmux tests: the fake ccmux, but not the fake tmux
         self.bin_real = self.tmp / "bin_real"; self.bin_real.mkdir()
-        os.symlink(self.bin / "ccmux", self.bin_real / "ccmux")
+        os.symlink(self.bin / "ccmux", self.bin_real / "ccmux"); os.symlink(self.bin / "ps", self.bin_real / "ps")
+        real = shutil.which("tmux", path="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin") or "tmux"  # the real tmux behind a wrapper that counts the board's polls like the fake one does
+        (self.bin_real / "tmux").write_text(f"""#!/bin/sh
+case "$1" in list-panes) case " $* " in *" -a "*) date +%s >> {d}/show.calls;; esac;; esac
+exec {shlex.quote(real)} "$@"
+"""); (self.bin_real / "tmux").chmod(0o755)
 
     def cleanup(self):
         if getattr(self, "pty_tty", None) is not None: self.pty_tty.close()
+        for p in self._procs.values():
+            try: p.kill()
+            except OSError: pass
+            p.wait()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     @property
@@ -105,10 +146,151 @@ exit 0
                 "TERM=xterm-256color COLORTERM=truecolor LANG=en_US.UTF-8")
 
     def write_show(self, sessions):
-        (self.fake / "show.json").write_text(json.dumps(sessions))
+        """The model of the fixtures is a list of ccmux-style records (show.json keeps them: tests read, edit and write them back); what the board sees is Claude Code's register, made from them here (T70)."""
+        (self.fake / "show.json").write_text(json.dumps(sessions)); self.sync_registry(sessions)
+
+    # ---- T70: the register ------------------------------------------------------------------------------------------------------------------
+    def proc(self, sid):
+        """the live process that stands for session `sid` (a `sleep`, started once, kept until cleanup); [pid, procStart as ps prints it in UTC]"""
+        if sid not in self._procs:
+            self._procs[sid] = subprocess.Popen(["sleep", "86400"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            threading.Thread(target=self._procs[sid].wait, daemon=True).start()  # reaped the moment it dies: a zombie still answers kill(pid, 0)
+        p = self._procs[sid]; out = subprocess.run(["ps", "-o", "lstart=", "-p", str(p.pid)], capture_output=True, text=True, env={**os.environ, "LC_ALL": "C", "TZ": "UTC"}).stdout.strip()
+        return p.pid, " ".join(out.split())
+
+    def reg(self, sid, status="idle", kind="interactive", pid=None, procstart=None, file=None, **kw):
+        """one register file written by hand (the way a test needs it, not through the ccmux-style records): <home>/.claude/sessions/<pid>.json for a live process of the harness; returns the path"""
+        if pid is None: pid, ps = self.proc(sid)
+        else: ps = ""
+        now = int(time.time() * 1000); e = dict(pid=pid, sessionId=sid, cwd=str(self.home / "work" / sid), startedAt=now - 60000, procStart=procstart if procstart is not None else ps, version="2.1.304", kind=kind, entrypoint="cli",
+                                                  pidDomain="darwin", status=status, updatedAt=now, statusUpdatedAt=now); e.update(kw)
+        e = {k: v for k, v in e.items() if v is not None}; f = self.claude / "sessions" / (file or f"{pid}.json"); f.write_text(json.dumps(e)); return f
+
+    def dead_pid(self):
+        p = subprocess.Popen(["true"]); p.wait(); return p.pid
+
+    def killed(self):
+        """ids of the sessions whose process is gone (what `x` does to a session: SIGTERM / SIGKILL)"""
+        return sorted(sid for sid, p in self._procs.items() if p.poll() is not None)
+
+    def _git(self, *args, cwd=None):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, capture_output=True, text=True)
+
+    def _make_repo(self, s):
+        """the project / worktree facts of a session are what git says of its cwd (T67): a directory that is not the project's own name is made a worktree of a repo named like the project"""
+        cwd, proj = s.get("cwd") or "", s.get("project") or ""
+        if not cwd or not proj or not cwd.startswith(str(self.tmp)) or not (s.get("isWorktree") or s.get("_variant")): return  # (a real worktree, or the directory a changed project asks for; only under the temp home: a long fake path like /zzz/... cannot be made)
+        root = s.get("mainRepoRoot") if s.get("isWorktree") and s.get("mainRepoRoot") and not s.get("_variant") else str(self.home / "work" / proj)
+        if cwd == root: return
+        if root not in self._repos:
+            os.makedirs(root, exist_ok=True); self._git("init", "-q", "-b", "main", root); self._git("commit", "-q", "--allow-empty", "-m", "i", cwd=root); self._repos.add(root)
+        if not os.path.exists(cwd) and (cwd, root) not in self._repos:
+            os.makedirs(os.path.dirname(cwd), exist_ok=True); self._git("worktree", "add", "-q", "--detach", cwd, cwd=root); self._repos.add((cwd, root))
+
+    def transcript_of(self, s):
+        slug = re.sub(r"[^A-Za-z0-9]", "-", s.get("cwd") or ""); return self.claude / "projects" / slug / f"{s['id']}.jsonl"
+
+    def sync_registry(self, sessions):
+        with self._lock: self._sync_registry(sessions)
+
+    def flip(self):
+        """the board has polled: what was busy for being `done` goes idle now (its time stays the record's)"""
+        with self._lock:
+            if not self._pending: return
+            self._flipped |= set(self._pending); self._pending.clear(); self._sync_registry(json.loads((self.fake / "show.json").read_text()))
+
+    def _mark_seen(self, sid, ms):
+        d = self.state / "agmux"; d.mkdir(exist_ok=True); f = d / "seen.json"
+        try: cur = json.loads(f.read_text()) if f.exists() else {}
+        except ValueError: return
+        key = datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if isinstance(cur, dict) and cur.get(sid) != key: cur[sid] = key; f.write_text(json.dumps(cur))
+
+    def rearm(self):
+        """a board is about to start: the sessions that were done before are busy again for it to see them work (a restarted board forgets which were done: the old fixtures say they still are)"""
+        with self._lock:
+            if self._flipped: self._flipped.clear(); self._sync_registry(json.loads((self.fake / "show.json").read_text()))
+
+    def board_started(self, term):
+        """a board began: when sessions wait to turn done, let it poll once (its cards are there), turn them, and wait for the word"""
+        with self._lock: self._boards += 1; pending = bool(self._pending)
+        if pending:
+            wait(lambda: " sessions" in term.text(), 10); time.sleep(0.3); self.flip(); wait(lambda: "● done" in term.text(), 6)
+
+    def _sync_registry(self, sessions):
+        ids = set()
+        for s in sessions:
+            s = dict(s); sid = s["id"]; ids.add(sid)
+            first = self._proj0.setdefault(sid, s.get("project"))
+            if s.get("summary") and s.get("project") and s["project"] != first and s.get("cwd", "").startswith(str(self.tmp)):
+                s["cwd"] = f"{s['cwd']}.{s['project']}"; s["_variant"] = True  # git decides the project (the directory's repo, else its name): a record whose project is changed lives in another directory, a worktree of a repo of that name
+            self._make_repo(s); pid, pstart = self.proc(sid); bg = s.get("trackingMode") == "background"
+            ms = lambda t: int(datetime.datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() * 1000) if t else None
+            status = {"working": "busy", "waiting": "waiting"}.get(s.get("status"), "idle")
+            if s.get("attentionType") and status == "busy": status = "waiting"  # a session that needs the user is `waiting` in the register (ccmux said working + an attention type)
+            if status == "idle" and s.get("attentionState") == "unread" and sid not in self._flipped:  # "done": the board must see it work first
+                status = "busy"; self._pending[sid] = True
+            else:
+                self._pending.pop(sid, None)
+                if self._boards and status == "idle" and (sid in self._flipped or self._last.get(sid) in ("busy", "waiting")) and s.get("attentionState") != "unread": self._mark_seen(sid, changed)  # "ccmux cleared it" (attentionState gone): the user has seen it
+            self._last[sid] = status
+            if status == "idle" and any(x.get("status") == "working" for x in s.get("subagents") or []): status = "busy"  # a session whose subagents work is busy in the register
+            upd = ms(s.get("lastActivityAt")) or int(time.time() * 1000); changed = ms(s.get("statusChangedAt")) or upd
+            e = dict(pid=pid, sessionId=sid, cwd=s.get("cwd"), startedAt=upd - 60000, procStart=pstart, version="2.1.304", kind="bg" if bg else "interactive", entrypoint="cli", pidDomain="darwin", status=status, updatedAt=upd, statusUpdatedAt=changed)
+            if s.get("summary"): e.update(name=s["summary"], nameSource="user")
+            elif s.get("project") and s.get("cwd") and not (s.get("isWorktree") or s.get("_variant")) and os.path.basename(s["cwd"].rstrip("/")) != s["project"]: e.update(name=s["project"], nameSource="derived")  # (the project of a directory is its name now: a record whose project is another word keeps that word as the name Claude made up)
+            if status == "waiting": e["waitingFor"] = "permission prompt" if s.get("attentionType") == "permission" else "input needed"
+            if s.get("tmuxPane") and not bg:
+                tgt = s.get("tmuxTarget") or "fixture"; sess = tgt.rsplit(":", 1)[0] if ":" in tgt else tgt; e["tmux"] = f"{sess}:@{abs(hash(sid)) % 90 + 1}.{s['tmuxPane']}"
+            if bg: e["jobId"] = sid
+            # the transcript: the test's own (logPath, told to the board through the statusline file) or a small one made from what the record says (branch, the tool it waits on)
+            tp = s.get("logPath")
+            if not tp:
+                lines = []
+                if s.get("gitBranch"): lines.append(json.dumps({"type": "user", "gitBranch": s["gitBranch"], "message": {"content": "x"}}))
+                if s.get("pendingTool"): lines.append(json.dumps(separators=(",", ":"), obj={"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": s["pendingTool"], "input": {}}]}}))
+                f = self.transcript_of(s)
+                if lines:
+                    f.parent.mkdir(parents=True, exist_ok=True); body = "\n".join(lines) + "\n"
+                    if not f.exists() or f.read_text() != body: f.write_text(body)
+                    tp = str(f)
+                elif f.exists(): f.unlink()
+            elif tp:
+                if os.path.exists(tp):  # the test's own transcript gets the branch and the pending tool the record says, as lines at its end, whenever its tail does not say so
+                    with open(tp, "rb") as fh:
+                        fh.seek(0, 2); n = fh.tell(); fh.seek(max(0, n - 65536)); tail = fh.read().decode("utf-8", "replace")
+                    last = self._tp.get(sid, (None, None)); add = ""
+                    seen = re.findall(r'"gitBranch": ("[^"]*")', tail)
+                    if s.get("gitBranch") and (not seen or seen[-1] != json.dumps(s["gitBranch"])): add += json.dumps({"type": "system", "gitBranch": s["gitBranch"]}) + "\n"
+                    want = s.get("pendingTool")
+                    if want != last[1] or (want and not re.search(r'"name":\s*' + re.escape(json.dumps(want)), tail)):
+                        if last[1] and want != last[1] and '"tool_use"' in tail: add += json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": f"t{self._tpn.get(sid, 0)}", "content": "ok"}]}}) + "\n"
+                        if want:
+                            self._tpn[sid] = self._tpn.get(sid, 0) + 1; add += json.dumps(separators=(",", ":"), obj={"type": "assistant", "message": {"content": [{"type": "tool_use", "id": f"t{self._tpn[sid]}", "name": want, "input": {}}]}}) + "\n"
+                    if add:
+                        with open(tp, "a") as fh: fh.write(add)
+                    self._tp[sid] = (s.get("gitBranch"), s.get("pendingTool"))
+                d = self.state / "agmux"; d.mkdir(exist_ok=True); f = d / f"{sid}.json"
+                try: hud = json.loads(f.read_text()) if f.exists() else {}
+                except ValueError: hud = {}
+                if hud.get("transcript_path") != tp: hud["transcript_path"] = tp; f.write_text(json.dumps(hud))
+            if bg:
+                st = {"idle": ("done", "idle"), "waiting": ("running", "blocked")}.get({"busy": "working"}.get(status, status), ("running", "active")); job = dict(state=st[0], tempo=st[1], sessionId=sid)
+                if s.get("summary"): job["name"] = s["summary"]
+                if tp: job["linkScanPath"] = tp
+                if status == "waiting": job["needs"] = ["x"] if s.get("attentionType") == "permission" else None; job["questions"] = [] if s.get("attentionType") == "permission" else [{"q": "?"}]
+                jd = self.claude / "jobs" / sid; jd.mkdir(parents=True, exist_ok=True); (jd / "state.json").write_text(json.dumps(job))
+            f = self.claude / "sessions" / f"{pid}.json"; body = json.dumps(e)
+            if self._written.get(sid) != body or not f.exists():
+                tmp = f.with_suffix(".tmp"); tmp.write_text(body); os.replace(tmp, f); self._written[sid] = body
+        if self._pending and self._boards: threading.Timer(2.6, self.flip).start()  # a board is up already: it polls within 2 s
+        for sid in list(self._written):  # a session no longer listed: its file goes, its process stays (it may come back)
+            if sid not in ids:
+                pid, _ = self.proc(sid); (self.claude / "sessions" / f"{pid}.json").unlink(missing_ok=True); del self._written[sid]
 
     def write_show_orders(self, variants):
-        """Each poll gets the next variant (a different array order of the same sessions)."""
+        """(Was: each poll got the next variant, a different array order of the same sessions. The register has no array order: the first variant is what there is; the order of the cards must not depend on it either.)"""
+        self.write_show(variants[0])
         for i, v in enumerate(variants):
             (self.fake / f"show.{i}.json").write_text(json.dumps(v))
         (self.fake / "orders").write_text(str(len(variants)))
@@ -120,22 +302,45 @@ exit 0
         return [[a for a in line.split("\x1f") if a != ""] for line in p.read_text().split("\n") if line]
 
     def actions(self):
-        """What the user asked for, whichever channel carries it: ccmux calls plus the tmux ones that replaced `ccmux switch` / `ccmux send` in T10
+        """What the user asked for, whichever channel carries it. As of T69 / T70 there is no ccmux: a foreground session is ended by a signal (`killed`), restarted by a signal plus the resume command typed into its pane
+        (tmux send-keys ... `claude --resume <session id>`), a background one by `claude stop|respawn <job id>`, a review is `hunk diff --watch`; the older vocabulary is kept so the tests read the same:
+        ["kill", id], ["restart", id] (the signal of a restart is not a kill), ["stop"...] -> ["kill", id], ["respawn"...] -> ["restart", id], ["review", <the id whose cwd is the repo>], and the tmux ones of T10
         (switch-client -t <pane> -> ["switch", id]; send-keys -t <pane> -l -- <text> -> ["send", id, "--", text]; the Enter key press is not a separate action)."""
-        out = list(self.calls())
+        out, restarted = [], set()
+        for c in self.calls():
+            if c[0] == "stop": out.append(["kill", c[1]])
+            elif c[0] == "respawn": out.append(["restart", c[1]])
+            elif c[0] == "hunk":
+                cwd = (self.fake / "hunk.cwd").read_text().strip() if (self.fake / "hunk.cwd").exists() else ""
+                ids = [s["id"] for s in json.loads((self.fake / "show.json").read_text()) if s.get("cwd") and os.path.realpath(s["cwd"]) == os.path.realpath(cwd)]; out.append(["review", ids[0] if len(ids) == 1 else (ids or ["?"])[0]])
+            else: out.append(c)
         for c in self.tmux_calls():
             if c[0] == "switch-client" and "-t" in c:
                 out.append(["switch", self.pane_ids.get(c[c.index("-t") + 1], "?")])
             elif c[0] == "send-keys" and "-l" in c and "--" in c:
-                out.append(["send", self.pane_ids.get(c[c.index("-t") + 1], "?"), "--", " ".join(c[c.index("--") + 1:])])
+                text, sid = " ".join(c[c.index("--") + 1:]), self.pane_ids.get(c[c.index("-t") + 1], "?")
+                if text.startswith("claude --resume "): restarted.add(sid); out.append(["restart", sid])
+                else: out.append(["send", sid, "--", text])
+        return out + [["kill", sid] for sid in self.killed() if sid not in restarted and not any(a[:2] == ["kill", sid] for a in out)]
+
+    def git_repo(self, path):
+        """a directory that is a git repository (a review runs hunk at the root of the repo of the session's cwd)"""
+        os.makedirs(path, exist_ok=True)
+        if not os.path.exists(os.path.join(path, ".git")): self._git("init", "-q", "-b", "main", str(path)); self._git("commit", "-q", "--allow-empty", "-m", "i", cwd=str(path))
+        return path
+
+    def _tmux_log(self):
+        """[(time, argv)] of every call the fake tmux got, oldest first"""
+        out = []
+        for f in sorted((self.fake / "tmuxlog").iterdir()):
+            try: line = f.read_text().rstrip("\n")
+            except OSError: continue
+            if line: out.append((float(f.name.rsplit(".", 1)[0]), [a for a in line.split("\x1f") if a != ""]))
         return out
 
     def tmux_calls(self, raw=False):
-        """what the board asked the fake tmux, argv by argv. The poll's own `list-panes -a -F ...` (T60: asked at every poll while a background session has no pane, which the fixture always has) is left out unless raw=True: it is not something the user asked for"""
-        p = self.fake / "tmux.log"
-        if not p.exists():
-            return []
-        calls = [[a for a in line.split("\x1f") if a != ""] for line in p.read_text().split("\n") if line]
+        """what the board asked the fake tmux, argv by argv. The poll's own `list-panes -a -F ...` (asked at every poll while there is a session) is left out unless raw=True: it is not something the user asked for"""
+        calls = [c for _, c in self._tmux_log()]
         return calls if raw else [c for c in calls if not (c[:3] == ["list-panes", "-a", "-F"])]
 
     def tmux_stdin(self):
@@ -144,11 +349,7 @@ exit 0
 
     def tmux_times(self):
         """the time of each call tmux_calls() lists (same order; the poll's own list-panes is left out of both)"""
-        p = self.fake / "tmux.times"
-        times = [float(x) for x in p.read_text().split()] if p.exists() else []
-        lp = self.fake / "tmux.log"
-        calls = [[a for a in line.split("\x1f") if a != ""] for line in lp.read_text().split("\n") if line] if lp.exists() else []
-        return [t for t, c in zip(times, calls) if c[:3] != ["list-panes", "-a", "-F"]]
+        return [t for t, c in self._tmux_log() if c[:3] != ["list-panes", "-a", "-F"]]
 
     def set_term(self, termname=None, passthrough=None):
         """T28: what the fake tmux answers to `display-message -p -c <client> '#{client_termname}'` (default xterm-256color) and `show -gv allow-passthrough` (default on)."""
@@ -189,9 +390,15 @@ exit 0
         p.touch() if on else p.unlink(missing_ok=True)
 
     def hud(self, native_id, text):
+        """the statusline payload of a session (its file is named by the session id, which here is the record's id: `n-<id>` is the old nativeSessionId); the transcript_path the register tells about is kept"""
         d = self.state / "agmux"
         d.mkdir(exist_ok=True)
-        (d / f"{native_id}.json").write_text(text)
+        sid = native_id[2:] if native_id.startswith("n-") else native_id; f = d / f"{sid}.json"
+        try:
+            old = json.loads(f.read_text()) if f.exists() else {}; new = json.loads(text)
+            if isinstance(old, dict) and isinstance(new, dict) and "transcript_path" in old and "transcript_path" not in new: new["transcript_path"] = old["transcript_path"]; text = json.dumps(new)
+        except ValueError: pass
+        f.write_text(text)
 
     def avatars_json(self, mapping):
         d = self.state / "agmux"
@@ -406,10 +613,12 @@ class Term:
             assert sock.count(",") == 2, f"no running private tmux server yet: {sock!r}"
             prefix, extra_env = env.prefix_real, f"TMUX={sock} {extra_env}"
         cmd = f"{prefix} {extra_env} {shlex.quote(binary or BIN)} {args}"
+        if args.split()[:1] == ["board"]: env.rearm()
         r = tm("start-server", ";", "set", "-g", "remain-on-exit", "on", ";", "new-session", "-d", "-s", self.name,
                "-x", w, "-y", h, cmd)
         if r.returncode:
             raise RuntimeError(r.stderr)
+        if args.split()[:1] == ["board"]: env.board_started(self)
 
     def raw(self):
         return tm("capture-pane", "-e", "-p", "-t", self.name).stdout

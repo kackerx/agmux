@@ -54,7 +54,7 @@ class Packages(Base):
 
     def test_the_shell_names_the_four_platform_packages_and_the_bin(self):
         self.build(); p = self.pkg("agmux"); self.assertEqual(p["name"], "@kackerx/agmux"); self.assertEqual(p["bin"], {"agmux": "bin/agmux.js"}); self.assertEqual(p["files"], ["bin"])
-        self.assertEqual(p["optionalDependencies"], {f"@kackerx/agmux-{os_}-{cpu}": "0.0.0-t" for _, _, os_, cpu in PLATFORMS}); self.assertEqual(p["repository"], "github:kackerx/agmux"); self.assertIn("engines", p)
+        self.assertEqual(p["optionalDependencies"], {f"@kackerx/agmux-{os_}-{cpu}": "0.0.0-t" for _, _, os_, cpu in PLATFORMS}); shell = json.loads((SRC / "npm" / "agmux" / "package.json").read_text()); self.assertEqual(p["repository"], shell["repository"]); self.assertIn("kackerx/agmux", json.dumps(p["repository"])); self.assertIn("engines", p)
 
     def test_each_platform_package_says_where_it_runs_and_holds_that_archives_binary(self):
         self.build()

@@ -166,7 +166,7 @@ class Blink(Base):
         d = state_set(self.cfg, "mine", {"idle": 3, "think": 0, "read": 0, "write": 0, "tool": 0, "hi": 0, "success": 0}); f = self.set_ids(d)["idle"]
         t = self.states_board(); seen = sample_series(lambda: self.ids_by_card(t), 17.0, 0.05)
         for n in [n for n, s in self.expect.items() if s == "idle"]:
-            seq = [s[n] for _, s in seen]; self.assertEqual(seq[0], f[0], n); blinks = [seq[i] for i in range(1, len(seq)) if seq[i] != f[0] and seq[i - 1] == f[0]]
+            seq = [s[n] for _, s in seen]; self.assertIn(seq[0], f, n); blinks = [seq[i] for i in range(1, len(seq)) if seq[i] != f[0] and seq[i - 1] == f[0]]
             self.assertGreaterEqual(len(blinks), 3, f"{n}: {blinks}"); self.assertTrue(set(blinks) <= set(f[1:]))
             for a, b in zip(blinks, blinks[1:]): self.assertEqual(b, f[1:][(f[1:].index(a) + 1) % 2], f"{n}: blink frames take turns in file-name order: {[hex(x) for x in blinks]}")
 

@@ -12,10 +12,10 @@ LINE = re.compile(r"^agmux (\S+) \((\S+), (\S+)\)$")
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="agmux-t62-")); self.addCleanup(lambda: subprocess.run(["chmod", "-R", "u+w", str(self.tmp)]) and shutil.rmtree(self.tmp, ignore_errors=True))
-        self.home = self.tmp / "home"; (self.home / ".claude").mkdir(parents=True); self.env = Env(); self.addCleanup(self.env.cleanup); build_fixture(self.env, with_hud=False)
+        self.env = Env(); self.addCleanup(self.env.cleanup); self.home = self.env.home; build_fixture(self.env, with_hud=False)
 
     def run_bin(self, args, binary=None, stdin="", extra=None):
-        e = {"PATH": f"{self.env.bin}:/usr/bin:/bin", "HOME": str(self.home), "XDG_STATE_HOME": str(self.tmp / "state"), "XDG_CONFIG_HOME": str(self.tmp / "cfg"), "LANG": "en_US.UTF-8", **(extra or {})}
+        e = {"PATH": f"{self.env.bin}:/usr/bin:/bin", "HOME": str(self.env.home), "XDG_STATE_HOME": str(self.tmp / "state"), "XDG_CONFIG_HOME": str(self.tmp / "cfg"), "LANG": "en_US.UTF-8", **(extra or {})}
         return subprocess.run([binary or BIN, *args], env=e, input=stdin, capture_output=True, text=True, timeout=30)
 
 

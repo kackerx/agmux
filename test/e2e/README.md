@@ -1,12 +1,12 @@
 # agmux 黑盒 e2e
 
-在真实终端（tmux）里跑 `agmux board` / `agmux show` / `agmux avatars`，按键、鼠标、resize、宽字符、配置加载都走真的；`ccmux` 用 PATH 上的假脚本代替，**绝不会碰真的 ccmux 或你的 tmux**。
+在真实终端（tmux）里跑 `agmux board` / `agmux show` / `agmux avatars`，按键、鼠标、resize、宽字符、配置加载都走真的；会话来自假的 Claude Code 登记目录（临时 `HOME` 下的 `.claude/sessions/*.json` + `jobs/` + `projects/`，pi 在 `.pi/agent/agmux-sessions/`；每个会话对应 harness 起的一个活 `sleep` 进程），`claude` / `hunk` / `ps` / `tmux` 用 PATH 上的假脚本代替，**绝不会碰真的 `~/.claude`、真会话或你的 tmux**。
 
 ## 跑法
 
 ```sh
 go build -o /tmp/agmux . && cd test/e2e
-AGMUX_BIN=/tmp/agmux python3 -m unittest -v                 # 全部，约 2 分钟
+AGMUX_BIN=/tmp/agmux python3 -m unittest -v                 # 全部，约 50 分钟（机器不忙时）
 AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 ```
 
@@ -16,10 +16,11 @@ AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 
 ## 怎么测的
 
-- 每个用例自带环境：临时的 `HOME`、`XDG_STATE_HOME`、假 `ccmux`（`show --json` 返回 `Env.write_show()` 写入的 JSON，其它子命令把 argv 记进日志，`fail` / `showfail` / `review.hold` 标志文件控制它的行为），跑完清理，可以和别的测试同时跑（socket 名不同时）。
+- 每个用例自带环境：临时的 `HOME`、`XDG_STATE_HOME`；会话由 `Env.write_show(records)` 写入——测试里的会话仍是 ccmux 风格的记录（`show.json` 留着，测试读、改、写回），`lib.Env.sync_registry` 把它们翻成 Claude Code 的登记文件（`Env.reg()` 手写单个登记文件，边角情形用它）、jobs state、transcript、statusline 文件和 harness 的活进程；`id` = 会话 id，`statusChangedAt` = statusUpdatedAt，`attentionState == "unread"` 的 idle 记录 = 看板先见它工作再变 idle 才 done（`Env.board_started` / `rearm` / `flip`）。假 `claude`（`stop` / `respawn` 把 argv 记进 `calls.log`，`fail` / `nojob` 标志文件控制它）、假 `hunk`（`review.hold` / `review.fail`）、假 `ps`（藏掉本机的 pi 进程，`ps.extra` 加行）。跑完清理，可以和别的测试同时跑（socket 名不同时）。
+- `Env.show_calls()` = 看板的轮询次数（每次轮询问一次 `tmux list-panes -a`，假 tmux 和真 tmux 前的包装脚本都计数）；`Env.actions()` 把 r / x / d 的新做法（进程信号 + 往 pane 里敲 `claude --resume`、`claude stop|respawn`、`hunk`）翻回 `["kill"|"restart"|"review", id]`；`Env.killed()` = 被信号结束的会话。
 - 等条件不等时钟：界面要变化时轮询到期望状态出现为止（带超时）。只有断言「什么都没发生」时才用固定短等待。
 - 屏幕用 `capture-pane -e` 读，解析成带颜色的格子（`lib.parse_screen`），宽字符占两格。
-- 键 → 期望的 `ccmux` 命令行，逐条断言假 ccmux 记下的 argv。ESC 后留 0.4s 间隔再发下一个键。
+- 键 → 期望的命令行 / 信号，逐条断言假脚本记下的 argv 和进程是否还活着。ESC 后留 0.4s 间隔再发下一个键。
 - 鼠标：`Mouse` 往 pane 注入 SGR 鼠标字节；`PopupMouse` 起一个挂在 pty 上的真 tmux client（`mouse on`），在 `display-popup` 里跑看板，往 client 的 pty 写鼠标字节，走完整条真实路径。
 
 ## 文件
@@ -76,8 +77,10 @@ AGMUX_BIN=/tmp/agmux python3 -m unittest -v test_t4.Keys    # 只跑一组
 | `test_t62.py` | T62 `agmux --version` / `version`：恰一行 `agmux <v> (<commit>, <date>)`、退出 0、stderr 空、两种写法逐字相同；`--version x` / `-v` / `-version` / `--versions` 退出 2 + usage 在 stderr；usage 首行 `usage: agmux [--version] <command>`；README 提到；本地 `go build -ldflags` 注入三值原样输出（含 `-s -w` 与单个注入）；从 git clone 里 `go install`（临时 GOBIN）得到 `v0.0.0-<14 位时间>-<12 位 commit>` 伪版本 + 7 位 commit + vcs.time（时间互相一致）；打 tag 后是 tag、改了文件是 `+dirty`；run() 抽出后其它入口行为不变（无参 / help / -h / --help / 未知命令 / 参数个数不对 / show / avatars / avatars import / config / config --path / statusline / setup 干跑与 --write（只写临时 HOME）/ board 错参 的退出码与输出）。
 | `test_t63.py` | T63 发布流水线（本地能跑的）：用手工打的 4 个 tar.gz（GoReleaser 的命名，内含被测二进制）喂 `node npm/build.mjs`：五个包各 3 个文件（bin、LICENSE、package.json）、LICENSE 与仓库一致、版本 = tag 去 v、壳包 optionalDependencies 四个平台包、平台包 os/cpu/files、各平台二进制来自各自的档案并保留可执行位、少一个档案报 `no archive for …`、无参数 exit 2、重跑清掉旧输出、`npm pack --dry-run` 只列 3 个文件；按 node_modules/@kackerx/ 布局后壳包 `--version` 走到平台包、参数 / stdin / stdout / 退出码原样、被信号杀死时壳同信号退出、缺平台包退出 1 带 `go install …@latest` 与平台包名、二进制不可执行一行退出 1；`tap-formula.sh` 输出带 tag / sha / commit / date / license / `-s -w` / depends_on go / test 断言，commit date 缺省 none / unknown，缺参数非 0，brew 的 Ruby 4 `-c` 通过（系统 Ruby 2.6 不认 `ldflags:`）；.goreleaser.yaml、ci.yml、release.yml、README 安装段、LICENSE、.gitignore、壳包文件的内容核对；changelog 过滤正则对本仓库历史（排掉过半、`m\d+:` 一条不剩）。goreleaser 本身（要联网）手工跑过一次 `release --snapshot --clean --skip=publish` 与 `check`，不在套件里。
 | `test_t64.py` | T64 session 分组里后台卡跟同 cwd 的前台会话走（假 ccmux + 假 tmux，单列 80×70）：两前台 blessmuse + 一后台同 cwd → 后台卡在 blessmuse 组，没有 `(no pane)` / `agmux-bg` 组，`bg` 标签还在；按 i attach 后（叠加层 %777 / list-panes 列出 agmux-bg 的 pane）仍在 blessmuse、不搬家；同 cwd 前台多的 tmux session 赢（即使另一个更新）、数量相等取最近活动（对调后跟着对调）、一个 session 里取最近的一条、完全并列每次 poll 都选同一个（名字序 alpha）；同 cwd 优先于同 mainRepoRoot（即使 worktree 那边更多）、没有同 cwd 时同 mainRepoRoot 也算、worktree 后台卡跟主仓库前台；父目录 / 兄弟目录不算；没有 pane 的前台和别的后台会话不算候选 → 老行为 `(no pane)`；没有同目录前台的卡 attach 后仍进 agmux-bg 组；cwd / project / state 分组不变、g 绕一圈回来仍在前台组；前台会话的键不变。
-| `test_t65.py` | T65 daemon 备用进程（background + 无 logPath + 无 lastPrompt + 无 prompts）不是会话：无卡、`agmux show` 无行、顶栏不计数；lastPrompt / prompts / logPath 各种缺法（null / 空串 / 空数组 / 字段不存在）都算备用；有 prompt（lastPrompt 或 prompts）无 logPath、有 logPath 无 prompt 仍显示；native 记录不受影响；挂着 pane 的 background 空记录也过滤（照字面规则）；pins / seen 不受影响；遍历每张卡按 i / Tab / H，tmux 与 ccmux 都没有关于备用进程 id 的调用，只有真后台会话 b2 会被 attach；备用旁边的真后台会话 enter 照常 attach。
 | `test_t66.py` | T66 npm Trusted Publishing（只核对文件，OIDC 本身要等下个 tag）：release.yml（系统 Ruby 解析 YAML）四个 job 次序、npm job `permissions` 恰为 contents: read + id-token: write、别的 job 和 workflow 顶层没有 id-token、release job 仍是 contents: write；全文件和 README 没有 NPM_TOKEN / NODE_AUTH_TOKEN / _authToken，tap job 仍有 TAP_GITHUB_TOKEN；setup-node node-version 24 + registry-url、不传 token；两处 `npm publish` 都带 --provenance、--access public、`./` 路径，平台包循环在前、壳包最后；发布前的步骤（gh release download、build.mjs、`--version | grep -F`）不变；壳包 package.json repository 指向 kackerx/agmux。
+| `test_t67.py` | T67 / T72 / T73 登记来源：`Env.reg` 手写登记文件——活进程、spare / 死 pid / procStart 不符（宽松匹配空白）/ 无 procStart 保留 / `.key` 与坏 JSON（空、截断、数组、pid≤0）只丢一条、`$CLAUDE_CONFIG_DIR`、进程结束 / 文件删除下一次 poll 消失、没有目录不报错；状态映射 busy / waiting / idle / shell / 未知、waitingFor 两种、ExitPlanMode 等批准；名字五级（user / peer 名 → custom-title → pane 标题摘要（去 ✳ / 盲文、`Claude Code` 当空、未列出的 pane）→ derived → 项目名）、重命名下一次 poll 生效、项目 = worktree 的主仓库 / 非 git 的目录名；transcript 默认路径与 statusline 的 transcript_path 优先（不存在则退回）、branch（HEAD 不算）/ 待决工具（配对则无）/ model；后台：jobId 为 id、job 状态 8 种、无 state 文件、job 名与 linkScanPath、后台无 pane 提示；done 规则（启动时 idle 不 done、工作后 idle 才 done、m 标已读后再 working→idle 又 done、waiting→idle、status 时间在 idle 时前移也算、重启看板回 idle、新出现 idle 不 done、同 id 换进程是新会话、后台 job 完成）；T72 角色文件（`-` / 无 / 空 / 空白 trim / XDG_STATE_HOME）；T73 底栏 `a avatar · t pin · m read`、按配置的键、无 pane 的卡也列、窄屏截断；tmux session 取 ` # ` 前第一段（含 `:` 的名字）、list-panes 说的 pane 所在 session 优先于登记。
+| `test_t68.py` | T68 pi：`~/.pi/agent/agmux-sessions/<pid>.json`（`$PI_CODING_AGENT_DIR` 可移）——按 sessionId 列、名字 / 状态映射 / 无 model 无 context、与 claude 同板、死 pid 与复用 pid 的文件被删、坏文件只丢一条、`*.json.tmp.*` 死进程的被扫掉活的留着、待决工具；pane 靠沿父进程爬到 pane_pid（找不到 → 无 pane）、能跳；pane 标题不当 pi 的名字；底栏提示（有 pi 进程无会话：`pi: run agmux setup --write`，扩展已装：`pi: restart the running pi sessions to show them`，有 pi 会话或没有 pi 进程：无提示）；`agmux setup` 的 pi 部分（干跑 / --write 原子写入且内容 = 内嵌文件 / 二次 already installed / 用户改过的不覆盖 / 无目录跳过 / 默认目录在 HOME 下）、扩展源码含 9 个事件名；r = SIGTERM + 敲 `pi --session '<transcript>'`、无 transcript 报错不动、x。
+| `test_t69.py` | T69 r / x / d 不走 ccmux：r = 进程 SIGTERM（慢退出的等它走了才敲）、不理 SIGTERM 的 5 s 后 SIGKILL、`claude --resume <sid>` + Enter、连按 r 只敲一次、无 pane / tmux 失败只报一行；后台 `claude respawn <jobId>` 与失败；x = SIGTERM（2 s 后 SIGKILL）/ `claude stop <jobId>`、`No job matching` 不算错、先问再 y；d = 仓库根上 `hunk diff --watch`（子目录的 cwd 也一样）、终端交给 hunk、非仓库一行说明、hunk 失败显示最后一行 stderr、无 hunk 回退 `git diff | less -R`（q 回看板）、无 cwd 不动。
 | `test_t45.py` | T45 / T48 看过的 done 算已读：只在开预览 / 进直通 / enter 跳转时记 `seen.json`（id → statusChangedAt）——焦点停 3 s、来回路过、popup 里停着都不算（仍是 done、无条目）、卡按 idle 画（状态词、边框色）、重启仍 idle、statusChangedAt 变了回 done 且停着不再自动读、ccmux 清掉 attentionState 或会话没了条目删（别的条目留）、null 不记（预览也不）、坏 seen.json 底栏一行不覆盖、waiting / attention 永不算（预览也不）；`--stay` 真 tmux：popup 里停着不算、预览 / enter 立即记 |
 | `test_t46.py` | T46 直写 client tty 的图片不被 tmux 自己的输出截断：pty 当 client tty、读得慢（队列一直满），另一线程每 2 ms 往同一 tty 写 BEL（等同 set-titles），数 APC 里被插进 BEL 的个数（修前 292/321，修后 0）；每个序列 <1024 字节、载荷 ≤768 且非末块是 4 的倍数；tmux 外和 passthrough 仍是 4096。真 kitty 的 15 套图集对比是手工做的（见 m3 结论），没进套件 |
 | `test_t7.py` | 固定排序（假 ccmux 每次轮询换数组顺序，卡片不动；同名按 id；组按 cwd 字符串）、`f` 折叠 / 展开（标题 ▾ ↔ ▸、其它组位置不动、折叠标题可获焦点且不响应 H/r/d/s/x、enter 展开、轮询不展开、不跨运行记忆） |

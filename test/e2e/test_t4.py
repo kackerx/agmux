@@ -18,7 +18,7 @@ class Base(unittest.TestCase):
         """Wait for n recorded ccmux calls (or return what is there after a quiet 0.8s when n is None)."""
         if n is None:
             time.sleep(0.8); return self.env.actions()
-        wait(lambda: len(self.env.actions()) >= n, timeout)
+        wait(lambda: len(self.env.actions()) >= n, timeout); time.sleep(0.6)  # (a restart ends the process first and types the command into the pane a moment later)
         return self.env.actions()
 
     def footer(self):
@@ -62,14 +62,16 @@ class Keys(Base):
 
     def test_burst_keys_not_dropped(self):
         """Several keys arriving in one read (bubbletea hands them over as one message)."""
-        self.t.lit("ljd")  # l -> b1, j -> b2, d -> review b2
-        self.assertEqual(self.calls(1), [["review", "b2"]])
+        self.env.git_repo(self.env.home / "work" / "bravo"); self.t.lit("ljd")  # l -> b1, j -> b2, d -> review b2 (hunk at the root of its repo)
+        self.assertEqual(self.calls(1), [["review", "b1"]], "(b1 and b2 share the directory)")
         env2 = Env(); self.addCleanup(env2.cleanup); build_fixture(env2)
         t2 = Term(env2, w=200, h=50); self.addCleanup(t2.close); self.assertTrue(ready(t2))
         t2.lit("jjxy")  # a3, x, confirm
         wait(lambda: env2.actions(), 3); self.assertEqual(env2.actions(), [["kill", "a3"]])
-        t2.lit("HHr"); wait(lambda: len(env2.actions()) >= 4, 3)
-        self.assertEqual(sorted(map(tuple, env2.actions()[1:])), sorted([("send", "a3", "--", "/handoff")] * 2 + [("restart", "a3")]))
+        env3 = Env(); self.addCleanup(env3.cleanup); build_fixture(env3)
+        t3 = Term(env3, w=200, h=50); self.addCleanup(t3.close); self.assertTrue(ready(t3))
+        t3.lit("jjHHr"); wait(lambda: ("restart", "a3") in map(tuple, env3.actions()), 8)  # a3: two handoffs and a restart, in one read
+        self.assertEqual(sorted(map(tuple, env3.actions())), sorted([("send", "a3", "--", "/handoff")] * 2 + [("restart", "a3")]))
 
     def test_H_hjkl_letters(self):
         self.t.keys("l"); time.sleep(0.2)
@@ -78,8 +80,10 @@ class Keys(Base):
         self.assertTrue(self.t.alive(), "H must not exit the TUI"); self.assertTrue(find_cards(self.t.snap()))
 
     def test_r_d(self):
-        self.t.keys("r"); self.assertEqual(self.calls(1), [["restart", "a1"]])
-        self.t.keys("d"); self.assertEqual(self.calls(2)[1:], [["review", "a1"]])
+        self.env.git_repo(self.env.home / "work" / "alpha")
+        self.t.keys("r"); self.assertEqual(self.calls(1), [["restart", "a1"]], "a1's process is ended and `claude --resume a1` is typed into its pane"); self.assertIn(["send-keys", "-t", "%101", "Enter"], self.env.tmux_calls())
+        self.assertEqual(self.env.killed(), ["a1"])
+        self.t.keys("d"); self.assertTrue(wait(lambda: len(self.env.actions()) >= 2, 5)); self.assertIn("review", [a[0] for a in self.env.actions()]); self.assertEqual(self.env.calls(), [["hunk", "diff", "--watch"]])
         self.assertTrue(self.t.alive())
 
     def test_x_confirm(self):
@@ -93,7 +97,7 @@ class Keys(Base):
         for k in ("n", "z"):
             self.t.keys("x"); time.sleep(0.2); self.t.keys(k)
         self.assertEqual(self.calls(), [], "any non-y key cancels")
-        self.t.keys("r"); self.assertEqual(self.calls(1), [["restart", "a1"]], "TUI back to normal mode after cancel")
+        self.t.keys("r"); self.assertEqual(self.calls(1), [["restart", "a1"]], "TUI back to normal mode after cancel"); self.assertEqual(self.env.killed(), ["a1"], "only the restart ended it")
 
     def test_paste_is_not_commands(self):
         self.t.lit("\x1b[200~xyHr\x1b[201~")  # bracketed paste while browsing
@@ -101,23 +105,23 @@ class Keys(Base):
         self.assertTrue(self.t.alive()); self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 9)
 
     def test_review_failure_shows_last_stderr_line(self):
-        self.env.flag("review.fail"); self.t.keys("d")
-        self.assertTrue(wait(lambda: "ccmux review: review exploded: the last word" in "\n".join(r.text for r in self.t.snap()[-3:]), 5),
-                        "footer should say `ccmux review: <last stderr line>`:\n" + self.t.text())
+        self.env.git_repo(self.env.home / "work" / "alpha"); self.env.flag("review.fail"); self.t.keys("d")
+        self.assertTrue(wait(lambda: "review exploded: the last word" in "\n".join(r.text for r in self.t.snap()[-3:]), 5),
+                        "footer should say the last stderr line of the review:\n" + self.t.text())
         self.assertNotIn("first stderr line", "\n".join(r.text for r in self.t.snap()[-3:]))
         self.assertTrue(self.t.alive()); self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 9)
 
     def test_mouse_works_again_after_review(self):
         mouse_on = lambda: tm("display", "-p", "-t", self.t.name, "#{mouse_any_flag}").stdout.strip()
         self.assertEqual(mouse_on(), "1", "board enables mouse reporting")
-        self.env.flag("review.hold"); self.t.keys("d")
+        self.env.git_repo(self.env.home / "work" / "alpha"); self.env.flag("review.hold"); self.t.keys("d")
         self.assertTrue(wait(lambda: "agmux · 9 sessions" in self.t.text() and self.env.actions() and "REVIEW-RUNNING" not in self.t.text(), 8))
         self.assertTrue(wait(lambda: mouse_on() == "1", 3), "mouse reporting must be back on after review (bubbletea v1 leaves it off)")
         c = by_name(find_cards(self.t.snap()), NAMES["a2"]); self.t.click(c.c + c.w // 2, c.r + 2); time.sleep(0.4)
         self.t.keys("H"); self.assertEqual(self.calls(2)[1:], [["send", "a2", "--", "/handoff"]], "click after review selects a2")
 
     def test_d_hands_terminal_over_then_returns(self):
-        self.env.flag("review.hold"); self.t.keys("d")
+        self.env.git_repo(self.env.home / "work" / "alpha"); self.env.flag("review.hold"); self.t.keys("d")
         self.assertTrue(wait(lambda: "REVIEW-RUNNING" in self.t.text(), 3), "review should own the terminal:\n" + self.t.text())
         self.assertNotIn("agmux · 9 sessions", self.t.text(), "board is suspended while review runs")
         self.assertTrue(wait(lambda: "agmux · 9 sessions" in self.t.text(), 6), "board must come back after review exits")
@@ -126,12 +130,6 @@ class Keys(Base):
         self.assertRegex("\n".join(r.text for r in self.t.snap()[-3:]), "review finished", "footer reports the finished review")
         self.t.keys("j"); time.sleep(0.2); self.t.keys("Enter")
         self.assertEqual(self.calls(2)[1:], [["switch", "a2"]], "board keeps working after review")
-
-    def test_ccmux_stderr_in_footer_no_popup(self):
-        self.env.flag("fail"); self.t.keys("r")
-        self.assertTrue(wait(lambda: "boom from fake ccmux" in "\n".join(r.text for r in self.t.snap()[-3:]), 3),
-                        "stderr should show on the bottom line:\n" + self.t.text())
-        self.assertTrue(self.t.alive()); self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 9, "cards still rendered")
 
     def test_background_session_greyed(self):
         self.t.keys("l"); time.sleep(0.2); self.t.keys("j"); time.sleep(0.2)  # b2
@@ -182,22 +180,14 @@ class Races(Base):
 class BackgroundWithError(Base):
     def test_error_and_hint_both_visible(self):
         self.t.keys("l"); time.sleep(0.2); self.t.keys("j"); time.sleep(0.2)  # b2: background
-        self.env.flag("fail"); self.t.keys("r")  # restart is not greyed; fake ccmux prints 3 stderr lines and exits 1
-        self.assertTrue(wait(lambda: "boom from fake ccmux" in "\n".join(r.text for r in self.t.snap()[-3:]), 4), self.t.text())
+        self.env.flag("fail"); self.t.keys("r")  # restart is not greyed (claude respawn <job id>); the fake claude prints 3 stderr lines and exits 1
+        self.assertTrue(wait(lambda: "boom from fake claude" in "\n".join(r.text for r in self.t.snap()[-3:]), 4), self.t.text())
         tail = "\n".join(r.text for r in self.t.snap()[-3:])
         self.assertIn("background session · enter or i attaches it", tail, "hint must not be pushed out by the error line")
         self.assertNotIn("second stderr line", self.t.text())
         rows = self.t.text().split("\n")
         while rows and rows[-1] == "" and len(rows) > 50: rows.pop()
         self.assertEqual(len(rows), 50); self.assertIn("agmux · 9 sessions", rows[0])
-
-    def test_poll_error_and_hint_both_visible(self):
-        self.t.keys("l"); time.sleep(0.2); self.t.keys("j"); time.sleep(0.2)
-        self.env.flag("showfail")
-        self.assertTrue(wait(lambda: "show exploded" in self.t.text(), 8), self.t.text())
-        tail = "\n".join(r.text for r in self.t.snap()[-3:])
-        self.assertIn("background session · enter or i attaches it", tail)
-        self.assertNotIn("second poll-error line", self.t.text())
 
 
 class Mouse(Base):

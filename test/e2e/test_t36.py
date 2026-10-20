@@ -1,4 +1,4 @@
-"""T36 card line 3: the `agents` detail and the `⚇ n` / `⚙ n` counts are drawn in the working colour (a pending tool's name stays muted); in image mode an avatar nobody bound is
+"""T36 card line 3: the status word is drawn in the working colour (a pending tool's name stays muted; the `agents` detail and the `⚇ n` counts that were drawn so are gone since T67); in image mode an avatar nobody bound is
 always a picture (the hash picks among the image sets only), in pixel mode always a sprite. Spec: specs/m3-config/tasks.md「第七批」T36."""
 import subprocess, unittest
 from lib import *
@@ -24,20 +24,16 @@ class Colours(Base):
         if config: self.config(config, default=None)
         t = self.board(tmux=False); return t, find_cards(t.snap())
 
-    def test_agents_detail_and_the_count_are_working_coloured(self):
-        t, cs = self.cards(); c = by_name(cs, "bravo-29"); self.assertIn("working · agents  ⚇ 1", c.line(3))  # b1: raw idle, a subagent is working
-        self.assertEqual(self.colour_of(c, "agents"), WORKING, "no pending tool: `agents` in the working colour"); self.assertEqual(self.colour_of(c, "⚇ 1"), WORKING)
-
-    def test_a_pending_tool_name_stays_muted_and_the_count_after_it_is_working(self):
-        t, cs = self.cards(); c = by_name(cs, "alpha-main"); self.assertIn("working · Bash  ⚇ 2", c.line(3))
-        self.assertEqual(self.colour_of(c, "Bash"), MUTED, "a tool name is secondary text"); self.assertEqual(self.colour_of(c, "⚇ 2"), WORKING, "the count is working-coloured whatever the detail is")
+    def test_a_pending_tool_name_stays_muted(self):  # (the `⚇ n` counts and the `agents` detail went with the subagent list, T67)
+        t, cs = self.cards(); c = by_name(cs, "alpha-main"); self.assertIn("working · Bash", c.line(3)); self.assertNotIn("⚇", c.line(3))
+        self.assertEqual(self.colour_of(c, "Bash"), MUTED, "a tool name is secondary text")
 
     def test_the_status_word_keeps_its_own_colour(self):
         t, cs = self.cards(); c = by_name(cs, "bravo-29"); self.assertEqual(self.colour_of(c, "working"), WORKING)
 
-    def test_both_follow_colors_working(self):
-        t, cs = self.cards('[colors]\nworking = "#010203"\n'); c = by_name(cs, "bravo-29"); new = ("rgb", 1, 2, 3)
-        self.assertEqual((self.colour_of(c, "agents"), self.colour_of(c, "⚇ 1")), (new, new)); self.assertEqual(self.colour_of(by_name(cs, "alpha-main"), "Bash"), MUTED, "the tool name does not move with it")
+    def test_the_status_word_follows_colors_working_and_the_tool_name_does_not_move(self):
+        t, cs = self.cards('[colors]\nworking = "#010203"\n'); new = ("rgb", 1, 2, 3)
+        self.assertEqual(self.colour_of(by_name(cs, "bravo-29"), "working"), new); self.assertEqual(self.colour_of(by_name(cs, "alpha-main"), "Bash"), MUTED, "the tool name does not move with colors.working")
 
     def test_cards_with_neither_are_unchanged(self):
         t, cs = self.cards(); c = by_name(cs, "charlie-30"); self.assertNotIn("⚇", c.line(3)); self.assertNotIn("agents", c.line(3))

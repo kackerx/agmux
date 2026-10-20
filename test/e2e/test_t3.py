@@ -164,8 +164,8 @@ class Content(unittest.TestCase):
         a1, b1, c2, d1, a2 = self.card("a1"), self.card("b1"), self.card("c2"), self.card("d1"), self.card("a2")
         self.assertEqual(a1.rows[3].find("■"), 1, "the bar starts under the avatar, at the left edge of the body")
         self.assertEqual(a1.rows[3].width_text(1, 7), "■" * 6); self.assertEqual(a1.rows[3].width_text(7, 9), "  ")
-        self.assertRegex(a1.line(3), r"■{6}  ⏵ working · Bash  ⚇ 2 +Opus 5\.5[│┃]$", "bar · status · detail · count · model flush right")
-        self.assertIn("⏵ working · agents  ⚇ 1", b1.line(3)); self.assertNotIn("Opus", b1.line(3))
+        self.assertRegex(a1.line(3), r"■{6}  ⏵ working · Bash +Opus 5\.5[│┃]$", "bar · status · detail · model flush right (T67: no subagent count any more)")
+        self.assertRegex(b1.line(3), r"■{6}  ⏵ working +[│┃]$"); self.assertNotIn("⚇", b1.line(3)); self.assertNotIn("Opus", b1.line(3))
         self.assertRegex(c2.line(3), r"■{6}  ● done +[│┃]$"); self.assertRegex(d1.line(3), r"■{6}  ⏳ waiting +[│┃]$")
         self.assertRegex(a2.line(3), r"■{6}  ⏸ idle +[│┃]$", "idle: no detail, no counts, no model")
         for sid in NAMES:
@@ -197,7 +197,7 @@ class Content(unittest.TestCase):
 
     def test_border_colour_is_status_colour(self):
         self.assertEqual(border_colours(self.card("a1")), {C_FOCUS}, "a1 is focused: #ff8ebe overrides its (working) status colour")
-        want = {"a2": "idle", "a3": "alert", "b1": "working", "b2": "idle", "c1": "idle", "c2": "done", "d1": "alert", "e1": "done"}
+        want = {"a2": "idle", "a3": "alert", "b1": "working", "b2": "idle", "c1": "idle", "c2": "done", "d1": "alert", "e1": "idle"}  # (e1: read = idle since T67)
         for sid, st in want.items():
             self.assertEqual(border_colours(self.card(sid)), {STATUS_COLOUR[st]}, f"{sid} ({st}): every border cell has the status colour")
 
@@ -223,9 +223,7 @@ class Content(unittest.TestCase):
         def band(sid):  # bottom half-pixel of the last avatar row: fg of '▄', bg of '▀'
             return [x[1] if x[0] == "▄" else x[2] for x in self.card(sid).rows[2].cells[1:7] if x[0] in ("▄", "▀")]
         self.assertTrue(any(is_orange(x) for x in band("a1")), f"claude band orange: {band('a1')}")
-        self.assertTrue(band("b1") and all(is_green(x) for x in band("b1")), f"codex band green: {band('b1')}")
-        g = band("c1")
-        self.assertTrue(g and not any(is_orange(x) or is_green(x) for x in g), f"other agent band grey: {g}")
+        self.assertTrue(band("b1") and all(is_orange(x) for x in band("b1")), f"b1 (once a codex): claude band orange now: {band('b1')}")  # (T67: every Claude Code session is a claude: no codex / gemini bands)
 
 
 class FocusMove(unittest.TestCase):
@@ -277,37 +275,26 @@ class Narrow(unittest.TestCase):
         a1 = sorted(cs, key=lambda c: (c.r, c.c))[0]  # alpha-main
         self.assertIn("alpha-main", a1.line(1), "the name fits: whole")
         self.assertIn("…", a1.line(2), "the branch is cut")
-        self.assertIn("Opus 5.5", a1.line(3), "model stays at 40 columns"); self.assertIn("⚇ 2", a1.line(3))
+        self.assertIn("Opus 5.5", a1.line(3), "model stays at 40 columns")
         cjk = [c for c in cs if "告警" in c.line(1)][0]
         self.assertIn("…", cjk.line(1), "a name that does not fit is cut"); self.assertTrue(cjk.ok)
 
 
 class StderrFooter(unittest.TestCase):
-    """Multi-line ccmux stderr must not push the screen: top bar stays, total rows == terminal height, only the first line shows."""
+    """Multi-line stderr of a failing command must not push the screen: top bar stays, total rows == terminal height, only the first line shows."""
 
-    def test_multiline_stderr(self):
-        env = Env(); self.addCleanup(env.cleanup); build_fixture(env); env.flag("fail")
+    def test_multiline_stderr(self):  # (T69: `r` ends the process and types the resume command into the pane: tmux is what can fail)
+        env = Env(); self.addCleanup(env.cleanup); build_fixture(env); (env.fake / "tmux.fail").write_text("send-keys")
         t = Term(env, w=200, h=50); self.addCleanup(t.close); self.assertTrue(ready(t))
         t.keys("r")
-        self.assertTrue(wait(lambda: "boom from fake ccmux" in t.text(), 3), t.text())
+        self.assertTrue(wait(lambda: "boom from fake tmux" in t.text(), 8), t.text())
         rows = t.text().split("\n")
         while rows and rows[-1] == "" and len(rows) > 50: rows.pop()
         self.assertEqual(len(rows), 50, "pane rows")
         self.assertIn("agmux · 9 sessions", rows[0], "top bar must stay on the first row")
         self.assertIn("q quit", rows[49], "key hints on the last row")
-        self.assertIn("boom from fake ccmux", "\n".join(rows[-3:]))
-        self.assertNotIn("second stderr line", t.text()); self.assertNotIn("third stderr line", t.text())
-
-    def test_multiline_poll_error(self):  # the same for a failing `ccmux show --json` poll (shown on the footer while the board keeps its cards)
-        env = Env(); self.addCleanup(env.cleanup); build_fixture(env)
-        t = Term(env, w=200, h=50); self.addCleanup(t.close); self.assertTrue(ready(t))
-        env.flag("showfail")
-        self.assertTrue(wait(lambda: "show exploded" in t.text(), 8), t.text())
-        rows = t.text().split("\n")
-        while rows and rows[-1] == "" and len(rows) > 50: rows.pop()
-        self.assertEqual(len(rows), 50, "pane rows")
-        self.assertIn("agmux · 9 sessions", rows[0]); self.assertIn("q quit", rows[49])
-        self.assertNotIn("second poll-error line", t.text())
+        self.assertIn("boom from fake tmux", "\n".join(rows[-3:]))
+        self.assertNotIn("second tmux line", t.text())
 
 
 class ModelCache(unittest.TestCase):
@@ -329,7 +316,7 @@ class ModelCache(unittest.TestCase):
 
 
 class LongPendingTool(unittest.TestCase):
-    """design T13: line 3 keeps the status word always; what gives way first is the `· pendingTool` detail, then the ⚇ / ⚙ counts, then the model.
+    """design T13: line 3 keeps the status word always; what gives way first is the `· pendingTool` detail, then the model (the ⚇ counts are gone with T67).
     Line 1 keeps the time and cuts the name only when it does not fit; line 2 cuts the branch."""
 
     TOOL = "mcp__claude_ai_Claude_Docs__batch"
@@ -359,14 +346,13 @@ class LongPendingTool(unittest.TestCase):
                 cs = ready(t); self.assertTrue(cs, t.text())
                 c = [x for x in cs if "agmux-orc" in x.line(1)][0]; l3 = c.line(3)
                 self.assertIn("⏵ working", l3, f"W={W}: the status word never gives way: {l3!r}")
-                detail, counts, model = "·" in l3, "⚇" in l3, "Opus" in l3
-                self.assertTrue(not detail or counts, f"W={W}: the detail is cut before the counts: {l3!r}")
-                self.assertTrue(not counts or model, f"W={W}: the counts are cut before the model: {l3!r}")
+                detail, model = "·" in l3, "Opus" in l3
+                self.assertNotIn("⚇", l3, "(T67: no subagent counts)")
                 if detail:
                     d = l3.split("· ", 1)[1].split("  ")[0].strip()
                     self.assertRegex(d, r"^\w", f"W={W}: a shown detail has real text, not a bare `…`: {l3!r}")
                 if W >= 232:
-                    self.assertTrue(model and counts, f"W={W}: wide enough for counts and model: {l3!r}")
+                    self.assertTrue(model and detail, f"W={W}: wide enough for the detail and the model: {l3!r}")
                 if W >= 400:
                     self.assertIn(self.TOOL, l3); self.assertIn("Opus 5.5", l3)
                 self.assertRegex(c.line(1), r"\b\d+[smhd][│┃]$", f"W={W}: time at the right edge of line 1")
@@ -378,7 +364,7 @@ class BarEdges(unittest.TestCase):
 
     def test_zero_unknown_small_and_full(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
-        for sid, p in (("n-a1", 0), ("n-b1", 1), ("n-c1", 4), ("n-c2", 100)):
+        for sid, p in (("a1", 0), ("b1", 1), ("c1", 4), ("c2", 100)):
             env.hud(sid, json.dumps({"context_window": {"used_percentage": p}}))
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs)
@@ -405,7 +391,7 @@ class HudModel(unittest.TestCase):
 
     def test_display_name_and_percentage_from_statusline(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
-        self.feed(env, "n-b1", "Fancy Model 9", pct=77)  # b1 has no jsonl: the HUD name is the only model source
+        self.feed(env, "b1", "Fancy Model 9", pct=77)  # b1 has no jsonl: the HUD name is the only model source
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs)
         b1 = by_name(cs, "bravo-29")
@@ -415,8 +401,8 @@ class HudModel(unittest.TestCase):
 
     def test_effort_only_from_effort_level(self):  # T27: a top-level string `effort` is not the real payload and stays unread; effort.level shows as `model·level`
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
-        self.feed(env, "n-b1", "Fancy Model 9", reasoning_effort="xhigh", thinking={"effort": "xhigh"})
-        self.feed(env, "n-c1", "Other Model", effort={"level": "high"})
+        self.feed(env, "b1", "Fancy Model 9", reasoning_effort="xhigh", thinking={"effort": "xhigh"})
+        self.feed(env, "c1", "Other Model", effort={"level": "high"})
         t = Term(env, w=200, h=50); self.addCleanup(t.close)
         cs = ready(t); self.assertTrue(cs)
         self.assertRegex(by_name(cs, "bravo-29").line(3), r"Fancy Model 9[│┃]$"); self.assertNotIn("xhigh", t.text())
@@ -425,7 +411,7 @@ class HudModel(unittest.TestCase):
     def test_live_update_when_statusline_runs_again(self):
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env, with_hud=False)
         t = Term(env, w=200, h=50); self.addCleanup(t.close); self.assertTrue(ready(t))
-        self.feed(env, "n-b1", "Late Model", pct=12)
+        self.feed(env, "b1", "Late Model", pct=12)
         self.assertTrue(wait(lambda: "Late Model" in by_name(find_cards(t.snap()), "bravo-29").line(3), 8), "board should pick the file up on the next poll")
 
 

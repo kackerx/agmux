@@ -42,10 +42,9 @@ def expect(branch, avail):
 def fixture(env, branches, agents=()):
     """one session (own project, panes %301..) per branch, names m00..; the sessions in `agents` get a transcript naming the agent AGENT_NAME"""
     names = build_many_fixture(env, sizes=[1] * len(branches)); S = json.loads((env.fake / "show.json").read_text())
-    log = env.tmp / "agent.jsonl"; log.write_text(SETTING(AGENT_NAME) + USER)
     for i, (s, b) in enumerate(zip(S, branches)):
         s["gitBranch"] = b
-        if i in agents: s["logPath"] = str(log)
+        if i in agents: log = env.tmp / f"agent{i}.jsonl"; log.write_text(SETTING(AGENT_NAME) + USER); s["logPath"] = str(log)  # (one transcript each: the branch is a line of it now)
     env.write_show(S); return names
 
 

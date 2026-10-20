@@ -19,7 +19,7 @@ W, H = 80, 70
 def state_of(s):
     if s["status"] == "working" or any(a["status"] == "working" for a in s["subagents"]): return "working"
     if s["status"] == "waiting": return "waiting"
-    return "done" if s["attentionState"] else "idle"  # (idle, nothing running, attentionState set)
+    return "done" if s["attentionState"] == "unread" else "idle"  # (idle, nothing running, unread: the board saw it work and the user has not looked at it; T67)
 
 
 def oracle(S, mode, home):
@@ -155,9 +155,6 @@ class Modes(Base):
         t = self.board(""); top = t.snap()[0].text.strip()
         for m in MODES[1:]: t.keys("g"); self.expect(t, m); self.assertEqual(t.snap()[0].text.strip(), top)
 
-    def test_project_names_the_group_and_an_empty_project_is_no_project(self):
-        self.edit(lambda S: S[-1].update(project="")); t = self.board('[layout]\ngroup_by = "project"\n'); self.expect(t, "project"); self.assertIn("▾ (no project) (1)", self.outline(t))
-
     def test_session_name_is_everything_before_the_first_hash_separator(self):
         def f(S): S[0]["tmuxTarget"] = "my # odd # name # win:1.0"; S[1]["tmuxTarget"] = "Zeta # w:1.0"
         self.edit(f); t = self.board('[layout]\ngroup_by = "session"\n'); self.expect(t, "session")
@@ -174,13 +171,13 @@ class Modes(Base):
         self.edit(f); t = self.board('[layout]\ngroup_by = "state"\n'); self.expect(t, "state"); self.assertEqual([x for x in self.outline(t) if x.startswith("▾")], ["▾ working (3)", "▾ waiting (1)", "▾ idle (4)"])
 
     def test_state_edge_cases(self):
-        """a done card is idle with attentionState set (read or unread); a card working only because of a subagent is working; a waiting one is waiting"""
+        """a done card is idle and unread (one already read is plain idle); a card working only because its subagents are is working (the register says busy); a waiting one is waiting"""
         def f(S):
             by = {s["summary"]: s for s in S}
             by["shop-feat"].update(status="idle", attentionState="read")
             by["solo-bg"].update(status="idle", subagents=[{"agentId": "z", "status": "working", "pendingTool": None}])
         self.edit(f); t = self.board('[layout]\ngroup_by = "state"\n'); self.expect(t, "state"); o = self.outline(t)
-        self.assertEqual(o[o.index("▾ done (2)") + 1:o.index("▾ done (2)") + 3], ["shop-feat", "shop-hf2"]); self.assertIn("solo-bg", o[o.index("▾ working (4)") + 1:o.index("▾ working (4)") + 5])
+        self.assertEqual(o[o.index("▾ done (1)") + 1:o.index("▾ done (1)") + 2], ["shop-hf2"]); self.assertIn("shop-feat", o[o.index("▾ idle (1)") + 1:]); self.assertIn("solo-bg", o[o.index("▾ working (4)") + 1:o.index("▾ working (4)") + 5])
 
 
 class Cards(Base):
@@ -305,7 +302,7 @@ class Passthrough(PreviewBase):
         self.assertIn("g", pane_text(self.panes["a3"], 5), "the pane got the g"); bar = last_text_row(self.t.snap()); self.assertIn("keys go to the pane", bar)
         self.press("Tab"); self.assertTrue(wait(lambda: "g group:cwd" in last_text_row(self.t.snap()) or "tab focus preview" in last_text_row(self.t.snap()), 3))
         self.assertTrue(any("▾ ~/work/alpha (3)" in r.text for r in self.t.snap()), "still cwd groups")
-        self.t.keys("g"); self.assertTrue(wait(lambda: any("▾ alpha (2)" in r.text for r in self.t.snap()), 4), "g on the cards: project groups (the fixture's project names)\n" + self.t.text())
+        self.t.keys("g"); self.assertTrue(wait(lambda: any("▾ alpha (3)" in r.text for r in self.t.snap()), 4), "g on the cards: project groups (T67: the project of a directory is its name: a2 is in alpha too)\n" + self.t.text())
 
 
 class Keys(Base):

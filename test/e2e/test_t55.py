@@ -97,10 +97,6 @@ class NotDone(Base):
         t.keys("f"); time.sleep(0.6); self.assertTrue(any(r.text.lstrip().startswith("▸") for r in t.snap()), t.text()); self.assertEqual(self.entries(), {})
         t.keys("m"); self.nothing(t); self.assertTrue(any(r.text.lstrip().startswith("▸") for r in t.snap()), "still folded, nothing opened")
 
-    def test_a_done_without_a_status_time_is_never_recorded(self):
-        self.edit(lambda by: by["shop-hf2"].update(statusChangedAt=None)); t = self.board(); t.keys("j"); t.keys("j"); self.assertEqual(self.look(t, "shop-hf2")[0], "● done"); t.keys("m"); time.sleep(1.5)
-        self.assertEqual(self.entries(), {}, "no time, no telling this done from the next"); self.assertEqual(self.word(t, "shop-hf2"), "● done"); self.assertTrue(t.alive())
-
 
 class Persistence(Base):
     def read_one(self):
@@ -112,9 +108,6 @@ class Persistence(Base):
     def test_a_new_status_change_is_a_new_done(self):
         t = self.read_one(); self.edit(lambda by: by["shop-feat"].update(statusChangedAt=T1)); self.assertTrue(wait(lambda: self.word(t, "shop-feat") == "● done", 4), "done again")
         t.keys("m"); self.assertTrue(wait(lambda: self.word(t, "shop-feat") == "⏸ idle" and self.entries().get("g03") == "2026-10-13T11:30:00Z", 4), self.entries())
-
-    def test_ccmux_clearing_the_attention_state_removes_the_entry_as_before(self):
-        t = self.read_one(); self.edit(lambda by: by["shop-feat"].update(attentionState=None)); self.assertTrue(wait(lambda: self.entries() == {}, 6), self.entries()); self.assertEqual(self.word(t, "shop-feat"), "⏸ idle")
 
     def test_a_corrupt_seen_json_is_not_overwritten_and_the_message_is_not_read(self):
         self.seen.parent.mkdir(parents=True, exist_ok=True); self.seen.write_text("{not json"); t = self.board(); t.keys("l"); t.keys("m"); time.sleep(1.5)

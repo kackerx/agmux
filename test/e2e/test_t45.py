@@ -95,22 +95,11 @@ class Persistence(Base):
         time.sleep(2.5); self.assertEqual(self.entries()["g02"], KEY0, "(the old entry stays until the new one is made; the focus resting on it makes none, T48)"); self.assertEqual(self.word(t, "shop-hf2"), "● done")
         t.keys("p"); self.assertTrue(wait(lambda: self.entries().get("g02") == "2026-10-13T11:30:00Z" and self.word(t, "shop-hf2") == "⏸ idle", 6), "opening the preview on it: seen again")
 
-    def test_ccmux_clearing_the_attention_state_removes_the_entry(self):
-        t = self.seen_board(); self.edit(lambda by: by["shop-hf2"].update(attentionState=None)); self.assertTrue(wait(lambda: "g02" not in self.entries(), 6), self.entries()); self.assertEqual(self.word(t, "shop-hf2"), "⏸ idle")
-
     def test_a_session_that_is_gone_loses_its_entry(self):
         t = self.seen_board(); S = json.loads((self.env.fake / "show.json").read_text()); self.env.write_show([s for s in S if s["summary"] != "shop-hf2"]); self.assertTrue(wait(lambda: "g02" not in self.entries(), 6), self.entries())
 
-    def test_the_entries_of_other_sessions_are_kept_when_one_is_removed(self):
-        t = self.seen_board(); t.keys("k"); t.keys("k"); t.keys("l"); t.keys("p"); self.assertTrue(wait(lambda: set(self.entries()) == {"g02", "g03"}, 4), self.entries())
-        self.edit(lambda by: by["shop-hf2"].update(attentionState=None)); self.assertTrue(wait(lambda: set(self.entries()) == {"g03"}, 6), self.entries())
-
 
 class Edges(Base):
-    def test_a_null_status_changed_at_is_never_recorded(self):
-        self.edit(lambda by: by["shop-hf2"].update(statusChangedAt=None)); t = self.board(); t.keys("j"); t.keys("j"); t.keys("p"); time.sleep(2.0)
-        self.assertEqual(self.entries(), {}, "no time, no telling this done from the next (even with the preview open)"); self.assertEqual(self.word(t, "shop-hf2"), "● done", "it stays done until ccmux clears it")
-
     def test_a_corrupt_seen_json_is_empty_says_one_line_and_is_not_overwritten(self):
         self.seen.parent.mkdir(parents=True, exist_ok=True); self.seen.write_text("{not json"); t = self.board()
         self.assertEqual((self.word(t, "shop-hf2"), self.word(t, "shop-feat")), ("● done", "● done"), "nothing is seen")

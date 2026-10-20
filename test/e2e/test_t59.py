@@ -110,10 +110,8 @@ class Preview(PreviewBase):
         self.press("p"); self.go_bg(); time.sleep(1.5); self.assertEqual(tm("list-sessions", "-F", "#{session_name}").stdout.split().count("agmux-bg"), 0, "no agmux-bg session was made")
 
     def test_with_a_pane_the_title_has_bg_and_the_pane_id(self):
-        S = json.loads((self.env.fake / "show.json").read_text())
-        for s in S:
-            if s["id"] == "b2": s["tmuxPane"] = self.panes["a2"]  # still trackingMode background
-        self.env.write_show(S); self.press("p"); self.assertTrue(wait(lambda: self.pv() is not None, 4)); self.go_bg(); self.assertTrue(wait(lambda: self.pv()[0] == f"bravo-bg · bg · {self.panes['a2']} · ⏸ idle", 5), self.pv()[0]); time.sleep(0.8)
+        # (a background session has a pane when `claude attach <its id>` runs in one: a2's pane is started like that)
+        tm("respawn-pane", "-k", "-t", self.panes["a2"], "sh", "-c", 'i=1; while [ $i -le 60 ]; do printf "second-pane-marker %d\\n" $i; i=$((i+1)); done; sleep 600', "claude", "attach", "b2"); time.sleep(0.8); self.press("p"); self.assertTrue(wait(lambda: self.pv() is not None, 4)); self.go_bg(); self.assertTrue(wait(lambda: self.pv()[0] == f"bravo-bg · bg · {self.panes['a2']} · ⏸ idle", 5), self.pv()[0]); time.sleep(0.8)
         self.assertEqual(self.pv()[0], f"bravo-bg · bg · {self.panes['a2']} · ⏸ idle"); self.assertIn("second-pane-marker", "\n".join(r.text for r in self.pv()[1]), "its pane is shown like any other")
 
     def test_a_native_card_has_no_bg_in_its_title(self):

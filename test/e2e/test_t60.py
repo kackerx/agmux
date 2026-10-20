@@ -155,9 +155,11 @@ class Listing(Shape):
         self.assertTrue(wait(lambda: "keys go to the pane" in self.row(t), 3), t.text())
         self.assertTrue(any("%55" in " ".join(c) for c in self.calls() if c[0] in ("display-message", "capture-pane")), "the preview reads %55")
 
-    def test_the_title_has_the_pane_and_the_card_is_in_the_agmux_bg_group_by_session(self):
+    def test_the_title_has_the_pane_and_the_attached_card_stays_with_the_foreground_sessions_of_its_directory(self):
+        # T64: in the session grouping a background session goes with the foreground ones of its directory (b1 is in bravo, in tmux session `fixture`), also when its pane is in agmux-bg
         self.panes("%55\tagmux-bg\t0\tclaude attach b2"); t = self.board(); self.to_bg(t); self.assertEqual(self.title(t), "bravo-bg · bg · %55 · ⏸ idle")
-        t.keys("p"); [t.keys("g") or time.sleep(0.3) for _ in range(2)]; time.sleep(0.8); self.assertTrue(any(re.match(r"▾ agmux-bg \(1\)", r.text.strip()) for r in t.snap()), t.text())
+        t.keys("p"); [t.keys("g") or time.sleep(0.3) for _ in range(2)]; time.sleep(0.8); titles = [re.match(r"▾ (.+?) \(\d+\)", r.text.strip()) for r in t.snap()]; titles = [m.group(1) for m in titles if m]
+        self.assertIn("fixture", titles); self.assertNotIn("agmux-bg", titles); self.assertNotIn("(no pane)", titles)
 
     def test_quotes_a_path_and_a_dead_pane(self):
         for line, claimed in (('%56\ts\t0\t"claude attach b2"', "%56"), ("%57\ts\t0\t'/usr/local/bin/claude' attach 'b2'", "%57"), ("%58\ts\t0\t/opt/x/claude attach b2", "%58"), ("%59\ts\t1\tclaude attach b2", None),
@@ -177,11 +179,13 @@ class Listing(Shape):
     def title_now(self, t):
         rows = [r.text for r in t.snap()]; return next((re.sub(r"^.*?(bravo-bg ·)", r"\1", r[100:]).strip() for r in rows if "bravo-bg ·" in r[100:]), None)
 
-    def test_list_panes_runs_only_while_a_background_session_has_no_pane(self):
-        t = self.board(); time.sleep(5.5); n = len([c for c in self.calls() if c[0] == "list-panes"]); self.assertGreaterEqual(n, 2, "every poll while b2 has no pane")
+    def test_list_panes_runs_at_every_poll_with_six_columns_and_not_without_sessions(self):
+        # (T67: the sessions' own tmux session and their pane titles are read from tmux too, so it is asked at every poll while there is a session; it used to be asked only for a background session without a pane)
+        t = self.board(); time.sleep(5.5); n = len([c for c in self.calls() if c[0] == "list-panes"]); self.assertGreaterEqual(n, 2, "every poll")
         S = json.loads((self.env.fake / "show.json").read_text()); self.env.write_show([s for s in S if s["id"] != "b2"]); time.sleep(3.0); k = len([c for c in self.calls() if c[0] == "list-panes"]); time.sleep(5.0)
-        self.assertEqual(len([c for c in self.calls() if c[0] == "list-panes"]), k, "no background session without a pane: tmux is not asked")
-        c = next(c for c in self.calls() if c[0] == "list-panes"); self.assertEqual(c, ["list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{pane_dead}\t#{pane_start_command}"])
+        self.assertGreaterEqual(len([c for c in self.calls() if c[0] == "list-panes"]), k + 2, "still asked with no background session at all")
+        c = next(c for c in self.calls() if c[0] == "list-panes"); self.assertEqual(c, ["list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{pane_dead}\t#{pane_start_command}\t#{pane_title}\t#{pane_pid}"])
+        self.env.write_show([]); time.sleep(3.0); k = len([c for c in self.calls() if c[0] == "list-panes"]); time.sleep(4.5); self.assertEqual(len([c for c in self.calls() if c[0] == "list-panes"]), k, "no session, nothing to ask about")
 
 
 class Failing(Shape):

@@ -29,7 +29,7 @@ class PreviewBase(unittest.TestCase):
         self.panes = {}
         for sid, cmd in self.PANES:
             tm("new-session", "-d", "-s", f"pane-{sid}", "-x", "100", "-y", "30", cmd)
-            self.panes[sid] = tm("display", "-p", "-t", f"pane-{sid}", "#{pane_id}").stdout.strip()
+            self.panes[sid] = tm("display", "-p", "-t", f"pane-{sid}", "#{pane_id}").stdout.strip(); tm("select-pane", "-t", self.panes[sid], "-T", " ")  # a pane title is a card name now (T67): not the host name tmux starts with
         S = json.loads((self.env.fake / "show.json").read_text())
         for s in S:
             if s["id"] in self.panes:
