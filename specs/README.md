@@ -16,7 +16,7 @@ agmux = 基于 ccmux（v1.4.3）的 CLI + TUI，用来看和管理 tmux 里跑�
 ## 技术选型【定】
 - Go（go 1.26）+ bubbletea v1 + lipgloss v1；模块名 `github.com/kackerx/agmux`；`go install` 到 ~/go/bin，和 ~/proj/hudiff 一个路数。
 - 头像用真彩半块字符 ▀▄ 画（1 列 = 1 像素宽，半行 = 1 像素高），不用 kitty 图形协议。
-- **tmux 优先，ccmux 只做发现**（用户 2026-10-12 定）：能用 tmux 直接做的——`switch-client`、`send-keys`、`capture-pane`、`kill-pane`——直接调 tmux，不经过 ccmux；ccmux 只用于会话发现（`show --json`，没有替代）和它独有的能力（`restart` 知道怎么 resume、`review` 起 hunk）。理由：tmux 体量大、接口稳定，ccmux 小项目升级可能变。M1 里走 ccmux 的 switch / send 在 M2 迁到 tmux。
+- **tmux 优先，不依赖 ccmux**（用户 2026-10-12 定 tmux 优先；2026-10-20 定去 ccmux，M5）：能用 tmux 直接做的——`switch-client`、`send-keys`、`capture-pane`、`kill-pane`——直接调 tmux；会话发现读 Claude Code 自己的 `~/.claude/sessions/<pid>.json` 登记 + `~/.claude/jobs/<id>/state.json`，pi 靠 agmux 自带的扩展写登记；r / x / d 自己实现（SIGTERM + `claude --resume` / `pi --session`、`claude stop`、hunk / git diff）。只支持 Claude Code 和 pi。
 - 路径不写死 /Users/xxx，用 `os.UserHomeDir` / `$XDG_STATE_HOME`。
 
 ## 数据模型
