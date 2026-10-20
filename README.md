@@ -109,6 +109,10 @@ agmux setup --write   # 改 ~/.claude/settings.json 的 statusLine.command，原
 
 原来的状态栏照常显示；只改 `statusLine.command` 这一个键。`settings.json` 是软链接时改的是链接指向的文件，`.bak` 也放在那旁边。
 
+### pi
+
+pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi 扩展知道有哪些会话。`agmux setup --write`（上面那条）在改状态栏之后顺手把扩展装到 `~/.pi/agent/extensions/agmux.js`（`$PI_CODING_AGENT_DIR` 优先；没有这个目录就跳过；已经一样就不动；你改过的或是别的版本不覆盖，只提示，删掉再装即可；不带 `--write` 只打印会做什么）。**已经在跑的 pi 会话要重启才会加载扩展**，之后每个有界面的 pi 会话在 `~/.pi/agent/agmux-sessions/<pid>.json` 里写自己的状态（idle / working / waiting：在等你回答对话框、正在跑的工具、名字），退出时删掉；`pi -p` 这类没有界面的不写。pi 会话按进程树找到所在的 tmux pane，卡片上没有模型和上下文（pi 没有状态栏数据）。没装扩展、但 ps 里有 `pi` 进程时，底栏提示一句 `pi: run agmux setup --write`。
+
 ### 看过的 done 算已读
 
 会话从干活变成空闲（登记里 `status` 由 `busy` 变 `idle`）就是 done，看板里只有**看过结果**才算已读。看板启动后的第一次轮询把当时已经空闲、`seen.json` 里没记录的会话都记成已读（只做这一次，`--stay` 常驻看板也只在进程启动时做；`agmux show` 不写），所以 done 是启动之后才看到完成的：在这张 done 的卡上开预览（`p`）、进直通（`tab` / `i`，含点预览区）、或 `enter` 跳转。焦点停在卡上多久、`j` / `k` 路过都不算。已读后卡片按 idle 画，`agmux show` 也一样。记在 `$XDG_STATE_HOME/agmux/seen.json`（会话 ID → 那次 done 的时间，即登记的 `statusUpdatedAt`），重启后还在；会话又干活、再完成一次就重新是 done；会话不在了条目自动删。告警 / 等权限的卡不做已读。文件坏了当作都没看过，底栏报一行，修好或删掉即可。

@@ -242,3 +242,31 @@ func TestVersionCommand(t *testing.T) {
 		t.Errorf("--version x: exit %d, %q, %q", code, out.String(), errs.String())
 	}
 }
+
+// `agmux setup` does the status line and then the pi extension; --write is for both, a usage error stops before either.
+func TestSetupInstallsThePiExtensionToo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	agent := filepath.Join(home, "pi-agent")
+	os.MkdirAll(agent, 0o755)
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	ext := filepath.Join(agent, "extensions", "agmux.js")
+	var out, errs bytes.Buffer
+	if code := run([]string{"setup"}, &out, &errs); code != 0 || !strings.Contains(out.String(), "would install the extension") {
+		t.Errorf("dry run: %d %q %q", code, out.String(), errs.String())
+	}
+	if _, err := os.Stat(ext); err == nil {
+		t.Fatal("a dry run installed it")
+	}
+	out.Reset()
+	if code := run([]string{"setup", "--write"}, &out, &errs); code != 0 || !strings.Contains(out.String(), "installed "+ext) || !strings.Contains(out.String(), "statusLine.command") {
+		t.Errorf("write: %d %q %q", code, out.String(), errs.String())
+	}
+	if _, err := os.Stat(ext); err != nil {
+		t.Error(err)
+	}
+	out.Reset()
+	if code := run([]string{"setup", "--bogus"}, &out, &errs); code != 2 || strings.Contains(out.String(), "pi:") {
+		t.Errorf("usage: %d %q", code, out.String())
+	}
+}

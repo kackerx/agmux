@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strings"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/board"
 	"github.com/kackerx/agmux/internal/config"
+	"github.com/kackerx/agmux/internal/pi"
 	"github.com/kackerx/agmux/internal/statusline"
 	"github.com/kackerx/agmux/internal/store"
 )
@@ -59,7 +61,8 @@ commands:
   config [--path]
           print the effective config (defaults + ~/.config/agmux/config.toml), or its path
   setup [--write]
-          point ~/.claude/settings.json's statusLine.command at agmux statusline (dry run without --write)
+          point ~/.claude/settings.json's statusLine.command at agmux statusline, and install the pi
+          extension that shows pi sessions on the board (dry run without --write)
 `
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -74,7 +77,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		case "statusline":
 			return statusline.Run(args[1:], os.Stdin, stdout, stderr)
 		case "setup":
-			return statusline.Setup(args[1:], stdout, stderr)
+			code := statusline.Setup(args[1:], stdout, stderr)
+			if code == 2 { // a usage error: nothing more to do
+				return code
+			}
+			fmt.Fprintln(stdout)
+			return max(code, pi.Setup(slices.Contains(args[1:], "--write"), stdout, stderr))
 		case "board":
 			return boardCmd(args[1:])
 		case "config":
