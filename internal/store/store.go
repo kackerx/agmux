@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -384,6 +385,9 @@ func (p *Poller) convert(r Raw) Session {
 		s.Model = modelIn(tail)
 		s.Agent = p.agent(r.Transcript, tail)
 	}
+	if a := recordedAgent(r.SessionID); a != "" { // the SessionStart hook's record beats the transcript, which a /clear leaves without the agent
+		s.Agent = a
+	}
 	// ~8% of transcripts end in a big attachment / long line with no assistant entry in the tail
 	if p.models == nil {
 		p.models = map[string]string{}
@@ -511,6 +515,28 @@ func modelIn(lines [][]byte) string {
 		if json.Unmarshal(lines[i], &e) == nil && e.Type == "assistant" && e.Message.Model != "" && e.Message.Model != "<synthetic>" {
 			return e.Message.Model
 		}
+	}
+	return ""
+}
+
+// recordedAgent is the agent role a SessionStart hook wrote for the session to
+// ${XDG_STATE_HOME:-~/.local/state}/claude-agent/<session id>: one line, "-" for none. "" when there
+// is no such file or no role in it.
+func recordedAgent(sessionID string) string {
+	dir := os.Getenv("XDG_STATE_HOME")
+	if !filepath.IsAbs(dir) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		dir = filepath.Join(home, ".local", "state")
+	}
+	if sessionID == "" || strings.ContainsAny(sessionID, `/\`) {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "claude-agent", sessionID))
+	if a := strings.TrimSpace(string(data)); err == nil && a != "-" {
+		return a
 	}
 	return ""
 }

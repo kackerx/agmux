@@ -24,6 +24,7 @@ var now = time.Date(2026, 10, 12, 4, 0, 0, 0, time.UTC)
 
 func fixture(t *testing.T) []store.Session {
 	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // no claude-agent records of the machine the test runs on
 	data, err := os.ReadFile("../../testdata/sessions.json")
 	if err != nil {
 		t.Fatal(err)

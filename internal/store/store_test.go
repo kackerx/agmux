@@ -32,6 +32,7 @@ func fixture(t *testing.T) []Raw {
 }
 
 func poller(t *testing.T, raw []Raw) *Poller {
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // no claude-agent records of the machine the test runs on
 	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)

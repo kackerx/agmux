@@ -342,3 +342,47 @@ func TestClaudeNameSource(t *testing.T) {
 		t.Errorf("derived: %v %v %v %v", got["sid-1"].NameDerived, got["sid-2"].NameDerived, got["sid-3"].NameDerived, got["sid-4"].NameDerived)
 	}
 }
+
+// The agent role of a session is what the SessionStart hook recorded for it, if that says one; "-", no file or
+// a blank file leave it to the transcript (the agent-setting line), and XDG_STATE_HOME says where the records are.
+func TestRecordedAgent(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	dir := filepath.Join(state, "claude-agent")
+	os.MkdirAll(dir, 0o755)
+	for id, body := range map[string]string{"named": "storefront-qa\n", "padded": "  dev \t\n\n", "dash": "-\n", "blank": " \n", "tail": "from-record\n"} {
+		os.WriteFile(filepath.Join(dir, id), []byte(body), 0o644)
+	}
+	log := filepath.Join(t.TempDir(), "s.jsonl")
+	os.WriteFile(log, []byte(`{"type":"agent-setting","agentSetting":"from-transcript"}`+"\n"), 0o644)
+	p := &Poller{StateDir: t.TempDir(), Sources: []Source{SourceFunc(func() ([]Raw, error) {
+		return []Raw{
+			{ID: "1", SessionID: "named", Transcript: log}, {ID: "2", SessionID: "padded"}, {ID: "3", SessionID: "dash", Transcript: log},
+			{ID: "4", SessionID: "blank", Transcript: log}, {ID: "5", SessionID: "none", Transcript: log}, {ID: "6", SessionID: "none"},
+			{ID: "7", SessionID: "../claude-agent/named", Transcript: log}, {ID: "8", Transcript: log},
+		}, nil
+	})}}
+	if err := p.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"1": "storefront-qa", "2": "dev", "3": "from-transcript", "4": "from-transcript", "5": "from-transcript", "6": "", "7": "from-transcript", "8": "from-transcript"}
+	for _, s := range p.Sessions() {
+		if s.Agent != want[s.ID] {
+			t.Errorf("%s: %q, want %q", s.ID, s.Agent, want[s.ID])
+		}
+	}
+	// the record is read on every poll: a role it gets later shows
+	os.WriteFile(filepath.Join(dir, "dash"), []byte("late\n"), 0o644)
+	p.Refresh()
+	if a := byID(t, p.Sessions(), "3").Agent; a != "late" {
+		t.Errorf("a record that changed: %q", a)
+	}
+	// a relative XDG_STATE_HOME is ignored, as in the XDG spec: then ~/.local/state
+	t.Setenv("XDG_STATE_HOME", "rel")
+	t.Setenv("HOME", state)
+	os.MkdirAll(filepath.Join(state, ".local", "state", "claude-agent"), 0o755)
+	os.WriteFile(filepath.Join(state, ".local", "state", "claude-agent", "named"), []byte("from-home\n"), 0o644)
+	if a := recordedAgent("named"); a != "from-home" {
+		t.Errorf("default dir: %q", a)
+	}
+}
