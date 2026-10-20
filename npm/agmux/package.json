@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "description": "A card board for the coding agents in tmux, in a popup",
   "license": "MIT",
-  "repository": "github:kackerx/agmux",
+  "repository": { "type": "git", "url": "git+https://github.com/kackerx/agmux.git" },
   "homepage": "https://github.com/kackerx/agmux",
   "bin": { "agmux": "bin/agmux.js" },
   "files": ["bin"],
