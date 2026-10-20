@@ -1783,7 +1783,7 @@ func TestOverlay(t *testing.T) {
 	if got := ansi.Strip(overlay("abc", []string{"XXXXX"}, 3)); got != "XXX" {
 		t.Errorf("a box wider than the screen is cut: %q", got)
 	}
-	if !strings.Contains(ansi.Strip(footer(false, 300, "cwd")), "a avatar · q quit") {
+	if !strings.Contains(ansi.Strip(footer(false, 300, "cwd")), "a avatar · t pin · m read · q quit") {
 		t.Errorf("footer: %s", ansi.Strip(footer(false, 300, "cwd")))
 	}
 }
@@ -2035,6 +2035,27 @@ func TestFooterSkipsKeylessAction(t *testing.T) {
 	}
 	if strings.Contains(f, "avatar") || !strings.Contains(f, "a fold") || strings.Contains(f, " avatar") {
 		t.Errorf("%s", f)
+	}
+}
+
+// The footer names the pin and mark-read keys, whatever the config made them.
+func TestFooterPinAndRead(t *testing.T) {
+	text := func(cfg string) string {
+		c, err := config.Parse("cfg", []byte(cfg))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var f []string
+		for _, k := range footerFor(c) {
+			f = append(f, k.text)
+		}
+		return strings.Join(f, " · ")
+	}
+	if got := text(""); !strings.Contains(got, "a avatar · t pin · m read · q quit") {
+		t.Errorf("default: %s", got)
+	}
+	if got := text("[keys]\nmark_read = [\"q\"]\npin = [\"P\"]\n"); !strings.Contains(got, "a avatar · P pin · q read") || strings.Contains(got, "m read") {
+		t.Errorf("rebound: %s", got)
 	}
 }
 
