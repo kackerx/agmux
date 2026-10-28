@@ -57,9 +57,9 @@ func TestRecallThreeBoxes(t *testing.T) {
 	if l := strings.Split(rview(mustRows(t, rtype(t, w.model(), "'export"), "ctrl+f", "down", "space", "esc")), "\n")[3]; !strings.HasPrefix(l, "┏━ 1/3 ━") {
 		t.Errorf("a source ticked off: %q", l)
 	}
-	// nothing found: 0/0 and no preview title
+	// nothing found: 0 of the 4 there are, and no preview title
 	m = rtype(t, m, "zzzzqqq")
-	if l := strings.Split(rview(m), "\n")[3]; !strings.HasPrefix(l, "┏━ 0/0 ━") || strings.Count(l, "┏━ ") != 1 && strings.Contains(l, "cart") {
+	if l := strings.Split(rview(m), "\n")[3]; !strings.HasPrefix(l, "┏━ 0/4 ━") || strings.Count(l, "┏━ ") != 1 && strings.Contains(l, "cart") {
 		t.Errorf("empty: %q", l)
 	}
 	// narrow: two boxes

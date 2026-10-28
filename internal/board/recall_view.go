@@ -141,11 +141,8 @@ func (m recallModel) View() string {
 	return strings.Join(append(lines, m.footer()), "\n")
 }
 
-// listTitle is how many sessions the query found out of how many there are to search: "3/14"; "0/0" for none.
+// listTitle is how many sessions the query found out of how many there are to search: "3/14", "0/14" when nothing is found.
 func (m recallModel) listTitle() string {
-	if len(m.results) == 0 {
-		return "0/0"
-	}
 	return fmt.Sprintf("%d/%d", len(m.results), m.total)
 }
 
