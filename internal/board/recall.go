@@ -49,8 +49,10 @@ type recallModel struct {
 	pick     *recallPick // embedded: what enter chose, for the board to act on
 
 	query    string
-	qpos     int  // the caret in it, in runes (editQuery)
-	locked   bool // the query is kept (enter in the input): j / k choose, enter resumes, / edits again
+	qpos     int       // the caret in it, in runes (editQuery)
+	clickRow int       // the row of the last click on the list, for the double click
+	clickAt  time.Time // and when
+	locked   bool      // the query is kept (enter in the input): j / k choose, enter resumes, / edits again
 	results  []recall.Result
 	sel, top int
 	sources  []string        // those that have a session here
@@ -136,7 +138,7 @@ func (m recallModel) Init() tea.Cmd {
 // is returned for the caller to run once the terminal is theirs again.
 func RunRecall(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) (*RecallResult, error) {
 	useConfig(cfg)
-	m, err := tea.NewProgram(NewRecall(ix, cfg, live, project, query), tea.WithAltScreen()).Run()
+	m, err := tea.NewProgram(NewRecall(ix, cfg, live, project, query), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return RecallOutcome(m), err
 }
 
@@ -168,10 +170,13 @@ func (m recallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.qgen == m.qgen { // an answer to a query that was typed over is not shown
 			m = m.show(msg.results, msg.keep)
 		}
-	case recallEditedMsg:
+	case tea.MouseMsg:
+		return m.mouse(msg)
+	case recallEditedMsg: // bubbletea v1 leaves the mouse off after ExecProcess
 		if msg.err != nil {
 			m.msg = fg(cRed, " "+firstLine(msg.err.Error()))
 		}
+		return m, tea.EnableMouseCellMotion
 	case tea.KeyMsg:
 		return m.key(msg)
 	}
@@ -299,6 +304,60 @@ func (m recallModel) back() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// scrollPreview moves the preview d lines down (up when negative), to its ends and no further.
+func (m recallModel) scrollPreview(d int) recallModel {
+	if r, ok := m.selected(); ok && m.previewOn() {
+		m.pvScroll = min(max(m.pvScroll+d, 0), m.previewScrollMax(r))
+	}
+	return m
+}
+
+// doubleClick is how soon the second click on a row is a confirmation (bubbletea has no such event).
+const doubleClick = 400 * time.Millisecond
+
+// mouse: a click on a session selects it (the input / kept state does not change), a second click on
+// the same one within doubleClick confirms it like enter does; the wheel moves the cursor a row over
+// the list (no coming round) and scrolls the preview three lines over the preview. The query box,
+// the borders, the message line and the footer do nothing, nor does anything while the filter panel
+// is open. Where things are is what View draws: the boxes start at row 3, a box's first line of
+// content is under its top border.
+func (m recallModel) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
+	bh, lw := m.bodyH(), m.listW()
+	if m.panel || e.Action != tea.MouseActionPress || bh == 0 || e.Y < 3 || e.Y >= 3+bh {
+		return m, nil
+	}
+	inList := e.X < lw
+	switch e.Button {
+	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+		d := 1
+		if e.Button == tea.MouseButtonWheelUp {
+			d = -1
+		}
+		if inList {
+			return m.move(d), nil
+		}
+		return m.scrollPreview(3 * d), nil
+	case tea.MouseButtonLeft:
+		row := e.Y - 4
+		if !inList || e.X < 1 || e.X > lw-2 || row < 0 || row >= m.listRows() || m.top+row >= len(m.results) {
+			return m, nil
+		}
+		i, now := m.top+row, m.now()
+		double := !m.clickAt.IsZero() && m.clickRow == i && now.Sub(m.clickAt) <= doubleClick
+		m.msg, m.sel, m.pvScroll = "", i, 0
+		if !double {
+			m.clickRow, m.clickAt = i, now
+			return m, nil
+		}
+		m.clickAt = time.Time{}
+		if m.building || m.searching { // as enter: a window is being made, or the list is not the query's yet
+			return m, nil
+		}
+		return m.enter()
+	}
+	return m, nil
+}
+
 // end leaves the screen: back to the board when it is in one, else the program ends.
 func (m recallModel) end() (tea.Model, tea.Cmd) {
 	if m.embedded {
@@ -360,13 +419,9 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case act("page_up", s):
 		return m.move(-m.listRows() / 2), nil
 	case act("preview_down", s):
-		if r, ok := m.selected(); ok && m.previewOn() {
-			m.pvScroll = min(m.pvScroll+3, m.previewScrollMax(r))
-		}
-		return m, nil
+		return m.scrollPreview(3), nil
 	case act("preview_up", s):
-		m.pvScroll = max(m.pvScroll-3, 0)
-		return m, nil
+		return m.scrollPreview(-3), nil
 	case act("recall_filter", s):
 		m.panel, m.pcur = true, 0
 		return m, nil
