@@ -1,0 +1,10 @@
+{"type":"session","version":3,"id":"019e0000-aaaa-7bbb-8ccc-000000000001","timestamp":"2026-09-02T08:00:00.000Z","cwd":"/work/ledger.worktrees/feature/audit/api"}
+{"type":"model_change","id":"a1","parentId":null,"timestamp":"2026-09-02T08:00:00.100Z","provider":"p","modelId":"m"}
+{"type":"message","id":"a2","parentId":"a1","timestamp":"2026-09-02T08:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"why does the audit export skip rows with a null owner"}],"timestamp":1}}
+{"type":"message","id":"a3","parentId":"a2","timestamp":"2026-09-02T08:00:02.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"The export joins owners with an inner join, so null owners drop out."}]}}
+{"type":"message","id":"a4","parentId":"a3","timestamp":"2026-09-02T08:00:03.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"ls"}}]}}
+{"type":"message","id":"a5","parentId":"a4","timestamp":"2026-09-02T08:00:04.000Z","message":{"role":"toolResult","toolCallId":"c1","content":[{"type":"text","text":"audit export owner null rows listing"}]}}
+{"type":"custom_message","customType":"wiki-session-notice","content":"audit notice that is not said by anyone","display":false,"id":"a6","parentId":"a5","timestamp":"2026-09-02T08:00:05.000Z"}
+{"type":"message","id":"a7","parentId":"a6","timestamp":"2026-09-02T08:00:06.000Z","message":{"role":"user","content":"switch to a left join and add a test"}}
+{"type":"session_info","id":"a8","parentId":"a7","timestamp":"2026-09-02T08:00:07.000Z","name":"audit-export"}
+{"type":"session_info","id":"a9","parentId":"a8","timestamp":"2026-09-02T08:00:08.000Z","name":"audit-export-v2"}

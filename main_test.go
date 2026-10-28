@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/config"
@@ -310,5 +311,85 @@ func TestSetupLanguage(t *testing.T) {
 	os.WriteFile(cfg, []byte("[ui]\nlanguage = \"fr\"\n"), 0o644) // broken: setup goes on, in English
 	if got := say(""); !strings.Contains(got, "dry run") {
 		t.Errorf("broken config: %q", got)
+	}
+}
+
+// T75: `agmux recall --dump [query]` lists the sessions of both agents, one tab-separated line each:
+// source, id, name, project, branch, mtime (UTC), hits, snippet. The cache is under $XDG_CACHE_HOME.
+func TestRecallDump(t *testing.T) {
+	claude, agent, cache := t.TempDir(), t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	t.Setenv("XDG_CACHE_HOME", cache)
+	put := func(dst, src string) string {
+		b, err := os.ReadFile(filepath.Join("internal", "recall", "testdata", src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.MkdirAll(filepath.Dir(dst), 0o755)
+		os.WriteFile(dst, b, 0o644)
+		return dst
+	}
+	cp := put(filepath.Join(claude, "projects", "-work-shopcart", "3f6c1a52.jsonl"), "claude-session.jsonl")
+	pp := put(filepath.Join(agent, "sessions", "--work-ledger--", "2026-09-02T08-00-00-000Z_019e0000.jsonl"), "pi-session.jsonl")
+	os.Chtimes(cp, time.Date(2026, 10, 20, 3, 5, 0, 0, time.UTC), time.Date(2026, 10, 20, 3, 5, 0, 0, time.UTC))
+	os.Chtimes(pp, time.Date(2026, 9, 2, 8, 5, 0, 0, time.UTC), time.Date(2026, 9, 2, 8, 5, 0, 0, time.UTC))
+	dump := func(args ...string) (string, int) {
+		var out, errs bytes.Buffer
+		code := run(append([]string{"recall"}, args...), &out, &errs)
+		if code == 0 && errs.Len() > 0 {
+			t.Errorf("stderr: %q", errs.String())
+		}
+		return out.String(), code
+	}
+	out, code := dump("--dump")
+	rows := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if code != 0 || len(rows) != 2 {
+		t.Fatalf("%d %q", code, out)
+	}
+	wantClaude := "claude\t3f6c1a52\tcart-fix-2\tshopcart\tfix/coupon-order\t2026-10-20T03:05:00Z\t4\tnow add a regression test for the coupon order"
+	wantPi := "pi\t019e0000-aaaa-7bbb-8ccc-000000000001\taudit-export-v2\tapi\t\t2026-09-02T08:05:00Z\t3\tswitch to a left join and add a test"
+	if rows[0] != wantClaude || rows[1] != wantPi {
+		t.Errorf("rows:\n%q\n%q\nwant\n%q\n%q", rows[0], rows[1], wantClaude, wantPi)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "agmux", "recall", "claude-3f6c1a52.json")); err != nil {
+		t.Error("the cache is not under $XDG_CACHE_HOME/agmux/recall:", err)
+	}
+	if out, _ := dump("--dump", "'left", "join"); strings.Count(out, "\n") != 1 || !strings.HasPrefix(out, "pi\t") || !strings.Contains(out, "\t1\t") {
+		t.Errorf("a query, split over arguments: %q", out)
+	}
+	if out, _ := dump("--dump", "zzzqqq"); out != "" {
+		t.Errorf("no match: %q", out)
+	}
+	// --reindex throws the cache away
+	stale := filepath.Join(cache, "agmux", "recall", "claude-3f6c1a52.json")
+	b, _ := os.ReadFile(stale)
+	os.WriteFile(stale, []byte(strings.Replace(string(b), "cart-fix-2", "STALE", 1)), 0o644)
+	if out, _ := dump("--dump"); !strings.Contains(out, "STALE") {
+		t.Fatalf("the cache is trusted: %q", out)
+	}
+	if out, _ := dump("--dump", "--reindex"); strings.Contains(out, "STALE") || !strings.Contains(out, "cart-fix-2") {
+		t.Errorf("--reindex: %q", out)
+	}
+	// "--" ends the options: a query may start with --
+	if out, code := dump("--dump", "--", "--reindex"); code != 0 || out != "" {
+		t.Errorf("-- then a query: exit %d %q", code, out)
+	}
+	if out, code := dump("--dump", "--", "'left"); code != 0 || !strings.HasPrefix(out, "pi\t") {
+		t.Errorf("-- then a query: exit %d %q", code, out)
+	}
+	// a tab or newline in a branch name does not break the columns
+	odd := filepath.Join(claude, "projects", "-w", "odd.jsonl")
+	os.MkdirAll(filepath.Dir(odd), 0o755)
+	os.WriteFile(odd, []byte(`{"type":"user","gitBranch":"x\ty\nz","cwd":"/w","message":{"role":"user","content":"sentence with a strange branch"}}`+"\n"), 0o644)
+	out, _ = dump("--dump", "'strange")
+	if row := strings.TrimRight(out, "\n"); strings.Count(row, "\t") != 7 || strings.Contains(row, "\n") || !strings.Contains(row, "\tx y z\t") {
+		t.Errorf("columns: %q", out)
+	}
+	for _, args := range [][]string{{}, {"--bogus"}, {"--dump", "--bogus"}, {"'x"}} {
+		var out, errs bytes.Buffer
+		if code := run(append([]string{"recall"}, args...), &out, &errs); code != 2 || out.Len() != 0 || !strings.Contains(errs.String(), "usage: agmux recall --dump") {
+			t.Errorf("recall %q: exit %d, %q", args, code, errs.String())
+		}
 	}
 }

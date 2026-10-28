@@ -31,3 +31,15 @@ func ConfigDir() (string, error) {
 	}
 	return filepath.Join(home, ".config", "agmux"), nil
 }
+
+// CacheDir is $XDG_CACHE_HOME/agmux, defaulting to ~/.cache/agmux.
+func CacheDir() (string, error) {
+	if d := os.Getenv("XDG_CACHE_HOME"); filepath.IsAbs(d) {
+		return filepath.Join(d, "agmux"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot locate the cache directory: %w; set $HOME or an absolute $XDG_CACHE_HOME", err)
+	}
+	return filepath.Join(home, ".cache", "agmux"), nil
+}

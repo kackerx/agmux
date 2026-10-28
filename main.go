@@ -6,17 +6,22 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/board"
 	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/pi"
+	"github.com/kackerx/agmux/internal/recall"
 	"github.com/kackerx/agmux/internal/statusline"
 	"github.com/kackerx/agmux/internal/store"
+	"github.com/kackerx/agmux/internal/xdg"
 )
 
 // Set by the release build (-ldflags "-X main.version=…", .goreleaser.yaml); a go install has none.
@@ -57,6 +62,9 @@ commands:
   avatars print every avatar: image sets, then pixel sprites
   avatars import <sheet.png> --name <id> [--layout 30|19] [--force]
           cut a pi-agent-portrait sheet (6 × 5 cells; 19: 5 × 4) into the image set <id>
+  recall --dump [--reindex] [--] [query...]
+          find a closed session by what was said in it: one line per session that matches,
+          tab-separated: source, id, name, project, branch, mtime (UTC), hits, snippet
   statusline [-- <command>]
           Claude Code status line wrapper: saves the payload for the board, runs <command>
   config [--path]
@@ -89,6 +97,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return boardCmd(args[1:])
 		case "config":
 			return configCmd(args[1:])
+		case "recall":
+			return recallCmd(args[1:], stdout, stderr)
 		case "avatars":
 			if len(args) > 1 {
 				return avatarsCmd(args[1:], stdout, stderr)
@@ -216,6 +226,69 @@ func show(w io.Writer, p *store.Poller) error {
 		fmt.Fprintln(w, strings.Join([]string{s.ID, s.Name, s.GroupKey, s.Status, s.Model, pct, s.Agent, bg}, "\t"))
 	}
 	return nil
+}
+
+// recallCmd is `agmux recall --dump [--reindex] [query...]`: the sessions that match, one per line.
+func recallCmd(args []string, stdout, stderr io.Writer) int {
+	const usage = "usage: agmux recall --dump [--reindex] [--] [query...]"
+	var dump, reindex bool
+	for len(args) > 0 && strings.HasPrefix(args[0], "--") {
+		if args[0] == "--" { // what follows is the query, even if it starts with --
+			args = args[1:]
+			break
+		}
+		switch args[0] {
+		case "--dump":
+			dump = true
+		case "--reindex":
+			reindex = true
+		default:
+			fmt.Fprintf(stderr, "agmux: recall: unknown option %s\n%s\n", args[0], usage)
+			return 2
+		}
+		args = args[1:]
+	}
+	if !dump {
+		fmt.Fprintf(stderr, "agmux: recall: only --dump is there so far\n%s\n", usage)
+		return 2
+	}
+	ix, err := openRecall()
+	if err != nil {
+		fmt.Fprintln(stderr, "agmux:", err)
+		return 1
+	}
+	if reindex {
+		if err := ix.Reset(); err != nil {
+			fmt.Fprintln(stderr, "agmux:", err)
+			return 1
+		}
+	}
+	if err := ix.Update(); err != nil { // some transcript could not be read: say so, show the rest
+		fmt.Fprintln(stderr, "agmux: recall:", err)
+	}
+	one := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
+	for _, r := range ix.Search(strings.Join(args, " ")) {
+		fmt.Fprintln(stdout, strings.Join([]string{r.Source, one.Replace(r.ID), one.Replace(r.Title()), one.Replace(r.Project), one.Replace(r.Branch),
+			time.Unix(0, r.MTime).UTC().Format(time.RFC3339), strconv.Itoa(r.Hits), one.Replace(r.Snippet.Text)}, "\t"))
+	}
+	return 0
+}
+
+// openRecall is the index of Claude Code's and pi's transcripts, cached under $XDG_CACHE_HOME/agmux/recall.
+func openRecall() (*recall.Index, error) {
+	cache, err := xdg.CacheDir()
+	if err != nil {
+		return nil, err
+	}
+	claude, err := recall.ClaudeDir()
+	if err != nil {
+		return nil, err
+	}
+	agent, err := pi.Dir()
+	if err != nil {
+		return nil, err
+	}
+	return &recall.Index{Dir: filepath.Join(cache, "recall"), Sources: []recall.Source{recall.Claude{Dir: claude}, recall.Pi{Dir: agent}}}, nil
 }
 
 // configCmd is `agmux config [--path]`: the effective config (defaults + config.toml), or its path.
