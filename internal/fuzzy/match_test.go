@@ -109,3 +109,30 @@ func TestEdgeTerms(t *testing.T) {
 		t.Errorf("a term with an accent keeps it: %v", got)
 	}
 }
+
+// FilterParallel gives the very same matches as Filter: scores, positions and order (ties in the
+// items' order), for lists that are one piece and lists that are cut into several.
+func TestFilterParallelEqualsFilter(t *testing.T) {
+	words := []string{"coupon", "cart", "total", "deploy", "pipeline", "kitty", "tmux", "popup", "审计", "导出", "Build", "STEP", "claude", "pi"}
+	for _, n := range []int{0, 1, 100, minChunk*2 - 1, minChunk * 2, 7000, 20001} {
+		items := make([]string, n)
+		for i := range items {
+			items[i] = fmt.Sprintf("%s %s %s %d", words[i%len(words)], words[(i*7+3)%len(words)], words[(i/3)%len(words)], i%13)
+		}
+		for _, p := range []string{"", "coupon", "cart total", "'tmux !popup", "^claude", "pi$", "审计", "BUILD", "zzzz", "dep pip", "!kitty"} {
+			want, got := Filter(p, items), FilterParallel(p, items)
+			if len(want) != len(got) || len(want) > 0 && !reflect.DeepEqual(want, got) {
+				t.Fatalf("%d items, %q: %d matches, want %d (first differing: %v)", n, p, len(got), len(want), firstDiff(want, got))
+			}
+		}
+	}
+}
+
+func firstDiff(a, b []Match) string {
+	for i := range min(len(a), len(b)) {
+		if !reflect.DeepEqual(a[i], b[i]) {
+			return fmt.Sprintf("#%d %+v vs %+v", i, a[i], b[i])
+		}
+	}
+	return "length"
+}

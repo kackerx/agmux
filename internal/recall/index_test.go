@@ -178,7 +178,7 @@ func TestUpdateReadsAgainWhatShrankOrChangedVersion(t *testing.T) {
 	// a cache of another format is read again
 	cache := filepath.Join(w.cache, "claude-s1.json")
 	b, _ := os.ReadFile(cache)
-	os.WriteFile(cache, []byte(strings.Replace(string(b), `"v":1`, `"v":0`, 1)), 0o644)
+	os.WriteFile(cache, []byte(strings.Replace(string(b), fmt.Sprintf(`"v":%d`, Version), `"v":0`, 1)), 0o644)
 	w.update()
 	if got := w.src.readsOf("s1.jsonl"); len(got) != 3 || got[2] != 0 {
 		t.Errorf("old cache version: reads %v", got)
@@ -375,13 +375,21 @@ func TestProject(t *testing.T) {
 	run("commit", "-q", "--allow-empty", "-m", "x")
 	wt := filepath.Join(dir, "ledger.worktrees", "audit")
 	run("worktree", "add", "-q", "-b", "audit", wt)
+	os.MkdirAll(filepath.Join(wt, "pkg", "api"), 0o755) // a session may be in a directory of the worktree
+	// a repository whose git directory is elsewhere is not a worktree, and is named after its checkout
+	sep := filepath.Join(dir, "sep")
+	os.MkdirAll(filepath.Join(dir, "gitdata"), 0o755)
+	if out, err := exec.Command("git", "init", "-q", "--separate-git-dir", filepath.Join(dir, "gitdata", "real.git"), sep).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
 	ix := &Index{}
-	for cwd, want := range map[string]string{
-		repo: "ledger", wt: "ledger", filepath.Join(wt, "."): "ledger",
-		dir: filepath.Base(dir), filepath.Join(dir, "gone", "api"): "api", "": "",
+	for cwd, want := range map[string][2]string{
+		sep: {"sep", ""}, filepath.Join(wt, "pkg", "api"): {"ledger", "audit"},
+		repo: {"ledger", ""}, wt: {"ledger", "audit"}, filepath.Join(wt, "."): {"ledger", "audit"},
+		filepath.Join(repo, "sub"): {"sub", ""}, dir: {filepath.Base(dir), ""}, filepath.Join(dir, "gone", "api"): {"api", ""}, "": {"", ""},
 	} {
-		if got := ix.project(cwd); got != want {
-			t.Errorf("project(%q) = %q, want %q", cwd, got, want)
+		if p, w := ix.project(cwd); p != want[0] || w != want[1] {
+			t.Errorf("project(%q) = %q, %q; want %q, %q", cwd, p, w, want[0], want[1])
 		}
 	}
 }
@@ -458,5 +466,19 @@ func TestSaveRemovesItsTempFileOnFailure(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".tmp-*")); len(left) != 0 {
 		t.Errorf("temp files %v", left)
+	}
+}
+
+// The command that opens a session again comes from its own source; an unknown one has none.
+func TestResumeIsOfTheSource(t *testing.T) {
+	ix := &Index{Sources: []Source{Claude{}, Pi{}}}
+	if got := ix.Resume(&Entry{Source: "claude", Head: Head{ID: "c1", Path: "/p/c1.jsonl"}}); strings.Join(got, " ") != "claude --resume c1" {
+		t.Errorf("claude: %q", got)
+	}
+	if got := ix.Resume(&Entry{Source: "pi", Head: Head{ID: "p1", Path: "/p/p1.jsonl"}}); strings.Join(got, " ") != "pi --session /p/p1.jsonl" {
+		t.Errorf("pi: %q", got)
+	}
+	if got := ix.Resume(&Entry{Source: "codex"}); got != nil {
+		t.Errorf("codex: %q", got)
 	}
 }

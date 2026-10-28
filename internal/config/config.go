@@ -24,7 +24,9 @@ import (
 // Actions, in the order `agmux config` prints them.
 var Actions = []string{
 	"up", "down", "left", "right", "page_down", "page_up", "jump", "fold", "preview", "focus_preview", "leave_preview", "preview_up", "preview_down",
-	"reply", "handoff", "search", "next_match", "prev_match", "clear_filter", "flash", "group", "group_cwd", "group_project", "group_session", "group_state", "restart", "kill", "review", "avatar", "pin", "mark_read", "quit", "exit", "confirm",
+	"reply", "handoff", "search", "next_match", "prev_match", "clear_filter", "flash", "group", "group_cwd", "group_project", "group_session", "group_state", "restart", "kill", "review", "avatar", "pin", "mark_read",
+	"recall", "recall_filter", "recall_scope", "recall_copy", "recall_open", "recall_toggle", "recall_all", "recall_none",
+	"quit", "exit", "confirm",
 }
 
 var defaultKeys = map[string][]string{
@@ -35,6 +37,8 @@ var defaultKeys = map[string][]string{
 	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "clear_filter": {"esc"}, "flash": {"s"}, "group": {"g"},
 	"group_cwd": {}, "group_project": {}, "group_session": {}, "group_state": {},
 	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"}, "pin": {"t"}, "mark_read": {"m"},
+	"recall": {"?"}, "recall_filter": {"ctrl+f"}, "recall_scope": {"ctrl+t"}, "recall_copy": {"ctrl+y"}, "recall_open": {"ctrl+o"},
+	"recall_toggle": {"space"}, "recall_all": {"a"}, "recall_none": {"A"},
 	"quit": {"q", "esc"}, "exit": {"Q"}, "confirm": {"y"},
 }
 
@@ -287,7 +291,8 @@ func Parse(path string, data []byte) (*Config, error) {
 
 // modal actions only act in their own mode (the kill prompt, pass-through, a kept filter), so they
 // may share keys with the board's; KeyMap leaves them out, Is asks about them.
-var modal = map[string]bool{"confirm": true, "leave_preview": true, "clear_filter": true}
+var modal = map[string]bool{"confirm": true, "leave_preview": true, "clear_filter": true,
+	"recall_filter": true, "recall_scope": true, "recall_copy": true, "recall_open": true, "recall_toggle": true, "recall_all": true, "recall_none": true}
 
 // sentAs: key names bubbletea never reports, and what it reports instead.
 var sentAs = map[string]string{"ctrl+i": "tab", "ctrl+m": "enter"}
@@ -351,7 +356,11 @@ var actionUse = map[string]string{
 	"review": "show the diff of the focused session's repo (hunk, else git diff)", "avatar": "open or close the avatar picker under the focused card",
 	"pin": "pin the focused card to the top of its group", "mark_read": "mark the focused card's done as seen (it turns idle)",
 	"clear_filter": "drop a kept search filter before anything else", "preview_up": "scroll the preview back", "preview_down": "scroll the preview forward",
-	"quit": "with `board --stay` inside a popup: hide instead", "exit": "always quit, even with --stay", "confirm": "answer yes to a prompt",
+	"recall": "find a closed session by what was said in it (agmux recall)", "recall_filter": "recall: open / close the filter panel (sources, scope)",
+	"recall_scope": "recall: switch between this project and all history", "recall_copy": "recall: copy the command that resumes the session",
+	"recall_open": "recall: open the transcript in $EDITOR", "recall_toggle": "recall: in the filter panel, tick / pick the line", "recall_all": "recall: in the filter panel, tick every source",
+	"recall_none": "recall: in the filter panel, clear every source",
+	"quit":        "with `board --stay` inside a popup: hide instead", "exit": "always quit, even with --stay", "confirm": "answer yes to a prompt",
 }
 
 var colorUse = map[string]string{
@@ -384,7 +393,8 @@ func (c *Config) String() string {
 # "tab", "shift+tab", "space", "backspace", "up"/"down"/"left"/"right", "home"/"end", "pgup"/"pgdown",
 # "f1".."f20", "ctrl+<letter>", "alt+<key>". An uppercase letter means shift+letter.
 # ctrl+c cannot be bound (it always quits); ctrl+i and ctrl+m are tab and enter.
-# A key may be bound to only one action, but confirm, leave_preview and clear_filter may share keys with others.
+# A key may be bound to only one action, but confirm, leave_preview, clear_filter and the recall_* ones (all but
+# recall) may share keys with others.
 # While a prompt takes text (search, flash) letters are text: enter and jump's non-character keys
 # keep the filter, esc and quit's non-character keys cancel it; backspace, ctrl+h, ctrl+c are fixed.
 `)

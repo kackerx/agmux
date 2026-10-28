@@ -14,14 +14,15 @@ import (
 )
 
 // Version is the cache format: an entry of another version is read again from its transcript.
-const Version = 1
+const Version = 2
 
 // Entry is what is known of one transcript: its head, how far it has been read, and its sentences.
 // It is the cache file <cache dir>/<source>-<transcript name>.json.
 type Entry struct {
-	V       int    `json:"v"`
-	Source  string `json:"source"`
-	Project string `json:"project"` // the main repository's name for a worktree, else the directory's
+	V        int    `json:"v"`
+	Source   string `json:"source"`
+	Project  string `json:"project"`      // the main repository's name for a worktree, else the directory's
+	Worktree string `json:"wt,omitempty"` // the worktree's own directory name, "" when the directory is the main checkout (or not in git)
 	Head
 	MTime   int64  `json:"mtime"` // of the transcript, ns since the epoch
 	Size    int64  `json:"size"`
@@ -51,11 +52,12 @@ type Index struct {
 	mu      sync.Mutex
 	entries []*Entry
 	gen     int // counts changes: what is derived from entries is stale when it moved
-	repos   map[string]string
+	repos   map[string][2]string
 
 	cached        *corpus // what Search matches, built from cachedEntries when gen was cachedGen
 	cachedEntries []*Entry
 	cachedGen     int
+	cachedKey     string
 }
 
 // Reset removes the cache: the next Update reads everything again.
@@ -188,7 +190,7 @@ func (ix *Index) entry(j job) (*Entry, error) {
 	e.Path, e.MTime, e.Size, e.Offset = j.path, mtime, size, end
 	e.add(lines)
 	if e.Project == "" {
-		e.Project = ix.project(e.CWD)
+		e.Project, e.Worktree = ix.project(e.CWD)
 	}
 	return e, save(cache, e)
 }
@@ -268,30 +270,61 @@ func save(path string, e *Entry) error {
 }
 
 // project is the name of the repository the directory belongs to (a worktree is under its main one),
-// else the directory's own name; one question to git per directory.
-func (ix *Index) project(cwd string) string {
+// else the directory's own name; and, for a linked worktree, its own directory's name. One question
+// to git per directory.
+func (ix *Index) project(cwd string) (project, worktree string) {
 	if cwd == "" {
-		return ""
+		return "", ""
 	}
 	ix.mu.Lock()
-	p, ok := ix.repos[cwd]
+	r, ok := ix.repos[cwd]
 	ix.mu.Unlock()
 	if ok {
-		return p
+		return r[0], r[1]
 	}
-	p = filepath.Base(cwd)
+	r[0] = filepath.Base(cwd)
 	if _, err := os.Stat(cwd); err == nil {
-		if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
-			if common := strings.TrimSpace(string(out)); common != "" {
-				p = filepath.Base(filepath.Dir(common))
+		if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir", "--show-toplevel").Output(); err == nil {
+			if f := strings.Split(strings.TrimSpace(string(out)), "\n"); len(f) == 3 {
+				common, gitDir, top := f[0], f[1], f[2]
+				r[0] = filepath.Base(top) // a submodule, a separate git dir: the checkout's own name
+				if filepath.Base(common) == ".git" {
+					r[0] = filepath.Base(filepath.Dir(common)) // a worktree is under the repository it was made from
+				}
+				if gitDir != common { // a linked worktree has a git dir of its own
+					r[1] = filepath.Base(top)
+				}
 			}
 		}
 	}
 	ix.mu.Lock()
 	if ix.repos == nil {
-		ix.repos = map[string]string{}
+		ix.repos = map[string][2]string{}
 	}
-	ix.repos[cwd] = p
+	ix.repos[cwd] = r
 	ix.mu.Unlock()
+	return r[0], r[1]
+}
+
+// Resume is the command that opens e again, "" argv when its source is not one of the index's.
+func (ix *Index) Resume(e *Entry) []string {
+	for _, s := range ix.Sources {
+		if s.Name() == e.Source {
+			return s.Resume(e.Head)
+		}
+	}
+	return nil
+}
+
+// ProjectOf is the project of a directory, as the sessions' are named (see Entry.Project).
+func (ix *Index) ProjectOf(cwd string) string {
+	p, _ := ix.project(cwd)
 	return p
+}
+
+// Gen counts the changes of the entries: what is derived from them is stale when it moved.
+func (ix *Index) Gen() int {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	return ix.gen
 }

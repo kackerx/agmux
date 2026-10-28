@@ -167,3 +167,103 @@ func TestSearchScoreBeatsAgeAndRole(t *testing.T) {
 		t.Errorf("the better sentence is the snippet even when yours comes first: %q hits %d", r.Snippet.Text, r.Hits)
 	}
 }
+
+// The hits are the sentences that match by their own text; a query that only names the project or the
+// branch finds the session and has none, and the snippet is the best sentence that matched by its text.
+func TestSearchHitsCountOnlyTheSentenceText(t *testing.T) {
+	a := ent("a", "claude", "shopcart", "main", "named", 100, []string{"first words", "second words"}, []string{"third words"})
+	b := ent("b", "claude", "other", "main", "named", 90, []string{"about the shopcart total", "nothing"}, []string{"shopcart again"})
+	rs := idx(a, b).Search("'shopcart")
+	if len(rs) != 2 {
+		t.Fatalf("both match: %v", ids(rs))
+	}
+	for _, r := range rs {
+		switch r.ID {
+		case "a":
+			if r.Hits != 0 || r.Snippet.Text == "" {
+				t.Errorf("a matches by its project only: hits %d snippet %q", r.Hits, r.Snippet.Text)
+			}
+		case "b":
+			if r.Hits != 2 || r.Snippet.Text != "about the shopcart total" {
+				t.Errorf("b: hits %d snippet %q (yours first among equals)", r.Hits, r.Snippet.Text)
+			}
+		}
+	}
+	// a sentence that matched only through the prefix is not the snippet when another matched by its text
+	c := ent("c", "claude", "p", "", "payments", 80, []string{"hello there", "the payments table is empty"}, nil)
+	if r := idx(c).Search("'payments")[0]; r.Hits != 1 || r.Snippet.Text != "the payments table is empty" {
+		t.Errorf("hits %d snippet %q", r.Hits, r.Snippet.Text)
+	}
+}
+
+func TestSearchFilters(t *testing.T) {
+	a := ent("a", "claude", "shop", "", "n", 300, []string{"deploy it"}, nil)
+	b := ent("b", "pi", "shop", "", "n", 200, []string{"deploy it"}, nil)
+	c := ent("c", "claude", "ledger", "", "n", 100, []string{"deploy it"}, nil)
+	ix := idx(a, b, c)
+	for _, tc := range []struct {
+		f    Filter
+		want string
+	}{
+		{Filter{}, "a b c "}, {Filter{Sources: map[string]bool{"pi": true}}, "b "}, {Filter{Sources: map[string]bool{"claude": true, "pi": false}}, "a c "},
+		{Filter{Sources: map[string]bool{}}, ""}, {Filter{Project: "shop"}, "a b "}, {Filter{Project: "shop", Sources: map[string]bool{"claude": true}}, "a "}, {Filter{Project: "nowhere"}, ""},
+	} {
+		if got := ids(ix.SearchIn("'deploy", tc.f)); got != tc.want {
+			t.Errorf("%+v: %q, want %q", tc.f, got, tc.want)
+		}
+		if got := ids(ix.SearchIn("", tc.f)); got != tc.want { // no query: the same sessions, by age
+			t.Errorf("%+v, no query: %q, want %q", tc.f, got, tc.want)
+		}
+	}
+}
+
+// What was searched for last does not stand in for what is asked now: the filters that differ only in
+// the project, or in nil against empty sources, are different questions.
+func TestSearchFilterChangesAreSeen(t *testing.T) {
+	a := ent("a", "claude", "shop", "", "n", 300, []string{"deploy it"}, nil)
+	c := ent("c", "claude", "ledger", "", "n", 100, []string{"deploy it"}, nil)
+	ix := idx(a, c)
+	steps := []struct {
+		f    Filter
+		want string
+	}{
+		{Filter{Project: "shop"}, "a "}, {Filter{Project: "ledger"}, "c "}, {Filter{}, "a c "}, {Filter{Sources: map[string]bool{}}, ""}, {Filter{}, "a c "},
+		{Filter{Sources: map[string]bool{"claude": false}}, ""}, {Filter{Sources: map[string]bool{"claude": true}}, "a c "},
+	}
+	for i, s := range steps {
+		if got := ids(ix.SearchIn("'deploy", s.f)); got != s.want {
+			t.Errorf("step %d %+v: %q, want %q", i, s.f, got, s.want)
+		}
+	}
+}
+
+// The matches come in the order the sentences were said, not the order of their scores.
+func TestMatchesAreInTheOrderSaid(t *testing.T) {
+	e := &Entry{Users: []Line{{Text: "d e p l o y spread out", At: time.Unix(1, 0)}, {Text: "deploy exact", At: time.Unix(2, 0)}}}
+	ms := e.Matches("deploy")
+	if len(ms) != 2 || ms[0].I != 0 || ms[1].I != 1 {
+		t.Errorf("%+v", ms)
+	}
+}
+
+func TestChronoAndMatches(t *testing.T) {
+	e := &Entry{Users: []Line{{Text: "u1 deploy", At: time.Unix(10, 0)}, {Text: "u2 later", At: time.Unix(30, 0)}}, Replies: []Line{{Text: "r1 deploy done", At: time.Unix(20, 0)}}}
+	var got []string
+	for _, l := range e.Chrono() {
+		got = append(got, string(l.Role)+l.Text)
+	}
+	if want := "[>u1 deploy <r1 deploy done >u2 later]"; fmt.Sprint(got) != want {
+		t.Errorf("%v, want %s", got, want)
+	}
+	ms := e.Matches("'deploy")
+	if len(ms) != 2 || ms[0].I != 0 || ms[1].I != 1 || len(ms[0].Pos) != 6 || ms[0].Pos[0] != 3 {
+		t.Errorf("%+v", ms)
+	}
+	if e.Matches("  ") != nil {
+		t.Error("no query, no matches")
+	}
+	e.Users[1].At = time.Time{} // a sentence without a time: the order of the lists
+	if l := e.Chrono(); l[0].Text != "u1 deploy" || l[1].Text != "u2 later" || l[2].Role != '<' {
+		t.Errorf("no times: %+v", l)
+	}
+}
