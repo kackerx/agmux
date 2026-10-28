@@ -3,13 +3,25 @@
 Each card is matched as `name + " " + branch + " " + cwd` (fzf's FuzzyMatchV2); the matched characters are drawn dark on a yellow background (T22: colors.match #f2d06b; they used to be pink text).
 Fixture strings: a1 `alpha-main feature/qa-… ~/work/alpha`, a2 `pj-fallback main ~/work/alpha` (no summary: named after its project), b1 `bravo-29 main ~/work/bravo`, e1 `echo-long main /zzz/agmux-e2e/…`.
 """
-import json, unittest
+import json, re, unittest
 import test_t12 as _t12
 from lib import *
+from lib_recall import cursor
 from test_t3 import ready, last_text_row, border_colours, C_FOCUS, NAMES, by_name
 from test_t11 import PreviewBase, CAT_CMD, MARK_CMD, PV_X
 
 F = C_FOCUS
+
+
+def typing(t):
+    """T79: the filter input's caret is the terminal's own (no drawn ▏ in the text any more): the input is open while the real cursor is shown on the top row"""
+    x, y, vis = cursor(t); return vis and y == 0
+
+
+def query_of(t):
+    """what is typed into the open input (the top row reads ` / query<spaces>n/total`), None when the input is not open"""
+    if not typing(t): return None
+    top = t.snap()[0].text; m = re.match(r"\s*/ (.*?)\s{2,}\d+/\d+\s*$", top); return m.group(1) if m else None
 MATCH, MATCH_INK = ("rgb", 242, 208, 107), ("rgb", 44, 42, 46)  # T22: yellow background (#f2d06b), dark text (#2d2a2e rounded by lipgloss)
 ALL = ["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字", "bravo-29", "bravo-bg", "charlie-30", "charlie-59", "delta-60", "echo-long"]  # NOT layout order; use sorted()
 
@@ -53,10 +65,10 @@ class Base(unittest.TestCase):
 class Input(Base):
     def test_slash_turns_the_top_row_into_an_input_with_a_counter(self):
         self.t.keys("/"); time.sleep(0.4)
-        top = self.top(); self.assertTrue(top.lstrip().startswith("/ ▏"), top); self.assertTrue(top.endswith("9/9"), top)
+        top = self.top(); self.assertEqual(query_of(self.t), "", top); self.assertTrue(top.endswith("9/9"), top)
         self.assertIn("enter keep the filter · esc clear it", last_text_row(self.t.snap()))
         self.t.lit("brav"); time.sleep(0.5)
-        top = self.top(); self.assertIn("/ brav▏", top); self.assertEqual(self.count(), (2, 9))
+        top = self.top(); self.assertEqual(query_of(self.t), "brav", top); self.assertEqual(self.count(), (2, 9))
         self.assertEqual(sorted(self.names()), ["bravo-29", "bravo-bg"], "only the matching cards are drawn")
         self.assertEqual(self.titles(), ["▾ ~/work/bravo (2)"], "groups without a match disappear; the count is of the visible cards")
 
@@ -66,8 +78,8 @@ class Input(Base):
     def test_typing_filters_live_and_ctrl_h_is_backspace(self):
         self.t.keys("/"); self.t.lit("alpx"); time.sleep(0.4); self.assertEqual(self.names(), [], "alpx matches nothing")
         self.t.keys("C-h"); time.sleep(0.4)
-        self.assertIn("/ alp▏", self.top()); self.assertEqual(sorted(self.names()), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字"]))
-        self.t.keys("BSpace"); time.sleep(0.3); self.assertIn("/ al▏", self.top())
+        self.assertEqual(query_of(self.t), "alp"); self.assertEqual(sorted(self.names()), sorted(["alpha-main", "pj-fallback", "告警会话-超长中文名字-用来测试宽字"]))
+        self.t.keys("BSpace"); time.sleep(0.3); self.assertEqual(query_of(self.t), "al")
         self.assertTrue(self.t.alive(), "ctrl+h is backspace, not a command")
 
     def test_no_match(self):
@@ -158,7 +170,7 @@ class Highlight(Base):
 class Keeping(Base):
     def test_enter_keeps_the_filter_and_focuses_the_first_match(self):
         self.search("bravo", enter=True)
-        top = self.top(); self.assertIn("/ bravo", top); self.assertNotIn("▏", top, "the caret is gone"); self.assertEqual(self.count(), (2, 9))
+        top = self.top(); self.assertIn("/ bravo", top); self.assertFalse(typing(self.t), "the caret is gone"); self.assertEqual(self.count(), (2, 9))
         self.assertEqual(sorted(self.names()), ["bravo-29", "bravo-bg"], "still filtered")
         self.assertEqual(self.focused(), ["bravo-29"], "focus on the first matching card")
         self.assertIn("j/k h/l move", last_text_row(self.t.snap()), "the normal footer is back")
@@ -182,8 +194,8 @@ class Keeping(Base):
 
     def test_slash_again_edits_the_kept_query(self):
         self.search("alpha", enter=True); self.assertEqual(len(self.names()), 3)
-        self.t.keys("/"); time.sleep(0.3); self.assertIn("/ alpha▏", self.top(), "the query is back in the input")
-        self.t.lit(" main"); time.sleep(0.5); self.assertIn("/ alpha main▏", self.top())
+        self.t.keys("/"); time.sleep(0.3); self.assertEqual(query_of(self.t), "alpha", "the query is back in the input")
+        self.t.lit(" main"); time.sleep(0.5); self.assertEqual(query_of(self.t), "alpha main")
         self.assertEqual(self.count(), (3, 9), "alpha main: a1 name+…, a2 and a3 have main in the branch")
 
     def test_filter_empty_means_everything_in_layout_order(self):
@@ -223,7 +235,7 @@ class WithPanes(PreviewBase):
         self.enter_passthrough_on_a3()
         self.t.lit("/"); time.sleep(0.5)
         self.assertEqual(self.cat("a3"), "/", "the pane got the slash")
-        self.assertNotIn("▏", self.t.snap()[0].text, "no filter input opened"); self.assertTrue(self.preview_focused())
+        self.assertFalse(typing(self.t), "no filter input opened"); self.assertTrue(self.preview_focused())
 
 
 class Review(Base):
@@ -233,7 +245,7 @@ class Review(Base):
         self.t.lit("\x1b[200~" + text + "\x1b[201~"); time.sleep(0.5)
 
     def query(self):
-        m = re.match(r"\s*/ (.*?)▏", self.top()); return m.group(1) if m else None
+        return query_of(self.t)
 
     def test_no_match_then_enter_then_slash_still_edits_the_query(self):
         self.search("qqqq", enter=True)
@@ -349,7 +361,7 @@ class SecondRound(Base):
 
     def test_f_while_typing_in_the_input_is_text_not_fold(self):
         self.t.keys("/"); self.t.lit("f"); time.sleep(0.3)
-        self.assertIn("/ f▏", self.top()); self.assertEqual(len(self.names()), self.count()[0])
+        self.assertEqual(query_of(self.t), "f"); self.assertEqual(len(self.names()), self.count()[0])
 
     def test_f_without_a_filter_still_folds_and_unfolds(self):
         self.t.keys("f"); time.sleep(0.4); self.assertIn("▸ ~/work/alpha (3)", self.t.text()); self.assertEqual(len(self.names()), 6)
@@ -372,14 +384,14 @@ class ThirdRound(Base):
     def test_enter_on_an_empty_query_closes_the_input_and_keeps_the_focus(self):
         self.to_b1()
         self.t.keys("/"); time.sleep(0.3); self.t.keys("Enter"); time.sleep(0.5)
-        self.assertNotIn("▏", self.top(), "the input is closed"); self.assertEqual(len(self.names()), 9)
+        self.assertFalse(typing(self.t), "the input is closed"); self.assertEqual(len(self.names()), 9)
         self.assertEqual(self.focused(), ["bravo-29"], "the focus stays on the card it was on before /")
 
     def test_enter_after_typing_and_erasing_everything_does_the_same(self):
         self.to_b1()
         self.t.keys("/"); self.t.lit("ab"); time.sleep(0.3); self.t.keys("C-h"); self.t.keys("C-h"); time.sleep(0.3)
         self.assertEqual(self.count(), (9, 9)); self.t.keys("Enter"); time.sleep(0.5)
-        self.assertNotIn("▏", self.top()); self.assertEqual(self.focused(), ["bravo-29"])
+        self.assertFalse(typing(self.t)); self.assertEqual(self.focused(), ["bravo-29"])
         self.t.keys("Enter"); self.assertTrue(wait(lambda: self.env.actions(), 3)); self.assertEqual(self.env.actions(), [["switch", "b1"]], "and enter then jumps from there")
 
     def test_esc_after_keeping_a_query_with_no_match_returns_to_the_card_from_before(self):
@@ -394,9 +406,9 @@ class ReviewWithPanes(WithPanes):
     def test_clicking_the_preview_while_the_input_is_open_closes_the_input_and_enters_the_passthrough(self):
         self.press("p"); self.assertTrue(wait(lambda: self.pv() is not None, 4))
         self.t.keys("/"); time.sleep(0.3); self.t.lit("al"); time.sleep(0.3)
-        self.assertIn("▏", self.t.snap()[0].text); self.assertIn("enter keep the filter", last_text_row(self.t.snap()))
+        self.assertTrue(typing(self.t)); self.assertIn("enter keep the filter", last_text_row(self.t.snap()))
         self.t.click(PV_X + 20, 12); time.sleep(0.6)
-        self.assertNotIn("▏", self.t.snap()[0].text, "the input is closed")
+        self.assertFalse(typing(self.t), "the input is closed")
         bar = last_text_row(self.t.snap()); self.assertIn("keys go to the pane", bar); self.assertNotIn("enter keep", bar)
         self.assertTrue(self.preview_focused())
 

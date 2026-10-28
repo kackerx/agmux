@@ -234,7 +234,7 @@ class Keys(Base):
 
     def test_the_default_template_lists_the_new_actions_with_their_default_keys(self):
         out = plain_config(self.cli("config").stdout); keys = out.split("[keys]")[1].split("[colors]")[0]
-        for line in ('clear_filter = ["esc"]', 'preview_up = ["pgup"]', 'preview_down = ["pgdown"]'): self.assertIn(line, keys)
+        self.assertIn('clear_filter = ["esc"]', keys); self.assertRegex(keys, r'preview_up = \["pgup"(, "ctrl\+p")?\]'); self.assertRegex(keys, r'preview_down = \["pgdown"(, "ctrl\+n")?\]')  # T81 added ctrl+p / ctrl+n (test_t81 pins them)
         full = self.cli("config").stdout
         self.assertRegex(full, r'clear_filter = \["esc"\] +# default: esc'); self.assertRegex(full, r'language = "en" +# default: "en"')
 
@@ -260,7 +260,7 @@ class TypingStates(Base):
 
     def test_enter_accepts_and_esc_cancels_even_when_quit_and_jump_are_only_letters(self):
         t = self.start('[keys]\nquit = ["q"]\njump = ["J"]\n'); n1 = self.n_cards(t); self.assertLess(n1, self.n0)
-        t.keys("Enter"); time.sleep(0.5); self.assertEqual(self.n_cards(t), n1, "enter keeps the filter"); self.assertNotIn("alpha▏", "\n".join(self.rows(t)))
+        t.keys("Enter"); time.sleep(0.5); self.assertEqual(self.n_cards(t), n1, "enter keeps the filter")
         t.keys("/"); time.sleep(0.2); t.lit("x"); time.sleep(0.3); t.esc(); self.assertTrue(wait(lambda: self.n_cards(t) == self.n0, 3), "esc cancels the typing and the filter with it"); self.assertTrue(t.alive())
 
     def test_a_non_character_key_of_jump_accepts_and_one_of_quit_cancels(self):
@@ -269,9 +269,9 @@ class TypingStates(Base):
         t.keys("/"); time.sleep(0.2); t.lit("x"); time.sleep(0.3); t.keys("C-g"); self.assertTrue(wait(lambda: self.n_cards(t) == self.n0, 3), "ctrl+g (a quit key that is not a character) cancels"); self.assertTrue(t.alive())
 
     def test_a_letter_bound_to_quit_or_jump_is_text_in_the_prompt(self):
-        t = self.start('[keys]\nquit = ["q"]\n'); t.lit("q"); time.sleep(0.4); self.assertTrue(t.alive()); self.assertIn("alphaq▏", "\n".join(self.rows(t)), "q was typed, not obeyed")
-        t.keys("BSpace"); time.sleep(0.3); self.assertIn("alpha▏", "\n".join(self.rows(t)), "backspace is fixed")
-        t.keys("C-h"); time.sleep(0.3); self.assertIn("alph▏", "\n".join(self.rows(t)), "ctrl+h is fixed")
+        t = self.start('[keys]\nquit = ["q"]\n'); t.lit("q"); time.sleep(0.4); self.assertTrue(t.alive()); self.assertIn("/ alphaq", "\n".join(self.rows(t)), "q was typed, not obeyed (T79: the caret is the terminal's own, no drawn ▏ in the text)")
+        t.keys("BSpace"); time.sleep(0.3); self.assertRegex("\n".join(self.rows(t)), r"/ alpha(?!q)", "backspace is fixed")
+        t.keys("C-h"); time.sleep(0.3); self.assertRegex("\n".join(self.rows(t)), r"/ alph(?!a)", "ctrl+h is fixed")
 
     def test_flash_prompt_has_the_same_exits(self):
         t = self.board(conf='[keys]\nquit = ["q"]\n'); t.keys("s"); time.sleep(0.3); t.lit("alp"); time.sleep(0.3); t.esc(); self.assertTrue(wait(lambda: not self.foot(t).startswith(("flash", "闪跳")), 3), self.foot(t)); self.assertTrue(t.alive())

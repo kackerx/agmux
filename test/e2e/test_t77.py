@@ -35,6 +35,10 @@ class Base(unittest.TestCase):
     def recall(self, t, query="'coupon"):
         t.keys("?"); self.assertTrue(wait(lambda: t.visible(NAMES), 10), "the recall screen:\n" + t.text()); time.sleep(0.4); t.lit(query); time.sleep(0.6)
 
+    def resume(self, t):
+        """T80: enter in the typing state only locks the query; enter in the locked state resumes"""
+        t.keys("Enter"); time.sleep(0.6); t.keys("Enter")
+
     def calls(self, name): return [c for c in self.env.tmux_calls() if c and c[0] == name]
 
 
@@ -63,50 +67,50 @@ class Entry(Base):
 @needs_ui
 class EnterClosed(Base):
     def test_on_a_plain_pane_a_closed_claude_session_is_resumed_in_place_by_exec(self):
-        t = self.board(**self.PLAIN); self.recall(t); t.keys("Enter"); self.assertTrue(wait(lambda: self.env.ran("claude"), 6), t.text()); r = self.env.ran("claude")[0]
+        t = self.board(**self.PLAIN); self.recall(t); self.resume(t); self.assertTrue(wait(lambda: self.env.ran("claude"), 6), t.text()); r = self.env.ran("claude")[0]
         self.assertEqual((r["argv"], os.path.realpath(r["cwd"])), (["--resume", CART], os.path.realpath(self.cart_dir))); self.assertEqual(self.calls("new-window"), [], "no new window on a plain pane"); self.assertEqual(t.exit_status(5), 0, "the board is gone")
 
     def test_on_a_plain_pane_a_pi_session_is_resumed_with_its_file(self):
-        t = self.board(**self.PLAIN); self.recall(t, "'inner join"); t.keys("Enter"); self.assertTrue(wait(lambda: self.env.ran("pi"), 6), t.text()); r = self.env.ran("pi")[0]
+        t = self.board(**self.PLAIN); self.recall(t, "'inner join"); self.resume(t); self.assertTrue(wait(lambda: self.env.ran("pi"), 6), t.text()); r = self.env.ran("pi")[0]
         self.assertEqual((r["argv"], os.path.realpath(r["cwd"])), (["--session", str(self.c["pi_audit"][0])], os.path.realpath(self.api_dir)))
 
     def test_with_stay_it_opens_a_tmux_window_in_the_sessions_cwd_runs_the_resume_command_there_and_switches_to_it(self):
-        t = self.board("board --stay", **self.POPUP); self.recall(t); t.keys("Enter"); self.assertTrue(wait(lambda: self.calls("new-window"), 6), t.text()); nw = self.calls("new-window")[0]
+        t = self.board("board --stay", **self.POPUP); self.recall(t); self.resume(t); self.assertTrue(wait(lambda: self.calls("new-window"), 6), t.text()); nw = self.calls("new-window")[0]
         self.assertEqual(self.env.ran("claude"), [], "nothing is exec'd: the board stays"); self.assertTrue(t.alive())
         self.assertEqual(nw[:5], ["new-window", "-d", "-P", "-F", "#{pane_id}"], "made without taking the focus, answering with its pane"); self.assertEqual(nw[nw.index("-t") + 1], "=main:", "in the session of the user's client (the fake list-clients says main)")
         self.assertIn("-c", nw); self.assertEqual(os.path.realpath(nw[nw.index("-c") + 1]), os.path.realpath(self.cart_dir)); self.assertEqual(nw[-4:], ["--", "claude", "--resume", CART]); self.assertEqual(nw[nw.index("-n") + 1], "cart-fix", "named after the session")
         self.assertTrue(wait(lambda: any("%88" in c and c[0] in ("switch-client", "select-window", "select-pane") for c in self.env.tmux_calls()), 4), "and the client is taken to the new pane: " + str(self.env.tmux_calls()))
 
     def test_in_a_popup_it_is_the_same_as_with_stay(self):
-        t = self.board(**self.POPUP); self.recall(t); t.keys("Enter"); self.assertTrue(wait(lambda: self.calls("new-window"), 6), t.text()); self.assertEqual(self.env.ran("claude"), [], "a popup is no terminal to exec in: no $TMUX_PANE"); self.assertEqual(self.calls("new-window")[0][-3:], ["claude", "--resume", CART])
+        t = self.board(**self.POPUP); self.recall(t); self.resume(t); self.assertTrue(wait(lambda: self.calls("new-window"), 6), t.text()); self.assertEqual(self.env.ran("claude"), [], "a popup is no terminal to exec in: no $TMUX_PANE"); self.assertEqual(self.calls("new-window")[0][-3:], ["claude", "--resume", CART])
 
     def test_the_window_for_a_pi_session_runs_pi_session_file(self):
-        t = self.board("board --stay", **self.POPUP); self.recall(t, "'inner join"); t.keys("Enter"); self.assertTrue(wait(lambda: self.calls("new-window"), 6)); nw = self.calls("new-window")[0]
+        t = self.board("board --stay", **self.POPUP); self.recall(t, "'inner join"); self.resume(t); self.assertTrue(wait(lambda: self.calls("new-window"), 6)); nw = self.calls("new-window")[0]
         self.assertEqual(nw[-3:], ["pi", "--session", str(self.c["pi_audit"][0])]); self.assertEqual(os.path.realpath(nw[nw.index("-c") + 1]), os.path.realpath(self.api_dir))
 
     def test_enter_pressed_again_while_the_window_is_being_made_makes_one_window(self):
-        (self.env.fake / "tmux.newwindow.delay").write_text("1.5"); t = self.board("board --stay", **self.POPUP); self.recall(t)
+        (self.env.fake / "tmux.newwindow.delay").write_text("1.5"); t = self.board("board --stay", **self.POPUP); self.recall(t); t.keys("Enter"); time.sleep(0.6)  # locked
         for _ in range(4): t.keys("Enter"); time.sleep(0.15)
         self.assertTrue(wait(lambda: self.calls("new-window"), 6)); time.sleep(2.5); self.assertEqual(len(self.calls("new-window")), 1, "487dd5a: enter while the first new-window is on its way does nothing")
 
     def test_a_hash_in_the_name_or_the_directory_is_doubled_for_tmux(self):
         d = self.env.home / "work" / "hash#dir"; d.mkdir(parents=True); sid = "17171717-0000-4000-8000-000000000017"
         self.env.claude_file(str(d), sid, claude_lines(sid, str(d), "main", [("u", "a sentence in the hash directory")], title="fix#12"), age=1)
-        t = self.board("board --stay", **self.POPUP); t.keys("?"); self.assertTrue(wait(lambda: t.visible(NAMES) or "fix#12" in t.text(), 10)); time.sleep(0.4); t.lit("'hash directory"); time.sleep(0.6); t.keys("Enter")
+        t = self.board("board --stay", **self.POPUP); t.keys("?"); self.assertTrue(wait(lambda: t.visible(NAMES) or "fix#12" in t.text(), 10)); time.sleep(0.4); t.lit("'hash directory"); time.sleep(0.6); self.resume(t)
         self.assertTrue(wait(lambda: self.calls("new-window"), 6), t.text()); nw = self.calls("new-window")[0]
         self.assertEqual(nw[nw.index("-n") + 1], "fix##12", "tmux formats -n and -c: a # would be eaten"); self.assertEqual(os.path.realpath(nw[nw.index("-c") + 1].replace("##", "#")), os.path.realpath(str(d))); self.assertIn("##", nw[nw.index("-c") + 1])
         self.assertEqual(nw[-3:], ["claude", "--resume", sid], "the command itself is not a format: untouched")
 
     def test_a_vanished_directory_opens_nothing_and_the_footer_says_so(self):
         for args, env in (("board", self.PLAIN), ("board --stay", self.POPUP)):
-            t = self.board(args, **env); self.recall(t, "'vanished helper"); t.keys("Enter"); time.sleep(1.0); self.assertEqual(self.env.ran("claude"), []); self.assertEqual(self.calls("new-window"), [], args); self.assertTrue(t.alive())
+            t = self.board(args, **env); self.recall(t, "'vanished helper"); self.resume(t); time.sleep(1.0); self.assertEqual(self.env.ran("claude"), []); self.assertEqual(self.calls("new-window"), [], args); self.assertTrue(t.alive())
             self.assertRegex(t.text(), r"(?i)no longer exists|does not exist|gone|missing"); t.close()
 
 
 @needs_ui
 class EnterRunning(Base):
     def test_a_running_session_is_jumped_to_as_on_the_board_and_nothing_is_started(self):
-        self.env.reg(CART, name="cart-fix", nameSource="user", tmux="sess:@1.%52", cwd=self.cart_dir); t = self.board("board --stay", **self.POPUP); self.recall(t); t.keys("Enter"); time.sleep(1.0)
+        self.env.reg(CART, name="cart-fix", nameSource="user", tmux="sess:@1.%52", cwd=self.cart_dir); t = self.board("board --stay", **self.POPUP); self.recall(t); self.resume(t); time.sleep(1.0)
         self.assertEqual((self.env.ran("claude"), self.calls("new-window")), ([], []), "it runs: no second copy"); self.assertTrue(wait(lambda: any("%52" in " ".join(c) for c in self.env.tmux_calls() if c[0] in ("switch-client", "select-pane", "select-window")), 4), str(self.env.tmux_calls()))
 
 
@@ -118,7 +122,7 @@ class Survives(Base):
         self.assertIn("esc clear", t.text().splitlines()[-1], "the filter is still there"); self.assertTrue(t.alive())
 
     def test_a_tmux_that_does_not_say_which_pane_it_made_is_a_red_line_and_the_recall_screen_stays(self):
-        t = self.board(**self.POPUP); self.recall(t); (self.env.fake / "tmux.newwindow").unlink(); t.keys("Enter")
+        t = self.board(**self.POPUP); self.recall(t); (self.env.fake / "tmux.newwindow").unlink(); self.resume(t)
         self.assertTrue(wait(lambda: "did not say which pane" in t.text(), 6), t.text()); self.assertTrue(t.alive()); self.assertTrue(t.visible(NAMES), "still on the recall screen")
 
 

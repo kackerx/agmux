@@ -265,7 +265,7 @@ class Search(Base):
         t.keys("g"); time.sleep(0.6); self.assertEqual(self.outline(t), ["▾ alpha (1)", "sql-b", "▾ gamma sess (2)", "sql-a", "sql-c"])
 
     def test_g_typed_in_the_search_box_is_text_not_the_action(self):
-        t = self.board(""); t.keys("/"); time.sleep(0.2); t.lit("g"); time.sleep(0.5); self.assertIn("/ g▏", t.snap()[0].text); t.esc(); time.sleep(0.4)
+        t = self.board(""); t.keys("/"); time.sleep(0.2); t.lit("g"); time.sleep(0.5); self.assertIn("/ g", t.snap()[0].text); t.esc(); time.sleep(0.4)
         self.expect(t, "cwd")
 
     def test_flash_reads_the_shown_title(self):

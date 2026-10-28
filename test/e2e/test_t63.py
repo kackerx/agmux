@@ -157,7 +157,7 @@ class Config(unittest.TestCase):
 
     def test_workflows(self):
         ci, rel = self.text(".github/workflows/ci.yml"), self.text(".github/workflows/release.yml")
-        for part in ("go vet ./...", "go test -race ./...", "gofmt -l", "go mod tidy", "workflow_call"): self.assertIn(part, ci)
+        for part in ("go vet ./...", "go test -race ./...", "deadcode", "gofmt -l", "go mod tidy", "workflow_call"): self.assertIn(part, ci)
         self.assertNotIn("unittest", ci); self.assertNotIn("test/e2e", [l for l in ci.splitlines() if not l.startswith("#")], "the e2e suite is Python on a real tmux: not in CI"); self.assertFalse(any("e2e" in l for l in ci.splitlines() if not l.lstrip().startswith("#")))
         for part in ('tags: ["v*"]', "uses: ./.github/workflows/ci.yml", "goreleaser/goreleaser-action", "GITHUB_TOKEN", "secrets.TAP_GITHUB_TOKEN", "kackerx/homebrew-tap", "tap-formula.sh", "id-token: write", "npm/build.mjs", "npm publish ./out/", "--version | grep -F"):
             self.assertIn(part, rel)

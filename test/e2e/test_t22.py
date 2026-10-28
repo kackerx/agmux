@@ -5,6 +5,7 @@ The matched characters are drawn as colors.match (#f2d06b) background with dark 
 """
 import json, re, subprocess, unittest
 from lib import *
+from lib_recall import cursor
 from test_t3 import ready, last_text_row, border_colours, C_FOCUS, NAMES, by_name
 
 MATCH, INK = ("rgb", 242, 208, 107), ("rgb", 44, 42, 46)
@@ -137,7 +138,7 @@ class NextPrev(Base):
 
     def test_n_is_text_inside_the_input(self):
         self.t.keys("/"); self.t.lit("nN"); time.sleep(0.3)
-        self.assertIn("/ nN▏", self.t.snap()[0].text)
+        self.assertIn("/ nN", self.t.snap()[0].text); self.assertTrue(cursor(self.t)[2], "the input is open: the terminal's own caret")
 
     def test_nothing_to_visit_when_the_kept_filter_has_no_match(self):
         self.search("qqq"); self.t.keys("n"); self.t.keys("N"); time.sleep(0.4)

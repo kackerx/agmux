@@ -76,7 +76,8 @@ class List(Base):
         t = self.ui(); self.assertNotIn("noise-token", t.text())
 
     def test_the_query_on_the_command_line_is_the_first_filter_and_typing_refines_it(self):
-        t = self.ui("'coupon"); self.settle(t, ["cart"]); self.type(t, " 'tax"); self.settle(t, ["cart"]); self.type(t, " 'csv"); self.settle(t, [])
+        t = self.ui("'coupon"); self.settle(t, ["cart"]); t.lit("/"); time.sleep(0.4)  # T80: a query on the command line starts locked: `/` goes back to the input
+        self.type(t, " 'tax"); self.settle(t, ["cart"]); self.type(t, " 'csv"); self.settle(t, [])
 
     def test_typing_filters_live_and_backspace_widens_again(self):
         t = self.ui(); self.type(t, "'regression"); self.settle(t, ["cart"]); t.keys("BSpace"); t.keys("BSpace"); time.sleep(0.6)
@@ -154,7 +155,7 @@ class Enter(Base):
     """design §2: enter on a closed session quits agmux and, in the same terminal, runs `cd <cwd> && exec claude --resume <id>` / `pi --session <file>`"""
 
     def run_enter(self, query, cwd=None):
-        t = self.ui(cwd=cwd); self.type(t, query); time.sleep(0.5); t.record(); t.keys("Enter"); return t
+        t = self.ui(cwd=cwd); self.type(t, query); time.sleep(0.5); t.record(); t.keys("Enter"); time.sleep(0.6); t.keys("Enter"); return t  # T80: the first enter keeps the query (locked), the second resumes
 
     def test_a_closed_claude_session_is_resumed_in_its_cwd_by_exec(self):
         t = self.run_enter("'coupon"); self.assertTrue(wait(lambda: self.env.ran("claude"), 6), t.text()); r = self.env.ran("claude")
@@ -171,7 +172,7 @@ class Enter(Base):
         self.assertRegex(t.text(), r"(?i)no longer|gone|missing|not found|does not exist|doesn't exist", "GUESS: the footer names the reason (design §2)"); self.assertIn("vanished", t.text())
 
     def test_a_running_session_is_not_started_again_and_the_footer_says_it_runs(self):
-        self.env.reg(CART, name="cart-fix", nameSource="user", cwd=self.cart_dir); t = self.ui(); self.type(t, "'coupon"); t.keys("Enter"); time.sleep(1.0)
+        self.env.reg(CART, name="cart-fix", nameSource="user", cwd=self.cart_dir); t = self.ui(); self.type(t, "'coupon"); t.keys("Enter"); time.sleep(0.6); t.keys("Enter"); time.sleep(1.0)  # T80: lock, then resume
         self.assertEqual(self.env.ran("claude"), [], "enter does not touch a running session"); self.assertTrue(t.alive()); self.assertRegex(t.text(), r"(?i)running|live|already", "GUESS: wording (design §2: the footer says it is running)")
 
     def test_the_resume_does_not_touch_the_transcripts_or_the_state(self):

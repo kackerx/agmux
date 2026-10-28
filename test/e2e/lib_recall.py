@@ -228,3 +228,47 @@ class RTerm(Term):
     def visible(self, names):
         """which of {key: name} are on the screen: the layout of the list is the UI's, the session names are the fixture's"""
         t = self.text(); return {k for k, n in names.items() if n in t}
+
+
+# ---------------------------------------------------------------- T83 helpers (work on any Term / RTerm)
+def cursor(t):
+    """the terminal's real cursor: (x, y, visible), 0-based, from the tmux pane that stands for the terminal"""
+    x, y, v = tm("display-message", "-p", "-t", t.name, "#{cursor_x},#{cursor_y},#{cursor_flag}").stdout.strip().split(","); return int(x), int(y), v == "1"
+
+
+def row_of(t, text):
+    """(row index, first column of `text` on that row) of the lowest row that holds `text`, or None: the layout is the UI's, the text the test typed"""
+    snap = t.snap()
+    for r in range(len(snap) - 1, -1, -1):
+        c = snap[r].find(text)
+        if c >= 0: return r, c
+    return None
+
+
+def wrap_corpus(env, n=4):
+    """n closed Claude sessions that all say `wrap test sentence <i>`, named wrap-1 .. wrap-n, wrap-1 the newest (the list order of an empty or a `'wrap test` query), each in a directory that exists:
+    [(session id, directory, name)]. The id is in the preview of the selected session and nowhere else on the screen: which row is selected is read from it."""
+    out = []
+    for i in range(1, n + 1):
+        sid = f"aaaa000{i}-0000-4000-8000-00000000000{i}"; d = env.home / "work" / f"wrap{i}"; d.mkdir(parents=True, exist_ok=True)
+        env.claude_file(str(d), sid, claude_lines(sid, str(d), "main", [("u", f"wrap test sentence {i}")], title=f"wrap-{i}"), age=i); out.append((sid, str(d), f"wrap-{i}"))
+    return out
+
+
+def selected_id(t, ids):
+    """which of the session ids is on the screen (the preview shows the selected session's id): the one, or None when none / several"""
+    txt = t.text(); seen = [i for i in ids if i in txt]; return seen[0] if len(seen) == 1 else None
+
+
+def scroll_corpus(env, n=80):
+    """one closed session with n sentences that all match `'scrollme`: a preview too long for the screen (the preview lists every hit). Returns (id, dir)."""
+    sid = "bbbb0001-0000-4000-8000-000000000001"; d = env.home / "work" / "scroll"; d.mkdir(parents=True, exist_ok=True)
+    env.claude_file(str(d), sid, claude_lines(sid, str(d), "main", [("u", f"scrollme line {i:03d}") for i in range(1, n + 1)], title="scroll-session"), age=1); return sid, str(d)
+
+
+def t83_ready():
+    """T79–T82 delivered? `agmux config` lists the three recall border colours once T82 is in (the other three tasks ship in the same batch)"""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        r = subprocess.run([BIN, "config"], capture_output=True, text=True, env={"PATH": "/usr/bin:/bin", "HOME": d, "XDG_CONFIG_HOME": d}, timeout=10)
+    return "recall_input" in r.stdout

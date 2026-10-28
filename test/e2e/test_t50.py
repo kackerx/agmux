@@ -32,7 +32,7 @@ class Default(Base):
         out = self.out(); d = tomllib.loads(out); self.assertEqual(set(d), {"keys", "colors", "layout", "ui", "avatars"}); self.assertEqual(d["avatars"]["bind"], {}, "an empty [avatars.bind]")
         from test_t17 import DEFAULT_KEYS
         for a in DEFAULT_KEYS: self.assertRegex(out, rf"(?m)^{a} = \[.*\]\s+# default: ", a)
-        self.assertEqual(sorted(d["keys"]), sorted(DEFAULT_KEYS)); self.assertEqual(len(d["colors"]), 19, "every color")
+        self.assertEqual(sorted(d["keys"]), sorted(DEFAULT_KEYS)); self.assertEqual(len(d["colors"]), 22, "every color (T82 added the three recall frames)")
         for k in list(d["keys"]) + list(d["colors"]) + ["max_columns", "flow", "group_by", "renderer", "default"]: self.assertRegex(out, rf"(?m)^{k} = .*# default: ", k)
 
     def test_the_template_ends_with_the_bind_section_and_its_comments(self):
