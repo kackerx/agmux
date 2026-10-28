@@ -105,7 +105,7 @@ func (c control) restart(s store.Session) error {
 	var again string // what the pane's shell is told to run once the process has gone
 	switch {
 	case s.TmuxPane == "":
-		return fmt.Errorf("%s has no tmux pane to start it again in (x ends it)", s.Name)
+		return fmt.Errorf("%s has no tmux pane to start it again in (kill ends it)", s.Name)
 	case s.AgentType == "pi" && s.Transcript != "":
 		again = "pi --session " + shellQuote(s.Transcript)
 	case s.AgentType == "pi":
@@ -115,7 +115,7 @@ func (c control) restart(s store.Session) error {
 	case s.AgentType == "claude":
 		return fmt.Errorf("%s: no session id to resume it by", s.Name)
 	default:
-		return fmt.Errorf("%s: r can't start a %s session again", s.Name, s.AgentType)
+		return fmt.Errorf("%s: restart can't start a %s session again", s.Name, s.AgentType)
 	}
 	if s.PID > 1 && !c.alive(s.PID) { // r pressed twice: the second would type the command into the session the first started
 		return fmt.Errorf("%s is not running (restarted already?)", s.Name)

@@ -1,10 +1,10 @@
 package i18n
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -22,21 +22,28 @@ func TestTablesHaveTheSameKeys(t *testing.T) {
 	}
 }
 
-// A zh text takes the same arguments as its en text: same verbs, same count (a reordering is %[2]s).
+// A zh text takes the arguments its en text takes, in the order they are given: Printf of the zh text
+// with arguments made from the en verbs has nothing wrong in it (no %!d(string=…), %!s(MISSING),
+// %!(EXTRA …)), so a zh text that reorders them says so with %[2]s.
 func TestTextsTakeTheSameArguments(t *testing.T) {
-	verbs := regexp.MustCompile(`%(?:\[\d+\])?[sdqv]`)
-	letters := func(s string) []string {
-		var out []string
-		for _, v := range verbs.FindAllString(s, -1) {
-			out = append(out, v[len(v)-1:])
-		}
-		slices.Sort(out)
-		return out
-	}
+	verbs := regexp.MustCompile(`%[sdqv]`)
 	for k, e := range en {
-		if !slices.Equal(letters(e), letters(zh[k])) {
-			t.Errorf("%q: en %q and zh %q take different arguments", k, e, zh[k])
+		var args []any
+		for _, v := range verbs.FindAllString(e, -1) {
+			switch v {
+			case "%d":
+				args = append(args, 7)
+			default:
+				args = append(args, "x")
+			}
 		}
+		if got := fmt.Sprintf(zh[k], args...); strings.Contains(got, "%!") {
+			t.Errorf("%q: zh %q does not take the arguments of en %q: %s", k, zh[k], e, got)
+		}
+	}
+	mismatch := "%s %d"
+	if got := fmt.Sprintf(mismatch, 1, "x"); !strings.Contains(got, "%!") { // the check can see a mismatch
+		t.Errorf("Printf does not complain: %q", got)
 	}
 }
 

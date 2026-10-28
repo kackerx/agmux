@@ -317,10 +317,11 @@ func typed(key string) bool { return utf8.RuneCountInString(key) == 1 }
 // letters of a binding are text, and only ctrl / alt / named keys act.
 func (c *Config) IsCtl(action, key string) bool { return !typed(key) && c.Is(action, key) }
 
-// FirstCtl is the first key of action that IsCtl accepts, or def when it has none.
-func (c *Config) FirstCtl(action, def string) string {
+// FirstCtl is the first key of action that IsCtl accepts and that is not one of skip, or def when
+// there is none.
+func (c *Config) FirstCtl(action, def string, skip ...string) string {
 	for _, k := range c.Keys[action] {
-		if !typed(norm(k)) {
+		if !typed(norm(k)) && !slices.Contains(skip, k) {
 			return k
 		}
 	}

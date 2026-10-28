@@ -646,6 +646,10 @@ func TestClearFilterPreviewScrollAndCtlKeys(t *testing.T) {
 	if c.FirstCtl("quit", "esc") != "esc" || c.FirstCtl("jump", "enter") != "enter" || c.IsCtl("quit", " ") {
 		t.Errorf("only characters: the default; FirstCtl(quit) %q, FirstCtl(jump) %q, IsCtl(quit, space) %v", c.FirstCtl("quit", "esc"), c.FirstCtl("jump", "enter"), c.IsCtl("quit", " "))
 	}
+	c, _ = Parse("cfg", []byte("[keys]\njump = [\"esc\", \"ctrl+x\"]\n"))
+	if c.FirstCtl("jump", "enter", "esc") != "ctrl+x" || c.FirstCtl("jump", "enter") != "esc" || c.FirstCtl("jump", "enter", "esc", "ctrl+x") != "enter" {
+		t.Errorf("skip: %q %q %q", c.FirstCtl("jump", "enter", "esc"), c.FirstCtl("jump", "enter"), c.FirstCtl("jump", "enter", "esc", "ctrl+x"))
+	}
 	c, _ = Parse("cfg", []byte("[keys]\nquit = [\"q\", \"alt+q\", \"ctrl+q\"]\n"))
 	if c.FirstCtl("quit", "esc") != "alt+q" || !c.IsCtl("quit", "alt+q") {
 		t.Errorf("alt+q is a key, not text: %q", c.FirstCtl("quit", "x"))

@@ -54,6 +54,9 @@ func TestChineseBoard(t *testing.T) {
 	if l := footerOf(press1(t, m, "a").View()); !strings.Contains(l, "移动") || !strings.Contains(l, "绑定") || !strings.Contains(l, "取消") {
 		t.Errorf("picker footer: %s", l)
 	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "⏸ 空闲") || strings.Contains(v, "idle") {
+		t.Errorf("card status word:\n%s", v)
+	}
 	if v := ansi.Strip(press1(t, m, "g", "g", "g").View()); !strings.Contains(v, "空闲 (3)") || !strings.Contains(v, "分组:状态") {
 		t.Errorf("state grouping:\n%s", v)
 	}
@@ -124,6 +127,25 @@ func TestBgNoteLeavesOutAnUnboundKey(t *testing.T) {
 	}
 }
 
+// T74: with neither jump nor reply bound to a key, the note names none.
+func TestBgNoteWithNoKeys(t *testing.T) {
+	c, err := config.Parse("cfg", []byte("[keys]\nsearch = [\"enter\"]\nflash = [\"i\"]\n")) // jump and reply lose their keys
+	if err != nil {
+		t.Fatal(err)
+	}
+	bg := append(staticSrc(nil), sessions...)
+	bg[1].Background = true
+	m := New(bg, &fakeRunner{})
+	m.getenv = func(string) string { return "" }
+	m.cfg, m.keymap = c, c.KeyMap()
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
+	useConfig(c)
+	t.Cleanup(func() { useConfig(config.Default()) })
+	if v := ansi.Strip(press1(t, tm.(Model), "j").View()); !strings.Contains(v, "background session") || strings.Contains(v, "attaches it") {
+		t.Errorf("bg note:\n%s", v)
+	}
+}
+
 // T74: the keys that were written into the code are in [keys] now. A kept filter is dropped by
 // clear_filter only; esc no longer does once it is rebound.
 func TestClearFilterIsConfigurable(t *testing.T) {
@@ -171,6 +193,22 @@ func TestSearchPromptKeysFollowTheConfig(t *testing.T) {
 			t.Errorf("%s keeps: searching %v query %q", k, m.searching, m.query)
 		}
 		m = press1(t, m, "esc") // a kept filter goes with esc (clear_filter)
+	}
+	// esc and enter are fixed: bound to the other action they still cancel / keep, and the footer
+	// does not offer them for the other thing
+	m = typeKeys(t, press1(t, withConfig(t, "[keys]\njump = [\"esc\"]\n"), "/"), "thr")
+	if f := strings.TrimSpace(footerOf(m.View())); f != "enter keep the filter · esc clear it" {
+		t.Errorf("jump = esc: %q", f)
+	}
+	if m = press1(t, m, "esc"); m.searching || m.query != "" {
+		t.Errorf("esc cancels though it is jump's key: searching %v query %q", m.searching, m.query)
+	}
+	m = typeKeys(t, press1(t, withConfig(t, "[keys]\nquit = [\"enter\"]\n"), "/"), "thr")
+	if f := strings.TrimSpace(footerOf(m.View())); f != "enter keep the filter · esc clear it" {
+		t.Errorf("quit = enter: %q", f)
+	}
+	if m = press1(t, m, "enter"); m.searching || m.query != "thr" {
+		t.Errorf("enter keeps though it is quit's key: searching %v query %q", m.searching, m.query)
 	}
 	// quit and jump with characters only: nothing of theirs acts in the box, esc and enter still do
 	m = withConfig(t, "[keys]\nquit = [\"q\"]\njump = [\"l\"]\n")
@@ -249,8 +287,16 @@ func TestPreviewScrollKeys(t *testing.T) {
 			t.Fatalf("%q: down: scroll %d", c.down, m.scroll)
 		}
 	}
-	m := press1(t, withConfig(t, ""), "pgup") // preview closed: nothing to scroll
-	if m.scroll != 0 {
-		t.Errorf("no preview, scroll %d", m.scroll)
+	// closed after something was captured: nothing to scroll, and it is still at the bottom when it opens again
+	m := press1(t, withConfig(t, ""), "p")
+	tm, _ := m.Update(previewMsg{pane: "%1", text: hist.String()})
+	m = tm.(Model)
+	m.capturing = false
+	m = press1(t, m, "p", "pgup")
+	if m.preview || m.scroll != 0 {
+		t.Errorf("preview closed, pgup: preview %v scroll %d", m.preview, m.scroll)
+	}
+	if m = press1(t, m, "p"); !m.preview || m.scroll != 0 {
+		t.Errorf("opened again: preview %v scroll %d", m.preview, m.scroll)
 	}
 }

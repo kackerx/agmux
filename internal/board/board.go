@@ -620,13 +620,16 @@ func (m Model) visibleFocus() string {
 // searchKey edits the / filter, which applies as it is typed. enter keeps it and puts the focus
 // on the first card it shows; esc / ctrl+c drop it, the focus back where it was.
 func (m Model) searchKey(k tea.KeyMsg) Model {
-	switch s := k.String(); {
+	switch s := k.String(); { // esc and enter first: a config that binds them to the other action does not take them away
+	case k.Type == tea.KeyCtrlC || s == "esc":
+		m.searching, m.query, m.focus = false, "", m.searchFrom
+		m.focus = m.visibleFocus()
 	case s == "enter" || m.cfg.IsCtl("jump", s): // onto the best match; with no query or no match, the focus stays
 		m.searching = false
 		if ss, _ := m.shown(); m.query != "" && len(ss) > 0 {
 			m.focus = ss[0].ID
 		}
-	case k.Type == tea.KeyCtrlC || s == "esc" || m.cfg.IsCtl("quit", s):
+	case m.cfg.IsCtl("quit", s):
 		m.searching, m.query, m.focus = false, "", m.searchFrom
 		m.focus = m.visibleFocus()
 	case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
@@ -1305,14 +1308,10 @@ func (m Model) msgLine(focused store.Session) string {
 	return strings.Join(parts, fg(cMuted, " ·"))
 }
 
-// hintLine joins the parts of a footer hint, leaving out the empty ones (an action with no key).
-func hintLine(parts ...string) string {
-	return strings.Join(slices.DeleteFunc(slices.Clone(parts), func(p string) bool { return p == "" }), " · ")
-}
-
-// typingHint is the footer of the search prompt: the keys that keep the filter and drop it.
+// typingHint is the footer of the search prompt: the keys that keep the filter and drop it (never
+// esc for the one or enter for the other: they are fixed).
 func (m Model) typingHint() string {
-	return hintLine(i18n.T("search.keep", m.cfg.FirstCtl("jump", "enter")), i18n.T("search.drop", m.cfg.FirstCtl("quit", "esc")))
+	return i18n.T("search.keep", m.cfg.FirstCtl("jump", "enter", "esc")) + " · " + i18n.T("search.drop", m.cfg.FirstCtl("quit", "esc", "enter"))
 }
 
 func (m Model) View() string {
@@ -1371,13 +1370,13 @@ func (m Model) View() string {
 		if c := m.cfg.First("clear_filter"); c != "" {
 			hints = append(hints, i18n.T("search.clear", c))
 		}
-		hint := hintLine(hints...)
+		hint := strings.Join(hints, " · ")
 		last := strings.LastIndexByte(out, '\n') + 1
 		out = out[:last] + ansi.Truncate(fg(cFocus, " "+hint)+fg(cMuted, " ·")+footer(ok && focused.TmuxPane == "" && !focused.Background, m.w, m.groupMode()), m.w, "…")
 	}
 	switch { // the footer is always the last line
 	case m.mode == flashing:
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+hintLine(i18n.T("flash.hint"), m.cfg.FirstCtl("quit", "esc")))
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+i18n.T("flash.hint")+" · "+m.cfg.FirstCtl("quit", "esc", "enter"))
 	case m.searching:
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+m.typingHint())
 	case m.mode == pickAvatar:
