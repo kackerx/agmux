@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"os"
@@ -1337,15 +1336,18 @@ func (m Model) View() string {
 	if m.previewOn() {
 		right, cx, cy = m.pvBox()
 	}
+	ss, hits := m.shown()
+	if x, y, ok := m.searchCursor(len(ss)); ok { // typing the filter: the cursor is the caret (the keys are not the pane's)
+		cx, cy = x, y
+	}
 	if m.curOut != nil {
 		m.curOut.place(cx, cy)
 	}
-	ss, hits := m.shown()
 	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "" && !focused.Background, m.foldedNow(), m.cardsW(), right, hits, m.pin(), m.groupMode())
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
 		lines := strings.SplitN(out, "\n", 3)
-		count := fg(cMuted, fmt.Sprintf("%d/%d ", len(ss), len(m.src.Sessions())))
-		lines[0] = spread(fg(cFocus, " / ")+queryView(m.query, m.qpos, m.searching, m.w-3-ansi.StringWidth(count)-1), count, m.w, "…")
+		count := fg(cMuted, m.searchCount(len(ss)))
+		lines[0] = spread(fg(cFocus, " / ")+queryView(m.query, m.qpos, m.searching, m.searchRoom(len(ss))), count, m.w, "…")
 		if len(ss) == 0 && len(lines) > 2 {
 			lines[1] = fg(cMuted, " "+i18n.T("search.no_match"))
 		}
