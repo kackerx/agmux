@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/xdg"
 )
 
@@ -128,17 +129,17 @@ func Setup(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if before == agmuxCmd || strings.HasPrefix(before, agmuxCmd+" ") {
-		fmt.Fprintf(stdout, "already set: %s\n", before)
+		fmt.Fprintln(stdout, i18n.T("setup.already_set", before))
 		return 0
 	}
 	after := wrap(before)
 	shown := before
 	if shown == "" {
-		shown = "(none)"
+		shown = i18n.T("setup.none")
 	}
-	fmt.Fprintf(stdout, "statusLine.command:\n  before: %s\n  after:  %s\n", shown, after)
+	fmt.Fprintln(stdout, i18n.T("setup.command", shown, after))
 	if !write {
-		fmt.Fprintln(stdout, "dry run: add --write to apply")
+		fmt.Fprintln(stdout, i18n.T("setup.dry_run"))
 		return 0
 	}
 	out, err := updated(after)
@@ -150,9 +151,9 @@ func Setup(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if exists {
-		fmt.Fprintf(stdout, "written (backup: %s.bak)\n", path)
+		fmt.Fprintln(stdout, i18n.T("setup.written_bak", path))
 	} else {
-		fmt.Fprintf(stdout, "written (new file: %s)\n", path)
+		fmt.Fprintln(stdout, i18n.T("setup.written_new", path))
 	}
 	return 0
 }

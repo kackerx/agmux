@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -116,9 +117,9 @@ func previewBox(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focus
 	curRow, curCol := -1, 0 // the row and column of the box the pane's cursor is on, if it is drawn
 	switch {
 	case !ok || s.TmuxPane == "":
-		content = []string{fg(cMuted, "no pane")}
+		content = []string{fg(cMuted, i18n.T("preview.no_pane"))}
 		if ok && s.Background {
-			content = []string{fg(cMuted, bgNote)}
+			content = []string{fg(cMuted, bgNote())}
 		}
 		if ok {
 			title = fg(cName, s.Name)

@@ -44,6 +44,7 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 | `g` | 换分组方式，按 `cwd`（目录，默认）→ `project`（项目：worktree 归到主仓库名下，名字是主仓库目录名）→ `session`（tmux session，名字只取第一个 ` # ` 之前的，`agmux # main` 就是 `agmux`；后台会话跟同目录（worktree 退到主仓库）前台会话所在的 session，多个取前台最多的、再取最近活动的，attach 前后不搬家；找不到就按它自己 pane 的 session，没有 pane 归 `(no pane)`，排最后）→ `state`（working / waiting / done / idle 四组，按这个顺序）循环，底栏显示 `g group:<当前>`；换了之后各组都是展开的（折叠不跨方式），焦点还在原来的卡上；cwd 以外的组标题直接写名字，搜索不往标题里画路径命中 |
 | （默认不绑）`group_cwd` / `group_project` / `group_session` / `group_state` | 直接切到那个分组方式，不用按 `g` 循环；和 `g` 切到同一方式时行为一样（各组展开、焦点留原卡），已经在该方式就什么也不做。在配置里给它们键才有用，例如 `group_state = ["G"]`；写 `[]` 表示不绑 |
 | `p` | 开关右侧预览（终端至少 100 列；宽度占终端的 40%，最少 60 列，`[layout] preview_width` 可改，30–70；pane 里比框宽的行从右边截掉，不换行，Claude Code 的表格和输入框才不会乱）；预览里会画出 pane 的光标（块状 = 反色，竖线 / 下划线 = focus 色下划线；光标被隐藏或预览往回滚时不画） |
+| `pgup` / `pgdown` | 预览开着时往回 / 往前滚 3 行（和滚轮一样；`[keys] preview_up` / `preview_down` 可改） |
 | `tab` | 打开预览（没开的话）并进入；在预览里时除 `tab` 外所有按键都发给那个 pane（含 `ctrl-c`、`shift+tab`），再按 `tab` 回到卡片（预览留着，`p` 才关它），滚轮往回翻。直通里 `tab` 到不了 pane，要补全请在真终端里按 |
 | `i` | 回复：开预览并把按键交给这个会话（等于 `p` + `tab`），之后打的字直接进它的 pane；`tab` 回到卡片 |
 | `H` | 发 `/handoff` |
@@ -123,7 +124,7 @@ pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi
 
 ### 配置
 
-`~/.config/agmux/config.toml`（设了 `XDG_CONFIG_HOME` 就在它下面），没有就全用默认值。`agmux config` 打印生效的完整配置：每个动作、每种颜色、`[layout]`、`[avatars]` 都占一行，行尾注释写着默认值和用途，可选项写在注释里（全英文）。**`agmux config > ~/.config/agmux/config.toml`** 就生成一份完整的配置文件，改要改的行即可（值是当时生效的值，注释里的 `default:` 永远是默认值；已有配置文件时先备份，别直接覆盖）；`agmux config --path` 打印路径。
+`~/.config/agmux/config.toml`（设了 `XDG_CONFIG_HOME` 就在它下面），没有就全用默认值。`agmux config` 打印生效的完整配置：每个动作、每种颜色、`[layout]`、`[avatars]` 都占一行，行尾注释写着默认值和用途，可选项写在注释里（全英文）。**`agmux config > ~/.config/agmux/config.toml`** 就生成一份完整的配置文件，改要改的行即可（值是当时生效的值，注释里的 `default:` 永远是默认值；已有配置文件时先备份，别直接覆盖）；`agmux config --path` 打印路径。看板里每个按键都在 `[keys]` 下；搜索框 / 定位（`s`）里字母是字符，`enter`（取 `jump` 的非字符键）保留过滤，`esc`（取 `quit` 的非字符键）取消，`esc` 清掉已保留的过滤由 `clear_filter` 管；`backspace`、`ctrl+h`、`ctrl+c` 固定。
 
 ```toml
 [keys]          # 动作 = 一个或多个键名（j、ctrl+k、enter、tab、shift+tab、esc、space、f5…）
@@ -143,6 +144,9 @@ max_columns = 4                     # 终端够宽时最多几列卡片（1–8�
 preview_width = 40                  # 预览占终端宽度的百分比（30–70，默认 40，最少 60 列）；越宽，pane 里的长行被截掉得越少，卡片区相应变窄（终端窄，100–133 列，而这个值又大时，卡片区可能窄于 40 列）
 flow = "bands"                      # 组怎么排：bands（默认）每 n 个组一行，行高 = 最高的组，矮的组下面留空；stack 第 k 个组进第 k mod n 列，每列自己往下堆（没有空洞，列高不齐）
 group_by = "cwd"                    # 启动时的分组方式：cwd | project | session | state；运行中按 g 换
+
+[ui]
+language = "en"                     # en | zh：看板和 agmux setup 的文案语言；环境变量 AGMUX_LANG 优先（config 模板的注释、报错、agmux show 不翻）
 
 [avatars]
 renderer = "auto"                   # auto：kitty / ghostty 里用图片，其它终端用像素；image：强制图片；pixel：强制像素

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/config"
+	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -94,7 +95,7 @@ func imageMode(r Runner, getenv func(string) string, renderer string) ImageMode 
 	}
 	pc, err := chooseClient(r, getenv)
 	if err != nil {
-		return ImageMode{On: force, Note: noClient + hintPixel(force)}
+		return ImageMode{On: force, Note: i18n.T("img.no_client") + hintPixel(force)}
 	}
 	var c tmuxClient
 	for _, o := range pc.clients {
@@ -110,11 +111,11 @@ func imageMode(r Runner, getenv func(string) string, renderer string) ImageMode 
 			}
 		}
 		if best < 0 && force { // nothing but tmux clients: no terminal to write to
-			return ImageMode{On: true, Note: "avatars: every tmux client is itself a tmux, no terminal to draw pictures through" + hintPixel(force)}
+			return ImageMode{On: true, Note: i18n.T("img.nested") + hintPixel(force)}
 		}
 	}
 	if !force && !kittyTerm(c.termname) {
-		return ImageMode{Note: fmt.Sprintf("avatars: pixel; tmux client %s is %q, not kitty or ghostty%s", c.name, c.termname, hintPixel(force))}
+		return ImageMode{Note: i18n.T("img.pixel", c.name, c.termname) + hintPixel(force)}
 	}
 	if c.tty == "" {
 		c.tty = c.name
@@ -122,14 +123,11 @@ func imageMode(r Runner, getenv func(string) string, renderer string) ImageMode 
 	return ImageMode{On: true, Client: c.name, TTY: c.tty}
 }
 
-// noClient is the note when list-clients gave nothing to ask.
-const noClient = "avatars: no tmux client found to draw pictures through (tmux list-clients is empty or failed)"
-
 func hintPixel(force bool) string {
 	if force {
-		return "; trying tmux passthrough"
+		return i18n.T("img.try_passthrough")
 	}
-	return ` (renderer = "image" forces pictures, "pixel" hides this note)`
+	return i18n.T("img.pixel_note")
 }
 
 // openTTY opens a client's tty for writing; tests replace it.

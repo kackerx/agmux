@@ -851,3 +851,22 @@ func TestTTYWriterWaitsForRoom(t *testing.T) {
 		t.Errorf("full queue: %d, %v", n, err)
 	}
 }
+
+// T74: the notes about pictures are in the language too, the "pixel" hint included.
+func TestImageNotesInChinese(t *testing.T) {
+	useKit(t)
+	zh(t)
+	inTmux := map[string]string{"TMUX": "/tmp/tmux-1/default,1,0"}
+	r := &fakeRunner{tmuxOut: map[string]string{"list-clients": "", "display-message": "fl-1\n"}}
+	if n := imageMode(r, env(inTmux), "auto").Note; !strings.Contains(n, "头像：找不到可用来画图的 tmux 客户端") || !strings.Contains(n, `"pixel" 隐藏此提示`) {
+		t.Errorf("no client: %q", n)
+	}
+	r = &fakeRunner{tmuxOut: map[string]string{"list-clients": "5\t/dev/c\tmain\txterm-256color\t/dev/c\n", "display-message": "fl-1\n"}}
+	if n := imageMode(r, env(inTmux), "auto").Note; !strings.Contains(n, "头像：像素；tmux 客户端 /dev/c 是 \"xterm-256color\"") {
+		t.Errorf("other client: %q", n)
+	}
+	r = &fakeRunner{tmuxOut: map[string]string{"list-clients": "", "display-message": "fl-1\n"}}
+	if n := imageMode(r, env(inTmux), "image").Note; !strings.Contains(n, "尝试 tmux 直通") {
+		t.Errorf("forced: %q", n)
+	}
+}

@@ -5,8 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/kackerx/agmux/internal/i18n"
 )
 
 func piDir(t *testing.T, files map[string]string) *Pi {
@@ -202,17 +205,17 @@ func TestPiHint(t *testing.T) {
 		t.Errorf("asked again within 30 s: %q, %d reads", got, reads)
 	}
 	now = now.Add(30 * time.Second)
-	if got := hint(); got != PiHint || reads != 2 {
+	if got := hint(); got != i18n.T(PiHint) || reads != 2 {
 		t.Errorf("a pi runs, no extension: %q", got)
 	}
 	comm[3] = "/opt/homebrew/bin/pi"
 	now = now.Add(time.Minute)
-	if got := hint(); got != PiHint {
+	if got := hint(); got != i18n.T(PiHint) {
 		t.Errorf("the path of a pi: %q", got)
 	}
 	installed = true
 	now = now.Add(time.Minute)
-	if got := hint(); got != PiRestartHint {
+	if got := hint(); got != i18n.T(PiRestartHint) {
 		t.Errorf("installed, and a pi that was started before it: %q", got)
 	}
 	installed = false
@@ -280,5 +283,25 @@ func TestGitBranch(t *testing.T) {
 	now = now.Add(11 * time.Second)
 	if got := branches(); got != "|given||" {
 		t.Errorf("detached HEAD: %q", got)
+	}
+}
+
+// T74: the hint is a key until it is said: English by default, Chinese when asked.
+func TestPiHintLanguage(t *testing.T) {
+	defer i18n.Set("en")
+	p := &Poller{hint: PiHint}
+	if got := p.Hint(); got != "pi: run agmux setup --write" {
+		t.Errorf("en: %q", got)
+	}
+	i18n.Set("zh")
+	if got := p.Hint(); got != "pi：运行 agmux setup --write" {
+		t.Errorf("zh: %q", got)
+	}
+	p.hint = PiRestartHint
+	if got := p.Hint(); !strings.Contains(got, "重启") {
+		t.Errorf("zh restart: %q", got)
+	}
+	if p.hint = ""; p.Hint() != "" {
+		t.Errorf("no hint: %q", p.Hint())
 	}
 }

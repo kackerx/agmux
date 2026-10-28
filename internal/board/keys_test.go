@@ -144,6 +144,14 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlD}
 	case "ctrl+u":
 		return tea.KeyMsg{Type: tea.KeyCtrlU}
+	case "ctrl+q":
+		return tea.KeyMsg{Type: tea.KeyCtrlQ}
+	case "ctrl+x":
+		return tea.KeyMsg{Type: tea.KeyCtrlX}
+	case "pgup":
+		return tea.KeyMsg{Type: tea.KeyPgUp}
+	case "pgdown":
+		return tea.KeyMsg{Type: tea.KeyPgDown}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
 	case "right":
@@ -241,7 +249,7 @@ func TestErrorsGoToMessageLine(t *testing.T) {
 	if _, quit := press(t, newModel(r), "enter"); quit {
 		t.Error("a failed switch must not quit")
 	}
-	if m, _ := press(t, newModel(&fakeRunner{}), "j"); !strings.Contains(m.View(), noPane) {
+	if m, _ := press(t, newModel(&fakeRunner{}), "j"); !strings.Contains(m.View(), noPane()) {
 		t.Error("focusing a background session shows the no-pane hint")
 	}
 }
@@ -365,7 +373,7 @@ func TestPollErrorKeepsBackgroundHint(t *testing.T) {
 	m := New(errSrc{sessions, errors.New("poll: boom\n  at x")}, &fakeRunner{})
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: 200, Height: 30})
 	m, _ = press(t, tm.(Model), "j") // a2: background
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "boom") || !strings.Contains(v, noPane) || strings.Contains(v, "at x") {
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "boom") || !strings.Contains(v, noPane()) || strings.Contains(v, "at x") {
 		t.Errorf("message line should be the error's first line plus the hint: %q", strings.Split(v, "\n")[28])
 	}
 }
@@ -373,7 +381,7 @@ func TestPollErrorKeepsBackgroundHint(t *testing.T) {
 func TestBackgroundHintOnce(t *testing.T) {
 	for _, k := range []string{"enter", "H", "i"} {
 		m, _ := press(t, newModel(&fakeRunner{}), "j", k) // a2 is the background session
-		if n := strings.Count(ansi.Strip(m.View()), noPane); n != 1 {
+		if n := strings.Count(ansi.Strip(m.View()), noPane()); n != 1 {
 			t.Errorf("%s on a background session: hint shown %d times, want 1", k, n)
 		}
 	}
@@ -4641,7 +4649,7 @@ func TestSourceHintOnTheMessageLine(t *testing.T) {
 	// after the note on the card with no pane: the line is cut from the right, and the hint is there for good
 	m, _ := press(t, psized(hintSrc{staticSrc: staticSrc(sessions), hint: "pi: run agmux setup --write"}, 120, 30), "j")
 	v := strings.Split(ansi.Strip(m.View()), "\n")
-	if got := v[len(v)-2]; !strings.Contains(got, noPane) || strings.Index(got, noPane) > strings.Index(got, "pi: run") {
+	if got := v[len(v)-2]; !strings.Contains(got, noPane()) || strings.Index(got, noPane()) > strings.Index(got, "pi: run") {
 		t.Errorf("order: %q", got)
 	}
 }

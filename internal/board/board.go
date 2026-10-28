@@ -24,6 +24,7 @@ import (
 	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/execx"
 	"github.com/kackerx/agmux/internal/fuzzy"
+	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -211,7 +212,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.w, m.h = msg.Width, msg.Height
 		if m.pvFocus && !m.previewOn() { // not "session is gone": it isn't
 			m.pvFocus = false
-			m = m.say(cMuted, "preview closed: terminal too narrow")
+			m = m.say(cMuted, i18n.T("msg.preview_closed"))
 		}
 		if m.mode == flashing { // the hits were read off the old size
 			m.flashFollow()
@@ -475,7 +476,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// the preview has the keys: everything but leave_preview's keys (tab) goes to the locked
 	// pane, ctrl+c and shift+tab included (Claude Code interrupts and cycles modes with them)
 	if m.pvFocus {
-		if m.cfg.Is("leave_preview", k.String()) || !m.passThrough() && k.Type == tea.KeyEsc {
+		if m.cfg.Is("leave_preview", k.String()) || !m.passThrough() && m.cfg.IsCtl("quit", k.String()) {
 			m.pvFocus = false
 			return m, nil
 		}
@@ -512,7 +513,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.kill(m.target)
 	case flashing: // text narrows the hits, a hit's label moves the focus there and ends it
 		switch {
-		case k.Type == tea.KeyEsc:
+		case m.cfg.IsCtl("quit", k.String()):
 			m.mode = browsing
 		case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
 			if r := []rune(m.flash.pat); len(r) > 0 {
@@ -552,16 +553,16 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = browsing
 			src, s, id := m.src, m.target, avatar.Listing()[m.pick]
 			return m, func() tea.Msg {
-				ok := s.Name + " wears " + avatarName(id)
+				ok := i18n.T("msg.wears", s.Name, avatarName(id))
 				if s.Name == "" {
-					ok = "bound to session id (name missing)"
+					ok = i18n.T("msg.bound_id")
 				}
 				return doneMsg{ok: ok, err: src.SetAvatar(s, id)}
 			}
 		}
 		return m, nil
 	}
-	if k.String() == "esc" && m.query != "" { // a kept filter goes first (alt+esc, two quick escs, doesn't)
+	if m.query != "" && m.cfg.Is("clear_filter", k.String()) { // a kept filter goes first (alt+esc, two quick escs, doesn't)
 		if ss, _ := m.shown(); len(ss) > 0 {
 			m.current() // the focus stays on the card it is on now, not on one the filter had hidden
 		} // with no match there is no such card: the focus is where it was
@@ -619,20 +620,20 @@ func (m Model) visibleFocus() string {
 // searchKey edits the / filter, which applies as it is typed. enter keeps it and puts the focus
 // on the first card it shows; esc / ctrl+c drop it, the focus back where it was.
 func (m Model) searchKey(k tea.KeyMsg) Model {
-	switch k.Type {
-	case tea.KeyEnter: // onto the best match; with no query or no match, the focus stays
+	switch s := k.String(); {
+	case m.cfg.IsCtl("jump", s): // onto the best match; with no query or no match, the focus stays
 		m.searching = false
 		if ss, _ := m.shown(); m.query != "" && len(ss) > 0 {
 			m.focus = ss[0].ID
 		}
-	case tea.KeyEsc, tea.KeyCtrlC:
+	case k.Type == tea.KeyCtrlC || m.cfg.IsCtl("quit", s):
 		m.searching, m.query, m.focus = false, "", m.searchFrom
 		m.focus = m.visibleFocus()
-	case tea.KeyBackspace, tea.KeyCtrlH:
+	case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
 		if r := []rune(m.query); len(r) > 0 {
 			m.query = string(r[:len(r)-1])
 		}
-	case tea.KeyRunes, tea.KeySpace:
+	case k.Type == tea.KeyRunes || k.Type == tea.KeySpace:
 		if k.Alt { // alt+e is a key, not the text "e"
 			break
 		}
@@ -702,6 +703,13 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Quit
+	case "preview_up", "preview_down": // what the wheel does over the preview
+		if !m.previewOn() {
+			return m, nil
+		}
+		m = m.scrollPreview(action == "preview_up")
+		cmd := m.capture()
+		return m, cmd
 	case "search": // even when the filter shows nothing: / edits it
 		m.searching, m.searchFrom, m.msg = true, m.focus, ""
 		return m, nil
@@ -780,7 +788,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "preview":
 		if m.w < previewMinTerm && !m.preview { // too narrow to open; an open one still closes
-			return m.say(cMuted, "the preview needs a terminal at least 100 columns wide"), nil
+			return m.say(cMuted, i18n.T("msg.preview_narrow")), nil
 		}
 		m.preview, m.msg = !m.preview, ""
 		cmd := m.capture()
@@ -790,7 +798,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case "fold": // fold / unfold the focused group; the focus stays on it
 		if m.query != "" { // every group is open under a filter: folding would show nothing
-			return m.say(cMuted, "clear the filter to fold"), nil
+			return m.say(cMuted, i18n.T("msg.fold_filter")), nil
 		}
 		m.folded[key] = !m.folded[key]
 		m.focus, m.msg = m.items(gs)[gi][0], ""
@@ -805,7 +813,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 	}
 	if !ok { // the rest act on a session; a folded title has none
 		if action == "avatar" {
-			return m.say(cMuted, "fold a group? pick a card first"), nil
+			return m.say(cMuted, i18n.T("msg.pick_card")), nil
 		}
 		return m, nil
 	}
@@ -814,7 +822,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		if s.TmuxPane == "" && s.Background { // a window first, as for enter, i and tab
 			return m, m.attach(s, action)
 		}
-		return m.send(s, "/handoff", "sent /handoff → "+s.Name)
+		return m.send(s, "/handoff", i18n.T("msg.sent_handoff", s.Name))
 	case "focus_preview", "reply": // open the preview if needed and give it the keys; typing is the reply
 		if s.TmuxPane == "" {
 			if s.Background {
@@ -823,7 +831,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			return m, nil // msgLine already shows noPane
 		}
 		if m.w < previewMinTerm {
-			return m.say(cMuted, "the preview needs a terminal at least 100 columns wide"), nil
+			return m.say(cMuted, i18n.T("msg.preview_narrow")), nil
 		}
 		m.preview = true
 		m.lock(s)
@@ -845,20 +853,20 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		src := m.src // the message comes with the write, so the footer and the card change in one frame
-		return m, func() tea.Msg { return doneMsg{ok: "read " + s.Name, err: src.MarkSeen(s)} }
+		return m, func() tea.Msg { return doneMsg{ok: i18n.T("msg.read", s.Name), err: src.MarkSeen(s)} }
 	case "pin": // off the UI goroutine: it writes a file
 		src := m.src
 		return m, func() tea.Msg {
 			on, err := src.TogglePin(s) // what is pinned now, not what this key press saw
-			verb := "unpinned "
+			verb := "msg.unpinned"
 			if on {
-				verb = "pinned "
+				verb = "msg.pinned"
 			}
-			return doneMsg{ok: verb + s.Name, err: err}
+			return doneMsg{ok: i18n.T(verb, s.Name), err: err}
 		}
 	case "restart":
-		m.msg = fg(cMuted, " restarting "+s.Name+"…")
-		return m, m.act("restarted "+s.Name, func() error { return m.run.Restart(s) })
+		m.msg = fg(cMuted, " "+i18n.T("msg.restarting", s.Name))
+		return m, m.act(i18n.T("msg.restarted", s.Name), func() error { return m.run.Restart(s) })
 	case "review":
 		c, err := m.run.Review(s)
 		if err != nil {
@@ -924,10 +932,24 @@ func nearest(rects []rect, id string, d [2]int) string {
 // can be taken as part of a paste and not submit (a short wait is what other tools do too).
 var enterDelay = 150 * time.Millisecond
 
-const noPane = "no tmux pane: can't jump or send"
+func noPane() string { return i18n.T("note.no_pane") }
+
+// bgJump and bgReply are the keys bgNote names; useConfig sets them from [keys].
+var bgJump, bgReply = "enter", "i"
 
 // bgNote is said of a background session, which gets a pane when it is asked for (T60).
-const bgNote = "background session · enter or i attaches it"
+func bgNote() string {
+	var keys []string
+	for _, k := range []string{bgJump, bgReply} {
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return i18n.T("note.bg_plain")
+	}
+	return i18n.T("note.bg", strings.Join(keys, i18n.T("list.or")))
+}
 
 func (m Model) say(c lipgloss.Color, text string) Model {
 	m.msg = fg(c, " "+text)
@@ -946,7 +968,7 @@ func (m Model) review(c *exec.Cmd, s store.Session) (*exec.Cmd, tea.ExecCallback
 				err = errors.New("review: " + last)
 			}
 		}
-		return doneMsg{ok: "review finished: " + s.Name, err: err, retrack: true}
+		return doneMsg{ok: i18n.T("msg.review_done", s.Name), err: err, retrack: true}
 	}
 }
 
@@ -1170,7 +1192,7 @@ func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
 	case s.TmuxPane == "":
 		return m, nil // msgLine already shows noPane
 	case !m.alive(s.ID):
-		return m.say(cRed, s.Name+" is gone; not sent"), nil
+		return m.say(cRed, i18n.T("msg.gone_not_sent", s.Name)), nil
 	}
 	r, pane := m.run, s.TmuxPane
 	return m, func() tea.Msg {
@@ -1185,9 +1207,20 @@ func (m Model) send(s store.Session, text, ok string) (tea.Model, tea.Cmd) {
 
 func (m Model) kill(s store.Session) (tea.Model, tea.Cmd) {
 	if !m.alive(s.ID) {
-		return m.say(cMuted, s.Name+" is gone"), nil
+		return m.say(cMuted, i18n.T("msg.gone", s.Name)), nil
 	}
-	return m, m.act("killed "+s.Name, func() error { return m.run.Kill(s) })
+	return m, m.act(i18n.T("msg.killed", s.Name), func() error { return m.run.Kill(s) })
+}
+
+// scrollPreview scrolls the preview three lines back (up) or forward: up to the oldest line
+// captured, no further.
+func (m Model) scrollPreview(up bool) Model {
+	if up {
+		m.scroll = min(m.scroll+3, max(m.pvLines-m.previewLinesN(), 0))
+	} else {
+		m.scroll = max(m.scroll-3, 0)
+	}
+	return m
 }
 
 // mouse: click a card to focus it, click the focused card again to jump to it. Over the preview
@@ -1195,10 +1228,10 @@ func (m Model) kill(s store.Session) (tea.Model, tea.Cmd) {
 func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.previewOn() && e.X >= m.cardsW() && e.Action == tea.MouseActionPress && m.mode == browsing {
 		switch e.Button {
-		case tea.MouseButtonWheelUp: // up to the oldest line captured, no further
-			m.scroll = min(m.scroll+3, max(m.pvLines-m.previewLinesN(), 0))
+		case tea.MouseButtonWheelUp:
+			m = m.scrollPreview(true)
 		case tea.MouseButtonWheelDown:
-			m.scroll = max(m.scroll-3, 0)
+			m = m.scrollPreview(false)
 		case tea.MouseButtonLeft: // only the box counts, not the title row
 			if _, _, s, ok := m.current(); ok && s.TmuxPane != "" && e.Y >= 2 && e.Y <= 3+m.previewLinesN() {
 				m.lock(s)
@@ -1244,7 +1277,7 @@ func (m Model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m Model) msgLine(focused store.Session) string {
 	switch m.mode {
 	case confirmKill:
-		return fg(cRed, " kill "+m.target.Name+"? "+m.cfg.First("confirm")+" to confirm, any other key cancels")
+		return fg(cRed, " "+i18n.T("prompt.kill", m.target.Name, m.cfg.First("confirm")))
 	case pickAvatar: // what the cursor is on
 		id := avatar.Listing()[m.pick]
 		if _, isSprite := avatar.ByID(id); isSprite && !isSet(id) {
@@ -1260,9 +1293,9 @@ func (m Model) msgLine(focused store.Session) string {
 		parts = append(parts, fg(cRed, " "+firstLine(err.Error()))) // or the hint after it is cut off
 	}
 	if focused.ID != "" && focused.TmuxPane == "" {
-		note := noPane
+		note := noPane()
 		if focused.Background {
-			note = bgNote
+			note = bgNote()
 		}
 		parts = append(parts, fg(cMuted, " "+note))
 	}
@@ -1270,6 +1303,23 @@ func (m Model) msgLine(focused store.Session) string {
 		parts = append(parts, fg(cMuted, " "+h.Hint()))
 	}
 	return strings.Join(parts, fg(cMuted, " ·"))
+}
+
+// hintLine joins the parts of a footer hint, leaving out the empty ones (an action with no key).
+func hintLine(parts ...string) string {
+	return strings.Join(slices.DeleteFunc(slices.Clone(parts), func(p string) bool { return p == "" }), " · ")
+}
+
+// typingHint is the footer of the search prompt: the keys that keep the filter and drop it.
+func (m Model) typingHint() string {
+	var keep, drop string
+	if k := m.cfg.FirstCtl("jump"); k != "" {
+		keep = i18n.T("search.keep", k)
+	}
+	if k := m.cfg.FirstCtl("quit"); k != "" {
+		drop = i18n.T("search.drop", k)
+	}
+	return hintLine(keep, drop)
 }
 
 func (m Model) View() string {
@@ -1295,7 +1345,7 @@ func (m Model) View() string {
 		lines := strings.SplitN(out, "\n", 3)
 		lines[0] = spread(fg(cFocus, " / ")+m.query+cursor, fg(cMuted, fmt.Sprintf("%d/%d ", len(ss), len(m.src.Sessions()))), m.w, "…")
 		if len(ss) == 0 && len(lines) > 2 {
-			lines[1] = fg(cMuted, " no match")
+			lines[1] = fg(cMuted, " "+i18n.T("search.no_match"))
 		}
 		out = strings.Join(lines, "\n")
 	}
@@ -1316,32 +1366,36 @@ func (m Model) View() string {
 		out = strings.Join(lines, "\n")
 	}
 	if m.query != "" { // a kept filter: what moves around it (the states below replace the whole line)
-		hint := "esc clear"
-		switch n, p := m.cfg.First("next_match"), m.cfg.First("prev_match"); { // whichever keys there are
+		var hints []string // whichever keys there are
+		switch n, p := m.cfg.First("next_match"), m.cfg.First("prev_match"); {
 		case n != "" && p != "":
-			hint = n + "/" + p + " next/prev · " + hint
+			hints = append(hints, i18n.T("search.next_prev", n, p))
 		case n != "":
-			hint = n + " next · " + hint
+			hints = append(hints, i18n.T("search.next", n))
 		case p != "":
-			hint = p + " prev · " + hint
+			hints = append(hints, i18n.T("search.prev", p))
 		}
+		if c := m.cfg.First("clear_filter"); c != "" {
+			hints = append(hints, i18n.T("search.clear", c))
+		}
+		hint := hintLine(hints...)
 		last := strings.LastIndexByte(out, '\n') + 1
 		out = out[:last] + ansi.Truncate(fg(cFocus, " "+hint)+fg(cMuted, " ·")+footer(ok && focused.TmuxPane == "" && !focused.Background, m.w, m.groupMode()), m.w, "…")
 	}
 	switch { // the footer is always the last line
 	case m.mode == flashing:
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " flash: type to narrow · label to jump · esc")
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+hintLine(i18n.T("flash.hint"), m.cfg.FirstCtl("quit")))
 	case m.searching:
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " enter keep the filter · esc clear it")
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+m.typingHint())
 	case m.mode == pickAvatar:
 		k := m.cfg.First
 		var hint []string // actions the config left with no key aren't offered
 		if k("left") != "" && k("down") != "" && k("up") != "" && k("right") != "" {
-			hint = append(hint, k("left")+"/"+k("down")+"/"+k("up")+"/"+k("right")+" move")
+			hint = append(hint, i18n.T("picker.move", k("left")+"/"+k("down")+"/"+k("up")+"/"+k("right")))
 		}
-		for _, a := range [][2]string{{"jump", " bind"}, {"quit", " cancel"}} {
+		for _, a := range [][2]string{{"jump", "picker.bind"}, {"quit", "picker.cancel"}} {
 			if k(a[0]) != "" {
-				hint = append(hint, k(a[0])+a[1])
+				hint = append(hint, i18n.T(a[1], k(a[0])))
 			}
 		}
 		x, y, rows := 0, 1, 1 // the grid under the card it is for (above if it doesn't fit)
@@ -1354,9 +1408,9 @@ func (m Model) View() string {
 		out = overlayAt(out, avatarGrid(m.target, m.pick, rows), x, y, m.w)
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+strings.Join(hint, " · "))
 	case m.passThrough():
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " keys go to the pane · "+m.cfg.First("leave_preview")+" back to the cards")
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+i18n.T("pass.keys", m.cfg.First("leave_preview")))
 	case m.pvFocus: // locked out: the target is gone, keys are being swallowed
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cRed, " session is gone · "+m.cfg.First("leave_preview")+" back to the cards")
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cRed, " "+i18n.T("pass.gone", m.cfg.First("leave_preview")))
 	}
 	return out
 }

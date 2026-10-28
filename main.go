@@ -13,6 +13,7 @@ import (
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/board"
 	"github.com/kackerx/agmux/internal/config"
+	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/pi"
 	"github.com/kackerx/agmux/internal/statusline"
 	"github.com/kackerx/agmux/internal/store"
@@ -77,6 +78,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		case "statusline":
 			return statusline.Run(args[1:], os.Stdin, stdout, stderr)
 		case "setup":
+			setupLang()
 			code := statusline.Setup(args[1:], stdout, stderr)
 			if code == 2 { // a usage error: nothing more to do
 				return code
@@ -241,12 +243,27 @@ func configCmd(args []string) int {
 	return 0
 }
 
+// setupLang picks the language of `agmux setup`'s output: $AGMUX_LANG, else the config's [ui]
+// language. A config that does not load is not setup's business: English then.
+func setupLang() {
+	avatar.LoadSets() // config.toml may name image sets
+	lang := ""
+	if c, err := config.Load(); err == nil {
+		lang = c.Language
+	}
+	useLang(lang)
+}
+
+// useLang is the language in use for the rest of the run: $AGMUX_LANG, else the config's.
+func useLang(cfgLang string) { i18n.Set(i18n.Resolve(cfgLang, os.Getenv("AGMUX_LANG"))) }
+
 func runBoard(stay bool) error {
 	avatar.LoadSets()         // before the config: it may name image sets
 	cfg, err := config.Load() // a broken config stops here, before the screen is taken over
 	if err != nil {
 		return err
 	}
+	useLang(cfg.Language)
 	p, err := store.NewPoller()
 	if err != nil {
 		return err

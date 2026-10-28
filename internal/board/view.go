@@ -17,6 +17,7 @@ import (
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/config"
+	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -76,6 +77,7 @@ func useConfig(c *config.Config) {
 	avatar.AlertColor = cRed
 	maxCols, stackFlow, previewPct = c.MaxColumns, c.Flow == "stack", c.PreviewWidth
 	footerKeys = footerFor(c)
+	bgJump, bgReply = c.First("jump"), c.First("reply")
 }
 
 func fg(c lipgloss.Color, s string) string { return lipgloss.NewStyle().Foreground(c).Render(s) }
@@ -164,10 +166,10 @@ func regroup(ss []store.Session, mode string) []store.Session {
 		switch mode {
 		case "project":
 			s.GroupKey = s.Project
-			if s.GroupKey == "" {
-				s.GroupKey = "(no project)"
-			}
 			s.GroupLabel = s.GroupKey
+			if s.GroupKey == "" { // the key is the same in every language, the title is not
+				s.GroupKey, s.GroupLabel = "(no project)", i18n.T("group.no_project")
+			}
 		case "session":
 			ts := s.TmuxSession
 			if h, ok := homes[s.ID]; ok {
@@ -175,11 +177,11 @@ func regroup(ss []store.Session, mode string) []store.Session {
 			}
 			s.GroupKey, s.GroupLabel = ts, ts
 			if ts == "" { // no pane: tmuxTarget is null
-				s.GroupKey, s.GroupLabel = "\U0010FFFF"+noPaneGroup, noPaneGroup // sorts after every name
+				s.GroupKey, s.GroupLabel = "\U0010FFFF"+noPaneGroup, i18n.T("group.no_pane") // sorts after every name
 			}
 		case "state":
 			st := stateOf(s)
-			s.GroupKey, s.GroupLabel = strconv.Itoa(slices.Index(stateGroups, st))+st, st
+			s.GroupKey, s.GroupLabel = strconv.Itoa(slices.Index(stateGroups, st))+st, i18n.T("status."+st)
 		}
 		out[i] = s
 	}
@@ -476,15 +478,15 @@ func status(s store.Session) (word, detail string) {
 		if s.PendingTool != "" {
 			detail = " · " + s.PendingTool
 		} else if s.AgentsWorking {
-			detail = " · agents"
+			detail = " · " + i18n.T("status.agents")
 		}
-		return fg(cWorking, "⏵ working"), detail
+		return fg(cWorking, "⏵ "+i18n.T("status.working")), detail
 	case s.Status == "waiting":
-		return fg(cRed, "⏳ waiting"), ""
+		return fg(cRed, "⏳ "+i18n.T("status.waiting")), ""
 	case s.Done:
-		return fg(cDone, "● done"), ""
+		return fg(cDone, "● "+i18n.T("status.done")), ""
 	case s.Status == "idle":
-		return fg(cMuted, "⏸ idle"), ""
+		return fg(cMuted, "⏸ "+i18n.T("status.idle")), ""
 	}
 	return fg(cMuted, "● "+s.Status), ""
 }
@@ -697,28 +699,28 @@ func footerFor(c *config.Config) []footerKey {
 				return
 			}
 		}
-		out = append(out, footerKey{fmt.Sprintf(text, keys...), needPane})
+		out = append(out, footerKey{fmt.Sprintf(i18n.T(text), keys...), needPane})
 	}
-	add(false, "%s/%s %s/%s move", "down", "up", "left", "right")
-	add(true, "%s jump", "jump")
-	add(false, "%s search", "search")
-	add(false, "%s flash", "flash")
-	add(false, "%s fold", "fold")
-	add(false, "%s group:{group}", "group") // {group}: the grouping now, said by footer
-	add(false, "%s preview", "preview")
-	add(true, "%s focus preview", "focus_preview")
-	add(true, "%s reply", "reply")
-	add(true, "%s handoff", "handoff")
-	add(false, "%s restart", "restart")
-	add(false, "%s kill", "kill")
-	add(false, "%s review", "review")
-	add(false, "%s avatar", "avatar")
-	add(false, "%s pin", "pin")
-	add(false, "%s read", "mark_read")
+	add(false, "footer.move", "down", "up", "left", "right")
+	add(true, "footer.jump", "jump")
+	add(false, "footer.search", "search")
+	add(false, "footer.flash", "flash")
+	add(false, "footer.fold", "fold")
+	add(false, "footer.group", "group") // {group}: the grouping now, said by footer
+	add(false, "footer.preview", "preview")
+	add(true, "footer.focus_preview", "focus_preview")
+	add(true, "footer.reply", "reply")
+	add(true, "footer.handoff", "handoff")
+	add(false, "footer.restart", "restart")
+	add(false, "footer.kill", "kill")
+	add(false, "footer.review", "review")
+	add(false, "footer.avatar", "avatar")
+	add(false, "footer.pin", "pin")
+	add(false, "footer.read", "mark_read")
 	if stayFooter {
-		add(false, "%s hide · %s quit", "quit", "exit")
+		add(false, "footer.hide_quit", "quit", "exit")
 	} else {
-		add(false, "%s quit", "quit")
+		add(false, "footer.quit", "quit")
 	}
 	return out
 }
@@ -780,7 +782,7 @@ func avatarGrid(s store.Session, pick, rows int) []string {
 			if n == 0 {
 				return fg(cFocus, l+strings.Repeat("─", gridW-2)+r)
 			}
-			label := fmt.Sprintf(" %s %d more ", arrow, n)
+			label := " " + i18n.T("picker.more", arrow, n) + " "
 			return fg(cFocus, l+"─") + fg(cMuted, label) + fg(cFocus, strings.Repeat("─", gridW-3-ansi.StringWidth(label))+r)
 		}
 		box[0] = note("╭", "╮", "↑", first*gridCols)
@@ -1039,7 +1041,7 @@ func footer(noPane bool, w int, group string) string {
 		if k.needPane && noPane {
 			c = cOff
 		}
-		parts[i] = fg(c, strings.ReplaceAll(k.text, "{group}", group))
+		parts[i] = fg(c, strings.ReplaceAll(k.text, "{group}", i18n.T("mode."+group)))
 	}
 	return ansi.Truncate(" "+strings.Join(parts, fg(cMuted, " · ")), w, "…")
 }
@@ -1048,15 +1050,15 @@ func footer(noPane bool, w int, group string) string {
 // wheel set it), message line and footer. The cards get the first cw columns; right (the preview,
 // one line per body row) fills the rest.
 func view(ss []store.Session, w, h int, focus string, frame int, now time.Time, msg string, noPane bool, folded map[string]bool, cw int, right []string, hits map[string]hit, pin int, group string) (string, []rect, int) {
-	top := " " + lipgloss.NewStyle().Bold(true).Render("agmux") + fg(cMuted, fmt.Sprintf(" · %d sessions", len(ss)))
+	top := " " + lipgloss.NewStyle().Bold(true).Render("agmux") + fg(cMuted, " · "+i18n.T("top.sessions", len(ss)))
 	body, rects := layout(groups(ss), cw, focus, frame, now, folded, hits)
 	bodyH := max(h-3, 1) // top bar, message line, footer
 	off := scrollOff(rects, focus, bodyH, len(body), pin)
 	if off > 0 {
-		top += fg(cMuted, " · ↑ more")
+		top += fg(cMuted, " · "+i18n.T("top.more_up"))
 	}
 	if off+bodyH < len(body) {
-		top += fg(cMuted, " · ↓ more")
+		top += fg(cMuted, " · "+i18n.T("top.more_down"))
 	}
 	vis := body[min(off, len(body)):]
 	vis = vis[:min(bodyH, len(vis))]

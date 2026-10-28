@@ -15,6 +15,7 @@ import (
 
 	"github.com/kackerx/agmux/internal/avatar"
 	"github.com/kackerx/agmux/internal/config"
+	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -250,6 +251,8 @@ func TestSetupInstallsThePiExtensionToo(t *testing.T) {
 	agent := filepath.Join(home, "pi-agent")
 	os.MkdirAll(agent, 0o755)
 	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	t.Setenv("XDG_CONFIG_HOME", home) // setup reads [ui] language: never the real config
+	t.Setenv("AGMUX_LANG", "en")
 	ext := filepath.Join(agent, "extensions", "agmux.js")
 	var out, errs bytes.Buffer
 	if code := run([]string{"setup"}, &out, &errs); code != 0 || !strings.Contains(out.String(), "would install the extension") {
@@ -268,5 +271,44 @@ func TestSetupInstallsThePiExtensionToo(t *testing.T) {
 	out.Reset()
 	if code := run([]string{"setup", "--bogus"}, &out, &errs); code != 2 || strings.Contains(out.String(), "pi:") {
 		t.Errorf("usage: %d %q", code, out.String())
+	}
+}
+
+// T74: `agmux setup` speaks $AGMUX_LANG, else [ui] language of the config, else English; a config that
+// does not load does not stop it.
+func TestSetupLanguage(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	agent := filepath.Join(home, "pi-agent")
+	os.MkdirAll(agent, 0o755)
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	t.Cleanup(func() { i18n.Set("en") })
+	say := func(env string) string {
+		t.Setenv("AGMUX_LANG", env)
+		var out, errs bytes.Buffer
+		if code := run([]string{"setup"}, &out, &errs); code != 0 {
+			t.Fatalf("setup: %d %q", code, errs.String())
+		}
+		return out.String()
+	}
+	if got := say(""); !strings.Contains(got, "dry run: add --write to apply") {
+		t.Errorf("no config, no env: %q", got)
+	}
+	if got := say("zh"); !strings.Contains(got, "试运行：加 --write 才会写入") || !strings.Contains(got, "将安装扩展") || strings.Contains(got, "dry run") {
+		t.Errorf("AGMUX_LANG=zh: %q", got)
+	}
+	os.MkdirAll(filepath.Join(home, "agmux"), 0o755)
+	cfg := filepath.Join(home, "agmux", "config.toml")
+	os.WriteFile(cfg, []byte("[ui]\nlanguage = \"zh\"\n"), 0o644)
+	if got := say(""); !strings.Contains(got, "试运行") {
+		t.Errorf("config zh: %q", got)
+	}
+	if got := say("en"); !strings.Contains(got, "dry run") {
+		t.Errorf("the env wins over the config: %q", got)
+	}
+	os.WriteFile(cfg, []byte("[ui]\nlanguage = \"fr\"\n"), 0o644) // broken: setup goes on, in English
+	if got := say(""); !strings.Contains(got, "dry run") {
+		t.Errorf("broken config: %q", got)
 	}
 }

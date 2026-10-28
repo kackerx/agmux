@@ -18,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/kackerx/agmux/internal/avatar"
+	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/pi"
 	"github.com/kackerx/agmux/internal/xdg"
 )
@@ -128,10 +129,10 @@ func (p *Poller) Sessions() []Session {
 }
 
 // What the board says when a pi runs that it can't see: the extension is not installed, or is and
-// the pi was started before it was.
+// the pi was started before it was. These are keys of internal/i18n; Hint says them in words.
 const (
-	PiHint        = "pi: run agmux setup --write"
-	PiRestartHint = "pi: restart the running pi sessions to show them"
+	PiHint        = "pi.hint"
+	PiRestartHint = "pi.restart_hint"
 )
 
 // piHintEvery is how often the process table is asked about pi when no extension is there to tell.
@@ -172,7 +173,10 @@ func (p *Poller) checkPiHint(raw []Raw) {
 func (p *Poller) Hint() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.hint
+	if p.hint == "" {
+		return ""
+	}
+	return i18n.T(p.hint)
 }
 
 // Err is the last poll's error (the previous sessions are kept when it fails),

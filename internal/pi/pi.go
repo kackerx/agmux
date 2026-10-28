@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/kackerx/agmux/internal/i18n"
 )
 
 //go:embed agmux.js
@@ -61,31 +63,31 @@ func Setup(write bool, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if _, err := os.Stat(dir); err != nil {
-		fmt.Fprintf(stdout, "pi: %s not found, extension skipped (no pi here; $PI_CODING_AGENT_DIR points elsewhere)\n", dir)
+		fmt.Fprintln(stdout, i18n.T("setup.pi_not_found", dir))
 		return 0
 	}
 	path, _ := ExtensionPath()
 	cur, err := os.ReadFile(path)
 	switch {
 	case err == nil && bytes.Equal(cur, Extension):
-		fmt.Fprintf(stdout, "pi: extension already installed: %s\n", path)
+		fmt.Fprintln(stdout, i18n.T("setup.pi_present", path))
 		return 0
 	case err == nil:
-		fmt.Fprintf(stdout, "pi: %s differs from agmux's extension (edited, or another version): left alone; delete it and run agmux setup --write to replace it\n", path)
+		fmt.Fprintln(stdout, i18n.T("setup.pi_differs", path))
 		return 0
 	case !os.IsNotExist(err):
 		fmt.Fprintf(stderr, "agmux setup: %v\n", err)
 		return 1
 	}
 	if !write {
-		fmt.Fprintf(stdout, "pi: would install the extension (%d lines): %s\ndry run: add --write to apply\n", bytes.Count(Extension, []byte("\n")), path)
+		fmt.Fprintln(stdout, i18n.T("setup.pi_would", bytes.Count(Extension, []byte("\n")), path))
 		return 0
 	}
 	if err := install(path); err != nil {
 		fmt.Fprintf(stderr, "agmux setup: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "pi: installed %s (a pi session loads extensions when it starts: restart the running ones)\n", path)
+	fmt.Fprintln(stdout, i18n.T("setup.pi_installed", path))
 	return 0
 }
 

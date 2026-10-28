@@ -17,21 +17,22 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/kackerx/agmux/internal/avatar"
+	"github.com/kackerx/agmux/internal/i18n"
 	"github.com/kackerx/agmux/internal/xdg"
 )
 
 // Actions, in the order `agmux config` prints them.
 var Actions = []string{
-	"up", "down", "left", "right", "page_down", "page_up", "jump", "fold", "preview", "focus_preview", "leave_preview",
-	"reply", "handoff", "search", "next_match", "prev_match", "flash", "group", "group_cwd", "group_project", "group_session", "group_state", "restart", "kill", "review", "avatar", "pin", "mark_read", "quit", "exit", "confirm",
+	"up", "down", "left", "right", "page_down", "page_up", "jump", "fold", "preview", "focus_preview", "leave_preview", "preview_up", "preview_down",
+	"reply", "handoff", "search", "next_match", "prev_match", "clear_filter", "flash", "group", "group_cwd", "group_project", "group_session", "group_state", "restart", "kill", "review", "avatar", "pin", "mark_read", "quit", "exit", "confirm",
 }
 
 var defaultKeys = map[string][]string{
 	"up": {"k", "up"}, "down": {"j", "down"}, "left": {"h", "left"}, "right": {"l", "right"},
 	"page_down": {"ctrl+d"}, "page_up": {"ctrl+u"},
-	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"tab"},
+	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"tab"}, "preview_up": {"pgup"}, "preview_down": {"pgdown"},
 	// search / flash are T19 / T20
-	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "flash": {"s"}, "group": {"g"},
+	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "clear_filter": {"esc"}, "flash": {"s"}, "group": {"g"},
 	"group_cwd": {}, "group_project": {}, "group_session": {}, "group_state": {},
 	"restart": {"r"}, "kill": {"x"}, "review": {"d"}, "avatar": {"a"}, "pin": {"t"}, "mark_read": {"m"},
 	"quit": {"q", "esc"}, "exit": {"Q"}, "confirm": {"y"},
@@ -60,6 +61,8 @@ type Config struct {
 	GroupBy      string // [layout] group_by: how cards are grouped at start: one of GroupModes
 	Flow         string // [layout] flow: "bands" (a row of groups at a time) or "stack" (group k in column k mod n)
 
+	Language string // [ui] language: "en" or "zh"; $AGMUX_LANG wins (i18n.Resolve)
+
 	AvatarRenderer string            // [avatars] renderer: "auto", "image" or "pixel"
 	AvatarDefault  string            // [avatars] default: "hash" or an avatar ID (sprite or image set)
 	AvatarBind     map[string]string // [avatars.bind]: session name → avatar ID
@@ -67,7 +70,7 @@ type Config struct {
 
 // Default is the configuration with no file.
 func Default() *Config {
-	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, PreviewWidth: 40, Flow: "bands", GroupBy: "cwd", AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
+	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, PreviewWidth: 40, Flow: "bands", GroupBy: "cwd", Language: "en", AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
 	for k, v := range defaultKeys {
 		c.Keys[k] = slices.Clone(v) // callers may change c; the defaults stay
 	}
@@ -130,6 +133,9 @@ func Parse(path string, data []byte) (*Config, error) {
 			Flow         string `toml:"flow"`
 			GroupBy      string `toml:"group_by"`
 		} `toml:"layout"`
+		UI struct {
+			Language string `toml:"language"`
+		} `toml:"ui"`
 		Avatars struct {
 			Renderer string            `toml:"renderer"`
 			Default  string            `toml:"default"`
@@ -146,7 +152,7 @@ func Parse(path string, data []byte) (*Config, error) {
 	if _, err := toml.Decode(string(data), &generic); err != nil {
 		return nil, oneLine(err)
 	}
-	for _, sec := range []string{"keys", "colors", "layout", "avatars"} {
+	for _, sec := range []string{"keys", "colors", "layout", "ui", "avatars"} {
 		if v, ok := generic[sec]; ok {
 			if _, isTable := v.(map[string]any); !isTable {
 				return nil, fmt.Errorf("%s: %s: must be a table, [%[2]s]", path, sec)
@@ -161,7 +167,7 @@ func Parse(path string, data []byte) (*Config, error) {
 		return nil, fmt.Errorf("%s: avatars.bind: must be a table, [avatars.bind]", path)
 	}
 	if u := md.Undecoded(); len(u) > 0 {
-		return nil, fmt.Errorf("%s: %s: unknown setting (sections are [keys], [colors], [layout], [avatars] and [avatars.bind])", path, u[0])
+		return nil, fmt.Errorf("%s: %s: unknown setting (sections are [keys], [colors], [layout], [ui], [avatars] and [avatars.bind])", path, u[0])
 	}
 	c := Default()
 	c.Path = path
@@ -230,6 +236,12 @@ func Parse(path string, data []byte) (*Config, error) {
 		}
 		c.GroupBy = raw.Layout.GroupBy
 	}
+	if md.IsDefined("ui", "language") {
+		if l := raw.UI.Language; !i18n.Valid(l) {
+			return nil, fmt.Errorf("%s: ui.language: %q is not a language (use %s)", path, l, strings.Join(i18n.Langs, " or "))
+		}
+		c.Language = raw.UI.Language
+	}
 	if r := raw.Avatars.Renderer; r != "" {
 		if r != "auto" && r != "image" && r != "pixel" {
 			return nil, fmt.Errorf("%s: avatars.renderer: %q is not auto, image or pixel", path, r)
@@ -273,9 +285,9 @@ func Parse(path string, data []byte) (*Config, error) {
 	return c, nil
 }
 
-// modal actions only act in their own mode (the kill prompt, pass-through), so they may share
-// keys with the board's; KeyMap leaves them out, Is asks about them.
-var modal = map[string]bool{"confirm": true, "leave_preview": true}
+// modal actions only act in their own mode (the kill prompt, pass-through, a kept filter), so they
+// may share keys with the board's; KeyMap leaves them out, Is asks about them.
+var modal = map[string]bool{"confirm": true, "leave_preview": true, "clear_filter": true}
 
 // sentAs: key names bubbletea never reports, and what it reports instead.
 var sentAs = map[string]string{"ctrl+i": "tab", "ctrl+m": "enter"}
@@ -296,6 +308,23 @@ func (c *Config) KeyMap() map[string]string {
 // Is reports whether key (as KeyMsg.String() spells it) is bound to action.
 func (c *Config) Is(action, key string) bool {
 	return slices.ContainsFunc(c.Keys[action], func(k string) bool { return norm(k) == key })
+}
+
+// typed reports whether key (as KeyMsg.String() spells it) is a character that text can contain.
+func typed(key string) bool { return utf8.RuneCountInString(key) == 1 }
+
+// IsCtl is Is for a key that is not a character: while a prompt takes text (search, flash) the
+// letters of a binding are text, and only ctrl / alt / named keys act.
+func (c *Config) IsCtl(action, key string) bool { return !typed(key) && c.Is(action, key) }
+
+// FirstCtl is the first key of action that IsCtl accepts, "" when it has none.
+func (c *Config) FirstCtl(action string) string {
+	for _, k := range c.Keys[action] {
+		if !typed(norm(k)) {
+			return k
+		}
+	}
+	return ""
 }
 
 // First is the key shown for action in the footer and prompts; "" when it has none.
@@ -320,6 +349,7 @@ var actionUse = map[string]string{
 	"group_state": "switch straight to the state grouping", "restart": "restart the focused session", "kill": "kill the focused session (asks first)",
 	"review": "show the diff of the focused session's repo (hunk, else git diff)", "avatar": "open or close the avatar picker under the focused card",
 	"pin": "pin the focused card to the top of its group", "mark_read": "mark the focused card's done as seen (it turns idle)",
+	"clear_filter": "drop a kept search filter before anything else", "preview_up": "scroll the preview back", "preview_down": "scroll the preview forward",
 	"quit": "with `board --stay` inside a popup: hide instead", "exit": "always quit, even with --stay", "confirm": "answer yes to a prompt",
 }
 
@@ -353,7 +383,9 @@ func (c *Config) String() string {
 # "tab", "shift+tab", "space", "backspace", "up"/"down"/"left"/"right", "home"/"end", "pgup"/"pgdown",
 # "f1".."f20", "ctrl+<letter>", "alt+<key>". An uppercase letter means shift+letter.
 # ctrl+c cannot be bound (it always quits); ctrl+i and ctrl+m are tab and enter.
-# A key may be bound to only one action, but confirm and leave_preview may share keys with others.
+# A key may be bound to only one action, but confirm, leave_preview and clear_filter may share keys with others.
+# While a prompt takes text (search, flash) letters are text: jump's non-character keys keep the
+# filter, quit's cancel it; backspace, ctrl+h and ctrl+c are fixed.
 `)
 	for _, a := range Actions {
 		def := strings.Join(defaultKeys[a], ", ")
@@ -388,6 +420,8 @@ func (c *Config) String() string {
 	cont(`height; "stack": groups stack down each column, no gaps`)
 	line(fmt.Sprintf("group_by = %q", c.GroupBy), with(`"cwd"`, `grouping at start: "cwd", "project", "session" or`))
 	cont(`"state"; the group key cycles through them in that order`)
+	b.WriteString("\n[ui]\n")
+	line(fmt.Sprintf("language = %q", c.Language), with(`"en"`, `"en" or "zh"; $AGMUX_LANG overrides it`))
 	b.WriteString("\n[avatars]\n")
 	line(fmt.Sprintf("renderer = %q", c.AvatarRenderer), with(`"auto"`, `"auto": pictures in kitty / ghostty, pixel art`))
 	cont(`elsewhere; "image": always pictures; "pixel": always pixel art`)

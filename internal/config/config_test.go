@@ -602,3 +602,52 @@ func TestPreviewWidth(t *testing.T) {
 		t.Errorf("template line:\n%s", Default().String())
 	}
 }
+
+// T74: [ui] language is en unless the file says zh; anything else names the file, the setting and the choices.
+func TestUILanguage(t *testing.T) {
+	if Default().Language != "en" {
+		t.Errorf("default %q", Default().Language)
+	}
+	c, err := Parse("cfg", []byte("[ui]\nlanguage = \"zh\"\n"))
+	if err != nil || c.Language != "zh" {
+		t.Fatalf("zh: %v %v", err, c)
+	}
+	if back, err := Parse("cfg", []byte(c.String())); err != nil || back.Language != "zh" || !strings.Contains(c.String(), "language = \"zh\"") {
+		t.Errorf("round trip: %v\n%s", err, c.String())
+	}
+	for _, bad := range []string{"fr", "", "EN"} {
+		_, err := Parse("cfg", []byte(fmt.Sprintf("[ui]\nlanguage = %q\n", bad)))
+		if want := fmt.Sprintf("cfg: ui.language: %q is not a language (use en or zh)", bad); err == nil || err.Error() != want {
+			t.Errorf("%q: %v, want %s", bad, err, want)
+		}
+	}
+	if _, err := Parse("cfg", []byte("ui = 3\n")); err == nil || !strings.Contains(err.Error(), "must be a table") {
+		t.Errorf("ui = 3: %v", err)
+	}
+}
+
+// T74: clear_filter may share esc with quit (it only acts on a kept filter); preview_up / down are
+// plain actions with pgup / pgdown; IsCtl and FirstCtl leave out the keys that are text.
+func TestClearFilterPreviewScrollAndCtlKeys(t *testing.T) {
+	c := Default()
+	if !c.Is("clear_filter", "esc") || !c.Is("quit", "esc") || c.KeyMap()["esc"] != "quit" {
+		t.Errorf("esc: clear_filter %v, quit %v, map %q", c.Keys["clear_filter"], c.Keys["quit"], c.KeyMap()["esc"])
+	}
+	if c.KeyMap()["pgup"] != "preview_up" || c.KeyMap()["pgdown"] != "preview_down" {
+		t.Errorf("pgup %q pgdown %q", c.KeyMap()["pgup"], c.KeyMap()["pgdown"])
+	}
+	if _, err := Parse("cfg", []byte("[keys]\nquit = [\"esc\"]\nclear_filter = [\"esc\"]\nsearch = [\"ctrl+x\"]\n")); err != nil {
+		t.Errorf("esc for both: %v", err)
+	}
+	if !c.IsCtl("quit", "esc") || c.IsCtl("quit", "q") || c.FirstCtl("quit") != "esc" || c.FirstCtl("jump") != "enter" {
+		t.Errorf("IsCtl(quit, esc) %v, IsCtl(quit, q) %v, FirstCtl(quit) %q", c.IsCtl("quit", "esc"), c.IsCtl("quit", "q"), c.FirstCtl("quit"))
+	}
+	c, _ = Parse("cfg", []byte("[keys]\nquit = [\"q\", \"space\"]\njump = [\"l\"]\n"))
+	if c.FirstCtl("quit") != "" || c.FirstCtl("jump") != "" || c.IsCtl("quit", " ") {
+		t.Errorf("only characters: FirstCtl(quit) %q, FirstCtl(jump) %q, IsCtl(quit, space) %v", c.FirstCtl("quit"), c.FirstCtl("jump"), c.IsCtl("quit", " "))
+	}
+	c, _ = Parse("cfg", []byte("[keys]\nquit = [\"q\", \"alt+q\", \"ctrl+q\"]\n"))
+	if c.FirstCtl("quit") != "alt+q" || !c.IsCtl("quit", "alt+q") {
+		t.Errorf("alt+q is a key, not text: %q", c.FirstCtl("quit"))
+	}
+}

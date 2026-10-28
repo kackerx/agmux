@@ -67,7 +67,7 @@ func TestBackgroundPreviewAndMessage(t *testing.T) {
 		t.Errorf("message line:\n%s", v)
 	}
 	m = psized(staticSrc{bgSession(func(s *store.Session) { s.Background = false })}, 120, 30)
-	if v := ansi.Strip(m.View()); !strings.Contains(v, noPane) || strings.Contains(v, "attaches it") {
+	if v := ansi.Strip(m.View()); !strings.Contains(v, noPane()) || strings.Contains(v, "attaches it") {
 		t.Errorf("a session that is not a background one: %s", v)
 	}
 }

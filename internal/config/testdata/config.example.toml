@@ -7,7 +7,9 @@
 # "tab", "shift+tab", "space", "backspace", "up"/"down"/"left"/"right", "home"/"end", "pgup"/"pgdown",
 # "f1".."f20", "ctrl+<letter>", "alt+<key>". An uppercase letter means shift+letter.
 # ctrl+c cannot be bound (it always quits); ctrl+i and ctrl+m are tab and enter.
-# A key may be bound to only one action, but confirm and leave_preview may share keys with others.
+# A key may be bound to only one action, but confirm, leave_preview and clear_filter may share keys with others.
+# While a prompt takes text (search, flash) letters are text: jump's non-character keys keep the
+# filter, quit's cancel it; backspace, ctrl+h and ctrl+c are fixed.
 up = ["k", "up"]              # default: k, up
 down = ["j", "down"]          # default: j, down
 left = ["h", "left"]          # default: h, left
@@ -19,11 +21,14 @@ fold = ["f"]                  # default: f — fold / unfold the focused group
 preview = ["p"]               # default: p — open / close the pane preview
 focus_preview = ["tab"]       # default: tab — pass keys through to the previewed pane
 leave_preview = ["tab"]       # default: tab — back to the board
+preview_up = ["pgup"]         # default: pgup — scroll the preview back
+preview_down = ["pgdown"]     # default: pgdown — scroll the preview forward
 reply = ["i"]                 # default: i — type a reply into the focused session
 handoff = ["H"]               # default: H — send /handoff to the focused session
 search = ["/"]                # default: / — filter the cards by fuzzy search
 next_match = ["n"]            # default: n — next search hit
 prev_match = ["N"]            # default: N — previous search hit
+clear_filter = ["esc"]        # default: esc — drop a kept search filter before anything else
 flash = ["s"]                 # default: s — move the focus to a card by its label
 group = ["g"]                 # default: g — cycle the grouping (see [layout] group_by)
 group_cwd = []                # default: none — switch straight to the cwd grouping
@@ -69,6 +74,9 @@ flow = "bands"                # default: "bands" — "bands": a row of groups at
                               #   height; "stack": groups stack down each column, no gaps
 group_by = "cwd"              # default: "cwd" — grouping at start: "cwd", "project", "session" or
                               #   "state"; the group key cycles through them in that order
+
+[ui]
+language = "en"               # default: "en" — "en" or "zh"; $AGMUX_LANG overrides it
 
 [avatars]
 renderer = "auto"             # default: "auto" — "auto": pictures in kitty / ghostty, pixel art
