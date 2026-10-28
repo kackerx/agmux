@@ -1,4 +1,4 @@
-# vet, gofmt, go mod tidy and the unit tests. test/e2e is not run here: it is
+# vet, gofmt, go mod tidy, dead code (deadcode) and the unit tests. test/e2e is not run here: it is
 # Python on a real tmux.
 name: ci
 
@@ -23,6 +23,10 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
+      - name: no dead code (a function only a _test.go calls is reported)
+        run: |
+          out="$(go run golang.org/x/tools/cmd/deadcode@v0.52.0 ./...)"
+          test -z "$out" || { echo "$out"; exit 1; }
       - name: gofmt and go mod tidy leave nothing to change
         run: |
           test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }

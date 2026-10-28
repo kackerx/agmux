@@ -319,6 +319,20 @@ func (*mutSrc) SetAvatar(store.Session, string) error { return nil }
 func (*mutSrc) MarkSeen(store.Session) error          { return nil }
 func (*mutSrc) TogglePin(store.Session) (bool, error) { return false, nil }
 
+// overlay draws box centered over screen (w columns), the screen showing on both sides.
+func overlay(screen string, box []string, w int) string {
+	lines := strings.Split(screen, "\n")
+	bw := min(ansi.StringWidth(box[0]), w)
+	x, y := (w-bw)/2, max((len(lines)-len(box))/2, 0)
+	for i, b := range box {
+		if y+i >= len(lines) {
+			break
+		}
+		lines[y+i] = put(lines[y+i], x, ansi.Truncate(b, bw, ""))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // The x / s prompts act on the session they named, never on whatever focus falls back to.
 func TestPromptTargetIsPinned(t *testing.T) {
 	for _, keys := range [][]string{{"x", "y"}} {
@@ -1689,7 +1703,7 @@ func TestAvatarPicker(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "avatars.json")
 	b, _ := avatar.LoadBindings(path)
-	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-04", Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) {
+	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-04", Sources: []store.Source{srcFunc(func() ([]store.Raw, error) {
 		return []store.Raw{{ID: "a1", Name: "one", CWD: "/a", Pane: "%1", Status: "idle"}, {ID: "a2", CWD: "/a", Status: "idle"}}, nil
 	})}}
 	if err := p.Refresh(); err != nil {

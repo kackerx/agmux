@@ -27,8 +27,3 @@ type Raw struct {
 type Source interface {
 	Sessions() ([]Raw, error)
 }
-
-// SourceFunc is a Source that is a function; the tests use it.
-type SourceFunc func() ([]Raw, error)
-
-func (f SourceFunc) Sessions() ([]Raw, error) { return f() }

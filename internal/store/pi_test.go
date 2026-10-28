@@ -146,7 +146,7 @@ func TestPlaceByPID(t *testing.T) {
 		{ID: "bg", AgentType: "claude", PID: 10, Background: true},
 		{ID: "nopid", AgentType: "pi"},
 	}
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(),
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(),
 		Panes: func() (string, error) { return listing, nil },
 		Procs: func() (procs, error) { asked++; return table, nil }}
 	if err := p.Refresh(); err != nil {
@@ -191,7 +191,7 @@ func TestPiHint(t *testing.T) {
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	comm, installed, reads := map[int]string{1: "zsh", 2: "/usr/bin/vim"}, false, 0
 	var raw []Raw
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(),
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(),
 		Now:         func() time.Time { return now },
 		Procs:       func() (procs, error) { reads++; return procs{comm: comm}, nil },
 		PiInstalled: func() bool { return installed }}
@@ -260,7 +260,7 @@ func TestGitBranch(t *testing.T) {
 	run("commit", "-q", "--allow-empty", "-m", "x")
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	p := &Poller{Now: func() time.Time { return now }, StateDir: t.TempDir(),
-		Sources: []Source{SourceFunc(func() ([]Raw, error) {
+		Sources: []Source{srcFunc(func() ([]Raw, error) {
 			return []Raw{{ID: "a", CWD: dir}, {ID: "b", CWD: dir, Branch: "given"}, {ID: "c", CWD: filepath.Join(dir, "gone")}, {ID: "d"}}, nil
 		})}}
 	branches := func() string {

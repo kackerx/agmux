@@ -106,17 +106,25 @@ func thickBox(c lipgloss.Color, title string, lines []string, w, h int) []string
 }
 
 func (m recallModel) View() string {
-	if m.w == 0 {
-		return ""
-	}
-	prog := m.progressText()
-	if m.curOut != nil {
-		if x, y, ok := m.cursorAtFor(prog); ok {
+	view, x, y, ok := m.frame()
+	if m.curOut != nil && m.w > 0 {
+		if ok {
 			m.curOut.place(x, y)
 		} else {
 			m.curOut.place(-1, -1)
 		}
 	}
+	return view
+}
+
+// frame is the screen and where the terminal's cursor goes on it (ok: it is shown), both made from one
+// reading of the index's progress, which goes on meanwhile.
+func (m recallModel) frame() (view string, x, y int, ok bool) {
+	if m.w == 0 {
+		return "", 0, 0, false
+	}
+	prog := m.progressText()
+	x, y, ok = m.cursorAtFor(prog)
 	lines := m.inputBox(prog)
 	if bh := m.bodyH(); bh > 0 {
 		lw := m.listW()
@@ -139,7 +147,7 @@ func (m recallModel) View() string {
 	if len(lines) >= m.h {
 		lines = lines[:max(m.h-1, 0)]
 	}
-	return strings.Join(append(lines, m.footer()), "\n")
+	return strings.Join(append(lines, m.footer()), "\n"), x, y, ok
 }
 
 // listTitle is how many sessions the query found out of how many there are to search: "3/14", "0/14" when nothing is found.
@@ -166,9 +174,6 @@ func (m recallModel) progressText() string {
 
 // roomFor is the cells the query has in its box: what is between the border and the progress text.
 func (m recallModel) roomFor(prog string) int { return m.w - 2 - 3 - ansi.StringWidth(prog) - 1 }
-
-// inputRoom is roomFor what the progress says now.
-func (m recallModel) inputRoom() int { return m.roomFor(m.progressText()) }
 
 // footer is the keys, each with its first configured key; esc closes the panel, clears the query
 // or ends the screen, whichever it would do. Outside the panel letters are text, so only a key that

@@ -616,10 +616,8 @@ func tailLines(path string) [][]byte {
 	return lines
 }
 
-// lastModel returns message.model of the last assistant entry in the final 64KB of a transcript.
+// modelIn is message.model of the last assistant entry in lines (the final 64KB of a transcript).
 // ponytail: an assistant line longer than 64KB is missed; widen tailBytes if models show blank.
-func lastModel(path string) string { return modelIn(tailLines(path)) }
-
 func modelIn(lines [][]byte) string {
 	for i := len(lines) - 1; i >= 0; i-- {
 		if !bytes.Contains(lines[i], []byte(`"type":"assistant"`)) {

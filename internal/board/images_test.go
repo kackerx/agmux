@@ -45,12 +45,12 @@ func pngFile(s string) *fstest.MapFile { return &fstest.MapFile{Data: pngOf(s)} 
 // useKit loads one set: two idle frames, two think, one read, one hi, nothing else.
 func useKit(t *testing.T) {
 	t.Helper()
-	avatar.UseSets(fstest.MapFS{
+	avatar.LoadSetsFrom(fstest.MapFS{}, fstest.MapFS{
 		"kit/idle/1.png": pngFile("i1"), "kit/idle/2.png": pngFile("i2"),
 		"kit/think/1.png": pngFile("t1"), "kit/think/2.png": pngFile("t2"),
 		"kit/read/1.png": pngFile("r1"), "kit/hi/1.png": pngFile("h1"),
 	})
-	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
+	t.Cleanup(func() { avatar.LoadSetsFrom(fstest.MapFS{}, fstest.MapFS{}); useImages = false })
 }
 
 func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
@@ -226,11 +226,11 @@ func gridFixture(t *testing.T, nSets int, def string, names ...string) (*store.P
 		files[fmt.Sprintf("s%02d/idle/2.png", i+1)] = pngFile(fmt.Sprintf("s%d-blink", i)) // the grid must still draw the resting face
 		files[fmt.Sprintf("s%02d/think/1.png", i+1)] = pngFile(fmt.Sprintf("s%d-think", i))
 	}
-	avatar.UseSets(files)
-	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
+	avatar.LoadSetsFrom(fstest.MapFS{}, files)
+	t.Cleanup(func() { avatar.LoadSetsFrom(fstest.MapFS{}, fstest.MapFS{}); useImages = false })
 	dir := t.TempDir()
 	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
-	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: def, Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) {
+	p := &store.Poller{StateDir: dir, Avatars: b, AvatarDefault: def, Sources: []store.Source{srcFunc(func() ([]store.Raw, error) {
 		var ss []store.Raw
 		for i, n := range names {
 			name, cwd, ok := strings.Cut(n, "@") // "name@/dir": its own group
@@ -543,9 +543,9 @@ func TestBlinksAreStaggered(t *testing.T) {
 
 // An 8 character name doesn't touch the next cell's: there are at least two spaces between them.
 func TestAvatarGridNamesKeepApart(t *testing.T) {
-	avatar.UseSets(fstest.MapFS{"aaaaaaaa/idle/1.png": pngFile("a"), "bbbbbbbb/idle/1.png": pngFile("b"), "cccccccc/idle/1.png": pngFile("c")})
-	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}); useImages = false })
-	p := &store.Poller{StateDir: t.TempDir(), Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) {
+	avatar.LoadSetsFrom(fstest.MapFS{}, fstest.MapFS{"aaaaaaaa/idle/1.png": pngFile("a"), "bbbbbbbb/idle/1.png": pngFile("b"), "cccccccc/idle/1.png": pngFile("c")})
+	t.Cleanup(func() { avatar.LoadSetsFrom(fstest.MapFS{}, fstest.MapFS{}); useImages = false })
+	p := &store.Poller{StateDir: t.TempDir(), Sources: []store.Source{srcFunc(func() ([]store.Raw, error) {
 		return []store.Raw{{ID: "a1", Name: "one", CWD: "/a", Pane: "%1", Status: "idle"}}, nil
 	})}}
 	if err := p.Refresh(); err != nil {

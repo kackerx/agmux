@@ -824,20 +824,6 @@ func overlayAt(screen string, box []string, x, y, w int) string {
 	return strings.Join(lines, "\n")
 }
 
-// overlay draws box centered over screen (w columns), the screen showing on both sides.
-func overlay(screen string, box []string, w int) string {
-	lines := strings.Split(screen, "\n")
-	bw := min(ansi.StringWidth(box[0]), w)
-	x, y := (w-bw)/2, max((len(lines)-len(box))/2, 0)
-	for i, b := range box {
-		if y+i >= len(lines) {
-			break
-		}
-		lines[y+i] = put(lines[y+i], x, ansi.Truncate(b, bw, ""))
-	}
-	return strings.Join(lines, "\n")
-}
-
 // put draws s over line from column x.
 func put(line string, x int, s string) string {
 	end := x + ansi.StringWidth(s)
