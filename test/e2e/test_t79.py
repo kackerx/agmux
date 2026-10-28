@@ -19,10 +19,9 @@ class Edits:
         want = {}
 
         def ok():
-            f = row_of(t, text)
-            if not f: return False
-            r, c = f; x, y, vis = cursor(t); want.update(row=r, col=c, cx=x, cy=y, vis=vis)
-            return vis and y == r and x == c + disp_width(text[:pos])
+            x, y, vis = cursor(t); snap = t.snap(); c = snap[y].find(text) if vis and y < len(snap) else -1  # the row the cursor is on holds the text (the board's cards below may say the same words)
+            want.update(cx=x, cy=y, vis=vis, col=c)
+            return vis and c >= 0 and x == c + disp_width(text[:pos])
         self.assertTrue(wait(ok, 4), f"{msg}: want {text!r} with the cursor after {text[:pos]!r}; found {want}\n{t.text()}")
 
     def test_the_cursor_is_the_terminals_own_and_follows_what_is_typed(self):
