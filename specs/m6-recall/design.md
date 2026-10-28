@@ -18,6 +18,7 @@
 - **两段式（用户 2026-10-28 验收后定，和看板 `/` 一致）**：打字态里边打边筛，第一行预选（像 nvim incsearch），上下键挪选中；enter = 保留查询进**锁定态**，不 resume。锁定态：`next_match` / `prev_match`（n / N，回绕）和 `down` / `up`（j / k，不回绕）挪选中，enter = resume，`search`（/）回输入框改查询（查询保留），esc 清空查询回打字态；打字态里查询为空再 esc 才退出屏幕（面板开着先收面板）。`agmux -r <关键词>` 带参数启动直接进锁定态。ctrl+y / ctrl+o / ctrl+f / ctrl+t 两态都能用。
 - **输入框（看板 `/` 和找回共用一个）**：真光标；left / right 挪光标，home / ctrl+a、end / ctrl+e 到头尾，alt+backspace / ctrl+w 删前一个词，字符插在光标处；光标位置按显示宽度算（中文 2 格）。这些编辑键固定不进 `[keys]`（同 backspace / ctrl+h / ctrl+c），模板头注里列出；打字态下 `[keys] left/right` 不起作用。
 - **预览滚动**：`preview_down` / `preview_up` 默认加 ctrl+n / ctrl+p（`["pgdown","ctrl+n"]` / `["pgup","ctrl+p"]`），打字态和锁定态都能滚；看板里同样生效（这两个键看板没占）。
+- **鼠标（用户 2026-10-28）**：`agmux -r` 和看板 `?` 里都开鼠标（看板已开，嵌入时不再吞掉）。列表行单击 = 选中（不改打字 / 锁定态）；同一行 400 ms 内再点一次 = 确认，打字态和锁定态都算（动作等于锁定态 enter：关了的 resume、在跑的看板里跳 pane、目录没了不动、窗口在建时忽略）；滚轮在列表区 = 选中行上下挪一行（不回绕）；滚轮在预览区 = 预览滚 3 行（同 ctrl+n/p）；输入框、边框、底栏上的点击和滚轮不做事；筛选面板开着时鼠标一律忽略。
 - **边框（像 television）**：输入框、列表、预览各自一个粗边框（┏━┓），颜色 `[colors] recall_input` / `recall_list` / `recall_preview`（默认 `#ff8ebe` / `#6272a4` / `#bd93f9`，用户可改）。标题嵌在上边框里：列表 `n/total`，预览是会话名；输入框没有标题。
 
 ## 3. 来源接口
