@@ -32,6 +32,7 @@ var zh = map[string]string{
 	"footer.avatar":        "%s 头像",
 	"footer.pin":           "%s 置顶",
 	"footer.read":          "%s 已读",
+	"footer.recall":        "%s 找回",
 	"footer.hide_quit":     "%s 隐藏 · %s 退出",
 	"footer.quit":          "%s 退出",
 
