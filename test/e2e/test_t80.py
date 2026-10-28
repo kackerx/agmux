@@ -1,7 +1,7 @@
 """T80 the recall screen is two-stage (T83, tester side; written from the spec before the code: specs/m6-recall/design.md §2「两段式」, specs/m3-config/tasks.md 第十六批 T80), like the board's `/`:
-TYPING: the query is edited as you type, the first row is pre-selected, up / down move the selection, enter KEEPS the query and goes to LOCKED (no resume), esc with an empty query leaves the screen (an open panel closes first).
-LOCKED: letters are no text; `next_match` / `prev_match` (n / N) move the selection and WRAP, `down` / `up` (j / k) move it and do NOT wrap, enter resumes the selected session, `search` (/) goes back to the input with the query
-kept, esc clears the query and goes back to typing. `agmux -r <query>` starts LOCKED. ctrl+y / ctrl+o / ctrl+f / ctrl+t work in both. Inside the board (`?`) the same.
+TYPING: the query is edited as you type, the first row is pre-selected, up / down move the selection, enter KEEPS the query and goes to SELECTING (no resume), esc with an empty query leaves the screen (an open panel closes first).
+SELECTING: letters are no text; `down` / `up` (j / k, arrows) move the selection and do NOT wrap (n / N do nothing there since 802fb83), enter resumes the selected session, `search` (/) goes back to the input with the query
+kept, esc clears the query and goes back to typing. `agmux -r <query>` starts SELECTING. ctrl+y / ctrl+o / ctrl+f / ctrl+t work in both. Inside the board (`?`) the same.
 Which row is selected is read from the preview: it shows the selected session's id and no other id does (lib_recall.selected_id). Four closed sessions wrap-1 .. wrap-4 (wrap-1 the newest), all saying `wrap test sentence <i>`.
 Skipped until T79-T82 are in the binary (lib_recall.t83_ready()). `GUESS:` marks what the spec leaves open."""
 import os, shlex, time, unittest
@@ -25,7 +25,7 @@ class TwoStage:
         t.lit(Q); time.sleep(0.5); self.until_sel(t, 0, "typing a query pre-selects the first row"); t.keys("Enter"); time.sleep(0.6)
 
     def not_text(self, t):
-        """in the locked state a letter is no text: the query on the screen does not change"""
+        """in the selecting state a letter is no text: the query on the screen does not change"""
         t.lit("x"); time.sleep(0.5); self.assertIsNotNone(row_of(t, Q), "the query is still there"); self.assertIsNone(row_of(t, Q + "x"), "`x` was not typed into it")
 
     def test_typing_preselects_the_first_row_and_up_down_move_the_selection(self):
@@ -36,25 +36,26 @@ class TwoStage:
         t = self.start(); t.lit(Q); time.sleep(0.4); t.keys("Down"); self.until_sel(t, 1); t.keys("Enter"); time.sleep(1.0)
         self.assertEqual(self.env.ran("claude"), [], "enter is not resume any more"); self.assertTrue(t.alive()); self.until_sel(t, 1, "the selection is where it was"); self.not_text(t)
 
-    def test_locked_n_and_N_wrap_around(self):
-        t = self.start(); self.lock(t)
-        for want in (1, 2, 3, 0): t.keys("n"); self.until_sel(t, want, "n")
-        t.keys("N"); self.until_sel(t, 3, "N from the first row wraps to the last"); t.keys("N"); self.until_sel(t, 2)
+    def test_n_and_N_do_nothing_in_the_selecting_state_they_are_not_text_either(self):
+        # (802fb83: the user dropped n / N from the recall screen)
+        t = self.start(); self.lock(t); t.keys("j"); self.until_sel(t, 1)
+        for k in ("n", "N", "n", "n", "N"): t.lit(k); time.sleep(0.3)
+        time.sleep(0.5); self.until_sel(t, 1, "the selection did not move"); self.assertIsNotNone(row_of(t, Q), "the query is as it was"); self.assertIsNone(row_of(t, Q + "n"), "n was not typed"); self.assertTrue(t.alive()); self.assertEqual(self.env.ran("claude"), [])
 
-    def test_locked_j_and_k_move_and_do_not_wrap(self):
+    def test_selecting_j_and_k_move_and_do_not_wrap(self):
         t = self.start(); self.lock(t)
         for want in (1, 2, 3): t.keys("j"); self.until_sel(t, want, "j")
         t.keys("j"); time.sleep(0.5); self.until_sel(t, 3, "j at the last row stays"); t.keys("k"); self.until_sel(t, 2)
         t.keys("k", "k"); self.until_sel(t, 0); t.keys("k"); time.sleep(0.5); self.until_sel(t, 0, "k at the first row stays")
 
-    def test_locked_up_and_down_arrows_move_like_j_and_k(self):
+    def test_selecting_up_and_down_arrows_move_like_j_and_k(self):
         t = self.start(); self.lock(t); t.keys("Down"); self.until_sel(t, 1); t.keys("Up"); self.until_sel(t, 0); t.keys("Up"); time.sleep(0.4); self.until_sel(t, 0, "no wrap")
 
-    def test_enter_in_the_locked_state_resumes_the_selected_session_in_its_directory(self):
+    def test_enter_in_the_selecting_state_resumes_the_selected_session_in_its_directory(self):
         t = self.start(); self.lock(t); t.keys("j"); self.until_sel(t, 1); t.record(); t.keys("Enter"); self.assertTrue(wait(lambda: self.env.ran("claude"), 6), t.text()); r = self.env.ran("claude")
         self.assertEqual([x["argv"] for x in r], [["--resume", self.ids[1]]]); self.assertEqual(os.path.realpath(r[0]["cwd"]), os.path.realpath(self.dirs[1])); self.assertEqual(t.exit_status(5), 0, "the screen is gone")
 
-    def test_a_letter_is_no_text_in_the_locked_state(self):
+    def test_a_letter_is_no_text_in_the_selecting_state(self):
         t = self.start(); self.lock(t); self.not_text(t)
 
     def test_search_key_goes_back_to_the_input_with_the_query_kept_and_enter_locks_again(self):
@@ -62,7 +63,7 @@ class TwoStage:
         t.lit(" 3"); self.until_sel(t, 2, "typing is text again: `wrap test 3` is the third session only"); self.assertEqual(self.env.ran("claude"), []); t.keys("Enter"); time.sleep(0.6); self.assertEqual(self.env.ran("claude"), [], "enter locks again, no resume")
         t.keys("Enter"); self.assertTrue(wait(lambda: self.env.ran("claude"), 6)); self.assertEqual(self.env.ran("claude")[0]["argv"], ["--resume", self.ids[2]])
 
-    def test_esc_in_the_locked_state_clears_the_query_and_goes_back_to_typing(self):
+    def test_esc_in_the_selecting_state_clears_the_query_and_goes_back_to_typing(self):
         t = self.start(); self.lock(t); t.esc(); self.assertTrue(wait(lambda: row_of(t, Q) is None, 4), "the query is cleared:\n" + t.text()); self.assertTrue(t.alive()); self.until_sel(t, 0, "everything is listed again")
         t.lit("'wrap"); self.assertTrue(wait(lambda: row_of(t, "'wrap") is not None, 4), "typing state: letters are text again")
 
@@ -77,9 +78,9 @@ class TwoStage:
         self.lock(t); t.keys("C-f"); time.sleep(0.6); t.esc(); time.sleep(0.5); self.assertIsNotNone(row_of(t, Q), "the panel closed, the query is still there"); self.until_sel(t, 0)
 
     def both(self, fn, cwd=None):
-        for state in ("typing", "locked"):
+        for state in ("typing", "selecting"):
             t = self.start(cwd=cwd)
-            if state == "locked": self.lock(t)
+            if state == "selecting": self.lock(t)
             else: self.until_sel(t, 0)
             with self.subTest(state=state): fn(t)
             t.close()
@@ -104,8 +105,8 @@ class TwoStage:
         self.both(go, cwd=self.dirs[0])
 
     def test_the_footer_lists_other_keys_in_the_two_states(self):
-        t = self.start(); typing = t.text().rstrip().splitlines()[-1]; self.lock(t); locked = t.text().rstrip().splitlines()[-1]
-        self.assertNotEqual(typing, locked, "each state lists its own keys"); self.assertIn("enter", typing); self.assertIn("enter", locked); self.assertIn("/", locked, "GUESS: the locked state names `/` (search again)")
+        t = self.start(); typing = t.text().rstrip().splitlines()[-1]; self.lock(t); selecting = t.text().rstrip().splitlines()[-1]
+        self.assertNotEqual(typing, selecting, "each state lists its own keys"); self.assertIn("enter", typing); self.assertIn("enter", selecting); self.assertIn("/", selecting, "GUESS: the selecting state names `/` (search again)")
 
 
 @needs
@@ -117,7 +118,7 @@ class RecallScreen(TwoStage, unittest.TestCase):
         t = RTerm(self.env, args="-r" + (f" {shlex.quote(query)}" if query else ""), w=140, h=40, cwd=cwd); self.addCleanup(t.close)
         self.assertTrue(wait(lambda: t.visible({"a": "wrap-1", "b": "wrap-2"}), 10), t.text()); time.sleep(0.5); return t
 
-    def test_a_query_on_the_command_line_starts_in_the_locked_state(self):
+    def test_a_query_on_the_command_line_starts_in_the_selecting_state(self):
         t = self.start(query=Q); self.until_sel(t, 0); self.not_text(t); t.keys("j"); self.until_sel(t, 1, "j moves, it is not typed"); self.assertEqual(self.env.ran("claude"), [], "starting with a query does not resume by itself")
         t.keys("Enter"); self.assertTrue(wait(lambda: self.env.ran("claude"), 6)); self.assertEqual(self.env.ran("claude")[0]["argv"], ["--resume", self.ids[1]])
 
