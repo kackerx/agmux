@@ -602,3 +602,30 @@
 - reviewer 复审 487dd5a 通过（probe_double / 离屏重开探针、# 转义四处 + 真 tmux 3.8 实测；变异 11 全杀）。**第十五批 reviewer 整体通过：T74 f21ff8e / T75 56fd337 / T76 e242a8b / T77 487dd5a。** 等 tester 整套。
 - tester（分支 worktree-agmux-tester，1620ec1；合回 main 957749a）：487dd5a 上整套 1329 条（t74 40 / t75 49 / t76 42 / t77 15，本批新增 146）。5 红全是测试没跟上产品：t3 两条（底栏加 `? recall` 后 200 列放不下 `q quit`，改 ≥210 列才要求 / 232 列跑）、t7（`kill .*\?` 正则误命中底栏，改 `kill \S+\?`）、t63（ci.yml 改 -race）、t44 轮询用例负载 10–20 时红、单跑绿（时序抖动）；t74 / t17 底栏字面串与宽度跟改。改后受影响 63 条复跑全绿，**整套没有连续一次全绿的记录**（已派 tester 在 957749a 上再跑一次整套补证据，不挡安装）。T76 复跑全绿；T77 15 条：普通 pane 原地 exec、popup / --stay 走 new-window（`-d -P -F #{pane_id} -t =<sess>: -c -n`）+ switch-client、在跑走 jump、目录没了不动、esc / `?` 回看板过滤不丢、tmux 不回 pane id 红字停留、键位可配、zh；487dd5a 的两条（连按 enter 只建一个窗口；`#`→`##`）在 e242a8b 二进制上红、487dd5a 上绿。假 tmux 新增 new-window 应答 + 延迟。没覆盖：真 kitty 目视、面板里改绑方向键、pi 在跑会话合并、recall 屏逐宽度扫。**第十五批 tester 通过，目标 487dd5a（产品）/ 957749a（含测试）**；派 dev 安装。备忘：t44 整套下时序抖动（第一次），再红一次就给它加机制（放宽等待或独立跑）。
 - dev 安装 957749a 到 ~/go/bin/agmux（vcs.modified=false，`agmux v0.1.1-0.20261028092037-957749a4e333`）。注意：从 git worktree 检出 go install 不带 vcs 信息（--version 显示 dev），以后安装用 git clone。**第十五批交付，待用户验收。**
+
+## 第十六批：找回验收返修（用户 2026-10-28 用 957749a 验收后提的 5 条）
+
+目标：找回界面的输入和选择像 nvim / television：光标能动、能删词、回车进锁定态再 n/N/j/k 选、ctrl+n/p 滚预览、三个框各有粗边框。细节已写进 m6-recall/design.md §2 的四条新规则。
+
+### T79 输入框（看板 `/` 和找回共用）
+- 要做：一个输入框组件两处共用：真光标；left / right、home / ctrl+a、end / ctrl+e、alt+backspace / ctrl+w 删前词、字符插在光标处；光标按显示宽度放（中文 2 格）。编辑键固定不进 `[keys]`，`agmux config` 模板头注列出。
+- 为的是：用户在 kitty 里 option+backspace 删词、左右改错字，现在都没反应。
+- 做法：`charmbracelet/bubbles/textinput` 可以用（bubbletea 的配套库，光标 / 删词 / 宽度都有），不想加依赖就自己写但行为对齐它；kitty 把 option+backspace 发成 ESC DEL，bubbletea 收到的是 `alt+backspace`，真 pty 里要核一次。
+- 验收：单测 光标移动 / 插入 / 删词（含中文、词边界是空格和标点）；看板 `/` 和找回各一条「光标中间插字」用例；tester 真 pty 里发 ESC DEL。
+
+### T80 找回两段式
+- 要做：design §2「两段式」整条：enter 进锁定态不 resume；锁定态 n / N 回绕、j / k 不回绕、enter resume、`/` 回输入框改查询、esc 清空回打字态；打字态空查询再 esc 退出；`agmux -r <关键词>` 直接进锁定态；底栏两态分别列键。
+- 为的是：用户习惯 nvim 的 `/foo<enter>` 再 n/N；现在打字态 enter 直接 resume，容易误开会话。
+- 做法：仿看板 `/` 的 typing / kept 两态（board.go 里现成），recall 模型加一个状态位；打字态上下键照旧。
+- 验收：单测 键 → 状态表（两态 × enter / esc / n / N / j / k / `/`）；embedded（看板里）同样走两态；黑盒 真 pty 打字 → enter → j → enter 才 exec 假 claude。
+
+### T81 ctrl+n / ctrl+p 滚预览
+- 默认 `preview_down = ["pgdown","ctrl+n"]`、`preview_up = ["pgup","ctrl+p"]`；golden 模板跟改；两态都能滚；看板也生效。
+- 验收：单测 + 黑盒各一条。
+
+### T82 三个粗边框
+- 输入框 / 列表 / 预览各一个粗边框（lipgloss ThickBorder），颜色 `[colors] recall_input` / `recall_list` / `recall_preview`（默认 `#ff8ebe` / `#6272a4` / `#bd93f9`），模板 + 校验 + golden；标题嵌在上边框：列表 `n/total`、预览会话名。窄屏（<100 列）只画前两个框。高度：三个框加起来不超过终端行数，列表行数相应减。
+- 验收：单测 三色从配置读到、默认值；黑盒 frame 里边框字符和颜色、100 / 99 列、24 行下不溢出；dev 真机截图贴这里。
+
+### T83 e2e（tester，与 T79 并行起步）
+- t79：真 pty 发 ESC DEL / 方向键 / ctrl+a / ctrl+e，看板 `/` 和找回各一组；t80：两态键表 + 只有锁定态 enter 才 exec；t81：ctrl+n/p；t82：边框字符与颜色、窄屏、矮屏；t74 / t76 / t77 里「打字态 enter 即 resume」的旧断言跟改。
