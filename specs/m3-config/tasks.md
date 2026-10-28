@@ -630,3 +630,9 @@
 ### T83 e2e（tester，与 T79 并行起步）
 - t79：真 pty 发 ESC DEL / 方向键 / ctrl+a / ctrl+e，看板 `/` 和找回各一组；t80：两态键表 + 只有锁定态 enter 才 exec；t81：ctrl+n/p；t82：边框字符与颜色、窄屏、矮屏；t74 / t76 / t77 里「打字态 enter 即 resume」的旧断言跟改。
 - tester（worktree-agmux-tester 3d2bcfe，先不合：t76 / t77 的 enter 已改成两次，合进去会在 957749a 上红）：t79 13×2 宿主（真光标读 tmux cursor_x/y、ESC DEL / M-BSpace / ctrl+w、中文宽度）、t80 两态各约 17 条 × 两宿主、t81、t82、夹具 lib_recall；二进制 `agmux config` 没有 `recall_input` 前整体 skip（88 条）。三点照准：(1) 打字态有查询时 esc 先清查询不退出（即 design §2「空查询再 esc 才退出」）；无命中列表标题 `0/0`；删词后光标在词原位置、前面空格留不留都接受。(2) 看板 `?` 里空查询 esc 回卡片不退 agmux。dev 做的如与此不同，以这三条为准。
+
+### T84 找回鼠标（用户 2026-10-28 追加，排在 T82 后）
+- 要做：design §2「鼠标」整条：单击选中、同行 400 ms 内双击确认、滚轮列表挪选中行 / 预览滚 3 行；`agmux -r` 的 Program 加 WithMouseCellMotion，看板嵌入时 recallUpdate 把 MouseMsg 交给 recall 模型而不是吞掉；ExecProcess 回来后鼠标重开（现有 recallEditedMsg 的处理照旧）。
+- 为的是：用户看板已经靠鼠标点卡片，找回也要能点。
+- 做法：bubbletea v1 没有双击事件，自己记上次点击的行和时间；行号 → 会话由 view 的布局反推（列表框内第几行 + 滚动偏移），T82 加边框后坐标要算上边框和标题行；看板 board.go 的 mouse() 已有滚轮 / 点击的写法。
+- 验收：单测 点击 → 选中、双击 → pick、隔行两次点不算双击、超时不算、滚轮两区各自生效、面板开着忽略；黑盒 真 pty 写 SGR 鼠标序列（`\x1b[<0;x;yM` / `m`、滚轮 64 / 65），`-r` 和看板 `?` 各一组；T83 的 tester 补 t84。
