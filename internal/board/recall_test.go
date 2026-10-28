@@ -571,7 +571,7 @@ func TestRecallIndexing(t *testing.T) {
 	m.indexing = true
 	m.progress.done.Store(3)
 	m.progress.total.Store(10)
-	if v := rview(m); !strings.Contains(strings.Split(v, "\n")[1], "indexing 3 / 10") || !strings.Contains(v, " 1/4 ") {
+	if v := rview(m); !strings.Contains(strings.Split(v, "\n")[1], "indexing 3 / 10") || !strings.Contains(v, " 4/4 ") {
 		t.Errorf("the input box: %s", strings.Split(v, "\n")[1])
 	}
 	m.results, m.indexing = nil, true
@@ -583,7 +583,7 @@ func TestRecallIndexing(t *testing.T) {
 	if m.indexing || len(m.results) != 4 || !strings.Contains(rview(m), "some transcripts could not be read: one bad transcript") {
 		t.Errorf("done: %v %d\n%s", m.indexing, len(m.results), rview(m))
 	}
-	if v := strings.Split(rview(m), "\n")[1]; strings.Contains(v, "indexing") || !strings.Contains(rview(m), " 1/4 ") {
+	if v := strings.Split(rview(m), "\n")[1]; strings.Contains(v, "indexing") || !strings.Contains(rview(m), " 4/4 ") {
 		t.Errorf("input box after: %q", v)
 	}
 	// a tick picks up what the index has got since, and the cursor stays on its session

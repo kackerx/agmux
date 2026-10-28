@@ -15,6 +15,12 @@ import (
 	"github.com/kackerx/agmux/internal/store"
 )
 
+func mustRows(t *testing.T, m recallModel, keys ...string) recallModel {
+	t.Helper()
+	m, _ = rpress(t, m, keys...)
+	return m
+}
+
 func resized(t *testing.T, m recallModel, w, h int) recallModel {
 	t.Helper()
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
@@ -33,16 +39,23 @@ func TestRecallThreeBoxes(t *testing.T) {
 		t.Errorf("the query box:\n%s", strings.Join(lines[:3], "\n"))
 	}
 	// the list and the preview side by side under it, titles in the top border
-	if !strings.HasPrefix(lines[3], "┏━ 1/4 ━") || !strings.Contains(lines[3], "┓┏━ cart-fix ━") || !strings.HasSuffix(lines[3], "┓") {
+	if !strings.HasPrefix(lines[3], "┏━ 4/4 ━") || !strings.Contains(lines[3], "┓┏━ cart-fix ━") || !strings.HasSuffix(lines[3], "┓") {
 		t.Errorf("titles: %q", lines[3])
 	}
 	if last := lines[len(lines)-3]; !strings.HasPrefix(last, "┗━") || strings.Count(last, "┛") != 2 {
 		t.Errorf("the bottom of the boxes: %q", last)
 	}
-	// the cursor moves the number and the preview's session
+	// the cursor moves the preview's session, not the number: that is how many sessions the query found
 	m, _ = rpress(t, m, "down", "down")
-	if l := strings.Split(rview(m), "\n")[3]; !strings.Contains(l, " 3/4 ") || !strings.Contains(l, "┏━ ledger") && !strings.Contains(l, "┏━ audit") {
+	if l := strings.Split(rview(m), "\n")[3]; !strings.HasPrefix(l, "┏━ 4/4 ━") || !strings.Contains(l, "┏━ audit export") {
 		t.Errorf("titles after down down: %q", l)
+	}
+	if l := strings.Split(rview(rtype(t, w.model(), "'coupon")), "\n")[3]; !strings.HasPrefix(l, "┏━ 1/4 ━") {
+		t.Errorf("one of four found: %q", l)
+	}
+	// a scope or a ticked-off source narrows what there is to search: found of that
+	if l := strings.Split(rview(mustRows(t, rtype(t, w.model(), "'export"), "ctrl+f", "down", "space", "esc")), "\n")[3]; !strings.HasPrefix(l, "┏━ 1/3 ━") {
+		t.Errorf("a source ticked off: %q", l)
 	}
 	// nothing found: 0/0 and no preview title
 	m = rtype(t, m, "zzzzqqq")
