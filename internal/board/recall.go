@@ -38,6 +38,7 @@ type recallModel struct {
 	gen        int  // of the index when results were asked for
 	qgen       int  // the number (recallSeq) of the last search asked for: the answers of older ones are dropped
 	searching  bool // a search is out: the list is the one of the query before
+	building   bool // embedded: the window of the session picked is being made; enter waits (a second one would resume it twice)
 	now        func() time.Time
 	lookPath   func(string) (string, error)
 	statDir    func(string) error
@@ -298,8 +299,10 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.panel {
 		return m.panelKey(s)
 	}
-	// the list on the screen is not the query's yet: not the sessions to act on
-	if m.searching && (s == "enter" || m.cfg.IsCtl("jump", s) || m.cfg.IsCtl("recall_copy", s) || m.cfg.IsCtl("recall_open", s)) {
+	// the list on the screen is not the query's yet: not the sessions to act on; and a window is
+	// being made for the one picked: not a second one for it
+	resume := s == "enter" || m.cfg.IsCtl("jump", s)
+	if m.building && resume || m.searching && (resume || m.cfg.IsCtl("recall_copy", s) || m.cfg.IsCtl("recall_open", s)) {
 		return m, nil
 	}
 	switch {
