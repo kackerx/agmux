@@ -629,3 +629,4 @@
 
 ### T83 e2e（tester，与 T79 并行起步）
 - t79：真 pty 发 ESC DEL / 方向键 / ctrl+a / ctrl+e，看板 `/` 和找回各一组；t80：两态键表 + 只有锁定态 enter 才 exec；t81：ctrl+n/p；t82：边框字符与颜色、窄屏、矮屏；t74 / t76 / t77 里「打字态 enter 即 resume」的旧断言跟改。
+- tester（worktree-agmux-tester 3d2bcfe，先不合：t76 / t77 的 enter 已改成两次，合进去会在 957749a 上红）：t79 13×2 宿主（真光标读 tmux cursor_x/y、ESC DEL / M-BSpace / ctrl+w、中文宽度）、t80 两态各约 17 条 × 两宿主、t81、t82、夹具 lib_recall；二进制 `agmux config` 没有 `recall_input` 前整体 skip（88 条）。三点照准：(1) 打字态有查询时 esc 先清查询不退出（即 design §2「空查询再 esc 才退出」）；无命中列表标题 `0/0`；删词后光标在词原位置、前面空格留不留都接受。(2) 看板 `?` 里空查询 esc 回卡片不退 agmux。dev 做的如与此不同，以这三条为准。
