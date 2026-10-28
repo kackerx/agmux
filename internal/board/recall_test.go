@@ -233,39 +233,39 @@ func TestRecallEnter(t *testing.T) {
 	w := newRWorld(t)
 	w.fill()
 	m := w.model()
-	m, quit := rpress(t, m, "enter")
+	m, quit := rpress(t, m, "enter", "enter") // the first keeps the query (none here), the second resumes
 	res := RecallOutcome(m)
 	if !quit || res == nil || res.Dir != w.dir("shopcart") || strings.Join(res.Argv, " ") != "claude --resume s-cart" {
 		t.Errorf("claude: quit %v %+v", quit, res)
 	}
 	m = w.model()
-	m, quit = rpress(t, m, "down", "enter") // pi
+	m, quit = rpress(t, m, "down", "enter", "enter") // pi
 	res = RecallOutcome(m)
 	if !quit || res == nil || res.Dir != w.dir("api") || len(res.Argv) != 3 || res.Argv[0] != "pi" || res.Argv[1] != "--session" || !strings.HasSuffix(res.Argv[2], "_p-api.jsonl") {
 		t.Errorf("pi: quit %v %+v", quit, res)
 	}
 
 	m = w.model()
-	m, quit = rpress(t, rtype(t, m, "legacy"), "enter")
+	m, quit = rpress(t, rtype(t, m, "legacy"), "enter", "enter")
 	if quit || RecallOutcome(m) != nil || !strings.Contains(rview(m), "directory is gone: /no/such/dir/gone-project") {
 		t.Errorf("gone: quit %v\n%s", quit, rview(m))
 	}
 
 	m = w.model()
 	m.lookPath = func(string) (string, error) { return "", fmt.Errorf("no") }
-	m, quit = rpress(t, m, "enter")
+	m, quit = rpress(t, m, "enter", "enter")
 	if quit || RecallOutcome(m) != nil || !strings.Contains(rview(m), "claude not found in PATH") {
 		t.Errorf("no claude: quit %v\n%s", quit, rview(m))
 	}
 
 	live := store.Session{ID: "x1", SessionID: "s-cart", TmuxPane: "%5", Status: "working"}
 	m = w.model(live)
-	m, quit = rpress(t, m, "enter")
+	m, quit = rpress(t, m, "enter", "enter")
 	if quit || RecallOutcome(m) != nil || !strings.Contains(rview(m), "cart-fix is running (%5): jump to it from the board") {
 		t.Errorf("running: quit %v\n%s", quit, rview(m))
 	}
 	m = w.model(store.Session{SessionID: "s-cart"})
-	if m, _ = rpress(t, m, "enter"); !strings.Contains(rview(m), "cart-fix is running: ") && !strings.Contains(rview(m), "cart-fix is running") || strings.Contains(rview(m), "running (") {
+	if m, _ = rpress(t, m, "enter", "enter"); !strings.Contains(rview(m), "cart-fix is running: ") && !strings.Contains(rview(m), "cart-fix is running") || strings.Contains(rview(m), "running (") {
 		t.Errorf("running with no pane:\n%s", rview(m))
 	}
 	// a running pi session is found by its transcript
@@ -273,7 +273,7 @@ func TestRecallEnter(t *testing.T) {
 	if _, ok := m.liveOf(m.ix.Entries()[1]); !ok {
 		t.Error("by transcript")
 	}
-	if _, quit := rpress(t, rtype(t, w.model(), "zzzzqqq"), "enter"); quit {
+	if _, quit := rpress(t, rtype(t, w.model(), "zzzzqqq"), "enter", "enter"); quit {
 		t.Error("enter with nothing to resume does nothing")
 	}
 }
@@ -691,16 +691,25 @@ func TestRecallFooterNamesOnlyKeysThatAct(t *testing.T) {
 	}
 	m.cfg = c
 	f := footerOf(m.View())
-	for _, want := range []string{"enter resume", "ctrl+q scope:all", "alt+y copy", "esc quit"} {
+	for _, want := range []string{"enter keep the query", "down/up move", "ctrl+q scope:all", "alt+y copy", "esc quit"} {
 		if !strings.Contains(f, want) {
 			t.Errorf("footer lacks %q: %s", want, f)
 		}
 	}
-	for _, not := range []string{"j resume", "f filter", "s scope", " y copy", "o open", "open"} {
+	for _, not := range []string{"j resume", "j keep", "f filter", "s scope", " y copy", "o open", "open", "resume"} {
 		if strings.Contains(f, not) {
 			t.Errorf("footer has %q: %s", not, f)
 		}
 	}
+	// a kept query is a list: every key of [keys] acts, the letters too
+	m.locked = true
+	f = footerOf(m.View())
+	for _, want := range []string{"j resume", "n/N next/prev", "/ edit", "f filter", "s scope:all", "y copy", "o open", "esc clear"} {
+		if !strings.Contains(f, want) {
+			t.Errorf("locked footer lacks %q: %s", want, f)
+		}
+	}
+	m.locked = false
 	// the panel is not text: its letters are the keys, and they are named
 	m.panel = true
 	if f := footerOf(m.View()); !strings.Contains(f, "space tick") {
@@ -714,19 +723,19 @@ func TestRecallChinese(t *testing.T) {
 	w.fill()
 	m := w.model(store.Session{SessionID: "s-cart", TmuxPane: "%5"})
 	v := rview(m)
-	for _, want := range []string{"enter 恢复", "ctrl+f 筛选", "ctrl+t 范围:全部", "ctrl+y 复制", "ctrl+o 打开", "esc 退出"} {
+	for _, want := range []string{"enter 保留查询", "ctrl+f 筛选", "ctrl+t 范围:全部", "ctrl+y 复制", "ctrl+o 打开", "esc 退出"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("footer lacks %q:\n%s", want, footerOf(m.View()))
 		}
 	}
-	if m, _ = rpress(t, m, "enter"); !strings.Contains(rview(m), "cart-fix 在跑（%5）：到看板里跳过去") {
+	if m, _ = rpress(t, m, "enter", "enter"); !strings.Contains(rview(m), "cart-fix 在跑（%5）：到看板里跳过去") {
 		t.Errorf("running:\n%s", rview(m))
 	}
 	m, _ = rpress(t, m, "ctrl+f")
 	if v := rview(m); !strings.Contains(v, "来源") || !strings.Contains(v, "范围") || !strings.Contains(v, "(•) 全部历史") || !strings.Contains(v, "( ) 当前项目") || !strings.Contains(v, "space 勾选 · a 全选 · A 清空 · esc 收起") {
 		t.Errorf("panel:\n%s", v)
 	}
-	m, _ = rpress(t, m, "esc")
+	m, _ = rpress(t, m, "esc", "/") // the panel closes; / is the input again
 	m = rtype(t, m, "zzzzqqq")
 	if v := rview(m); !strings.Contains(v, "没有匹配的会话") || !strings.Contains(footerOf(m.View()), "esc 清除") {
 		t.Errorf("empty:\n%s", v)
@@ -983,7 +992,7 @@ func TestRecallMessageGoesAtTheNextKey(t *testing.T) {
 	w := newRWorld(t)
 	w.fill()
 	m := w.model()
-	m, _ = rpress(t, rtype(t, m, "legacy"), "enter")
+	m, _ = rpress(t, rtype(t, m, "legacy"), "enter", "enter")
 	if !strings.Contains(rview(m), "directory is gone") {
 		t.Fatal("no message")
 	}

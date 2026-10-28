@@ -15,10 +15,11 @@ func TestRecallDoesNotActOnAListThatIsNotTheQuerys(t *testing.T) {
 	w := newRWorld(t)
 	w.fill()
 	m := w.model()
+	m.locked = true // enter resumes from the kept query only
 	copied, edited := 0, 0
 	m.copyToClip = func(string) error { copied++; return nil }
 	m.editor = func() string { edited++; return "true" }
-	tm, search := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	tm, search := m.Update(key("ctrl+t")) // the scope changes: a search is out
 	for _, k := range []string{"enter", "ctrl+y", "ctrl+o"} {
 		if got, cmd := tm.Update(key(k)); cmd != nil || got.(recallModel).msg != "" || got.(recallModel).res != nil {
 			t.Errorf("%s while searching: cmd %v msg %q", k, cmd != nil, got.(recallModel).msg)
@@ -33,7 +34,7 @@ func TestRecallDoesNotActOnAListThatIsNotTheQuerys(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.cfg = c
-	jumped, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	jumped, _ := m.Update(key("ctrl+t"))
 	for _, k := range []string{"enter", "ctrl+g"} {
 		if got, cmd := jumped.Update(key(k)); cmd != nil || got.(recallModel).res != nil {
 			t.Errorf("%s with jump on ctrl+g, while searching: cmd %v", k, cmd != nil)
