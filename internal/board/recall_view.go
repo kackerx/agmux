@@ -109,14 +109,15 @@ func (m recallModel) View() string {
 	if m.w == 0 {
 		return ""
 	}
+	prog := m.progressText()
 	if m.curOut != nil {
-		if x, y, ok := m.cursorAt(); ok {
+		if x, y, ok := m.cursorAtFor(prog); ok {
 			m.curOut.place(x, y)
 		} else {
 			m.curOut.place(-1, -1)
 		}
 	}
-	lines := m.inputBox()
+	lines := m.inputBox(prog)
 	if bh := m.bodyH(); bh > 0 {
 		lw := m.listW()
 		body := thickBox(cRecallList, m.listTitle(), m.listLines(bh-2, lw-2), lw, bh)
@@ -148,23 +149,26 @@ func (m recallModel) listTitle() string {
 
 // inputBox is the query in a box of its own; on the right how far the index is, while it is built.
 // The caret is there while the input has the keys.
-func (m recallModel) inputBox() []string {
-	var right string
-	if m.indexing {
-		right = fg(cMuted, i18n.T("recall.indexing", m.progress.done.Load(), m.progress.total.Load())+" ")
-	}
-	left := fg(cFocus, " / ") + queryView(m.query, m.qpos, !m.locked, m.inputRoom())
-	return thickBox(cRecallInput, "", []string{spread(left, right, m.w-2, "…")}, m.w, 3)
+// prog is what progressText said for this frame: the index goes on while the frame is drawn, and
+// the caret and the cursor must be put by the same words.
+func (m recallModel) inputBox(prog string) []string {
+	left := fg(cFocus, " / ") + queryView(m.query, m.qpos, !m.locked, m.roomFor(prog))
+	return thickBox(cRecallInput, "", []string{spread(left, fg(cMuted, prog), m.w-2, "…")}, m.w, 3)
 }
 
-// inputRoom is the cells the query has in its box: what is between the border and the progress.
-func (m recallModel) inputRoom() int {
-	right := 0
-	if m.indexing {
-		right = ansi.StringWidth(i18n.T("recall.indexing", m.progress.done.Load(), m.progress.total.Load()) + " ")
+// progressText is how far the index is while it is built (read once for a frame), else nothing.
+func (m recallModel) progressText() string {
+	if !m.indexing {
+		return ""
 	}
-	return m.w - 2 - 3 - right - 1
+	return i18n.T("recall.indexing", m.progress.done.Load(), m.progress.total.Load()) + " "
 }
+
+// roomFor is the cells the query has in its box: what is between the border and the progress text.
+func (m recallModel) roomFor(prog string) int { return m.w - 2 - 3 - ansi.StringWidth(prog) - 1 }
+
+// inputRoom is roomFor what the progress says now.
+func (m recallModel) inputRoom() int { return m.roomFor(m.progressText()) }
 
 // footer is the keys, each with its first configured key; esc closes the panel, clears the query
 // or ends the screen, whichever it would do. Outside the panel letters are text, so only a key that

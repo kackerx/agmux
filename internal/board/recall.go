@@ -172,11 +172,14 @@ func (m recallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // cursorAt is the screen cell (0-based) for the terminal's cursor: in the query box, at the caret,
 // so that an input method puts its candidates there. Not while the keys are the list's (kept query)
 // or the filter panel's.
-func (m recallModel) cursorAt() (x, y int, ok bool) {
+func (m recallModel) cursorAt() (x, y int, ok bool) { return m.cursorAtFor(m.progressText()) }
+
+// cursorAtFor is cursorAt for the progress text the frame is drawn with.
+func (m recallModel) cursorAtFor(prog string) (x, y int, ok bool) {
 	if m.w == 0 || m.locked || m.panel {
 		return 0, 0, false
 	}
-	return 1 + 3 + queryCaretCells(m.query, m.qpos, m.inputRoom()), 1, true // the border, " / "
+	return 1 + 3 + queryCaretCells(m.query, m.qpos, m.roomFor(prog)), 1, true // the border, " / "
 }
 
 func (m recallModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {

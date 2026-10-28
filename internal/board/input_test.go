@@ -82,10 +82,10 @@ func TestEditQuery(t *testing.T) {
 func TestQueryCellsAndView(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
-	if got := queryCells("优a惠", 2); got != 3 {
+	if got := queryCaretCells("优a惠", 2, 20); got != 3 {
 		t.Errorf("cells before the caret: %d (a Chinese character is two)", got)
 	}
-	if got := queryCells("ab", 9); got != 2 {
+	if got := queryCaretCells("ab", 9, 20); got != 2 {
 		t.Errorf("a caret past the end is at the end: %d", got)
 	}
 	rev := "\x1b[7m"
