@@ -647,3 +647,8 @@
 - dev ea694c4（无命中 `0/total`；合回 main 2376ff9）。**第十六批目标 2376ff9**（产品）。
 - reviewer（2376ff9）：1 必改——input.go 的 queryCells 只剩测试在调（T85 实际用 queryCaretCells），删掉函数和两条断言。建议 a：滚轮落在列表 / 预览的边框上也生效，与 design 字面不符 → 我改 design：滚轮在边框上算框内（更顺手、少一个判断），点击边框仍不做事；b：建索引时 View 里两次读 progress 可能让光标差一格一帧 → 采纳，每帧读一次 room 传下去。已核：输入框 / 真光标 / 两态键归属 / 双击守卫 / 鼠标坐标 / 7680 屏不溢出 / 嵌入鼠标路由 / 配置 / 标题；变异 54 全杀。退回 dev。
 - dev 867af00（删 queryCells、两条断言改到 queryCaretCells；View 每帧读一次进度，progressText / roomFor / cursorAtFor；变异 7 杀 6，1 为原双读等价）。合回 main 7f3d256。**第十六批目标 7f3d256**，送 reviewer 复审 + tester。
+- reviewer 复审 7f3d256 退回 1 必改：inputRoom() 生产代码无调用、只剩测试在用（和上轮 queryCells 同类，第二次）→ 删掉，测试改 roomFor(progressText())。建议 a 采纳：看板 `?` 嵌入时 board.View 先 cursorAt 再 rc.View 仍读两次进度 → recallModel 加一个同时返回画面和光标的方法，board.View 用它。
+### T86 死代码检查进 CI（同类问题第二次，加机制）
+- 要做：`go run golang.org/x/tools/cmd/deadcode@<固定版本> ./...` 输出必须为空（它从 main 可达性算，只被 _test.go 用的函数会被报出来）；加进 ci.yml 和本地 `make check`（或现有的检查脚本）；现在报出来的先清掉。
+- 为的是：两轮审查各抓到一个只有测试在调的函数，不该再靠人眼。
+- 验收：CI 里这一步在 7f3d256 上会红（inputRoom），修后绿；t63 的 workflows 断言跟改。
