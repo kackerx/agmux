@@ -54,14 +54,9 @@ func (m Model) recallUpdate(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case tea.WindowSizeMsg:
 		m.rc.w, m.rc.h = msg.Width, msg.Height // the board takes it too
 		return m, nil, false
-	case tea.MouseMsg:
-		return m, nil, true
-	case tea.KeyMsg, recallTickMsg, recallIndexedMsg, recallFoundMsg, recallEditedMsg:
+	case tea.KeyMsg, tea.MouseMsg, recallTickMsg, recallIndexedMsg, recallFoundMsg, recallEditedMsg:
 		tm, cmd := m.rc.Update(msg)
 		rm := tm.(recallModel)
-		if _, edited := msg.(recallEditedMsg); edited { // bubbletea v1 leaves the mouse off after ExecProcess
-			cmd = tea.Batch(cmd, tea.EnableMouseCellMotion)
-		}
 		switch {
 		case rm.leave:
 			m.rc = nil

@@ -64,6 +64,10 @@ func (m Model) pvBox() (right []string, x, y int) {
 
 // wantCursor: the terminal's cursor should be shown (on the pane's cursor) rather than hidden.
 func (m Model) wantCursor() bool {
+	if m.curOut != nil && m.rc != nil { // the recall screen: its input's caret
+		_, _, ok := m.rc.cursorAt()
+		return ok
+	}
 	if m.curOut == nil || !m.previewOn() {
 		return false
 	}

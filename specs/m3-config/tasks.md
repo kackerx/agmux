@@ -601,3 +601,47 @@
 - dev 8e2ac46（T77 退回）：Model.resuming + recallModel.building（离屏重开也拦）、enter / jump 在建期间忽略；tmuxText() 把 # 换 ##，recall 与 T60 attach 的 -c / -n 共用；变异 17 杀 16（1 等价）。合回 main（merge 487dd5a）。**第十五批目标 487dd5a**，送 reviewer 复审 + tester。
 - reviewer 复审 487dd5a 通过（probe_double / 离屏重开探针、# 转义四处 + 真 tmux 3.8 实测；变异 11 全杀）。**第十五批 reviewer 整体通过：T74 f21ff8e / T75 56fd337 / T76 e242a8b / T77 487dd5a。** 等 tester 整套。
 - tester（分支 worktree-agmux-tester，1620ec1；合回 main 957749a）：487dd5a 上整套 1329 条（t74 40 / t75 49 / t76 42 / t77 15，本批新增 146）。5 红全是测试没跟上产品：t3 两条（底栏加 `? recall` 后 200 列放不下 `q quit`，改 ≥210 列才要求 / 232 列跑）、t7（`kill .*\?` 正则误命中底栏，改 `kill \S+\?`）、t63（ci.yml 改 -race）、t44 轮询用例负载 10–20 时红、单跑绿（时序抖动）；t74 / t17 底栏字面串与宽度跟改。改后受影响 63 条复跑全绿，**整套没有连续一次全绿的记录**（已派 tester 在 957749a 上再跑一次整套补证据，不挡安装）。T76 复跑全绿；T77 15 条：普通 pane 原地 exec、popup / --stay 走 new-window（`-d -P -F #{pane_id} -t =<sess>: -c -n`）+ switch-client、在跑走 jump、目录没了不动、esc / `?` 回看板过滤不丢、tmux 不回 pane id 红字停留、键位可配、zh；487dd5a 的两条（连按 enter 只建一个窗口；`#`→`##`）在 e242a8b 二进制上红、487dd5a 上绿。假 tmux 新增 new-window 应答 + 延迟。没覆盖：真 kitty 目视、面板里改绑方向键、pi 在跑会话合并、recall 屏逐宽度扫。**第十五批 tester 通过，目标 487dd5a（产品）/ 957749a（含测试）**；派 dev 安装。备忘：t44 整套下时序抖动（第一次），再红一次就给它加机制（放宽等待或独立跑）。
+- dev 安装 957749a 到 ~/go/bin/agmux（vcs.modified=false，`agmux v0.1.1-0.20261028092037-957749a4e333`）。注意：从 git worktree 检出 go install 不带 vcs 信息（--version 显示 dev），以后安装用 git clone。**第十五批交付，待用户验收。**
+
+## 第十六批：找回验收返修（用户 2026-10-28 用 957749a 验收后提的 5 条）
+
+目标：找回界面的输入和选择像 nvim / television：光标能动、能删词、回车进锁定态再 n/N/j/k 选、ctrl+n/p 滚预览、三个框各有粗边框。细节已写进 m6-recall/design.md §2 的四条新规则。
+
+### T79 输入框（看板 `/` 和找回共用）
+- 要做：一个输入框组件两处共用：真光标；left / right、home / ctrl+a、end / ctrl+e、alt+backspace / ctrl+w 删前词、字符插在光标处；光标按显示宽度放（中文 2 格）。编辑键固定不进 `[keys]`，`agmux config` 模板头注列出。
+- 为的是：用户在 kitty 里 option+backspace 删词、左右改错字，现在都没反应。
+- 做法：`charmbracelet/bubbles/textinput` 可以用（bubbletea 的配套库，光标 / 删词 / 宽度都有），不想加依赖就自己写但行为对齐它；kitty 把 option+backspace 发成 ESC DEL，bubbletea 收到的是 `alt+backspace`，真 pty 里要核一次。
+- 验收：单测 光标移动 / 插入 / 删词（含中文、词边界是空格和标点）；看板 `/` 和找回各一条「光标中间插字」用例；tester 真 pty 里发 ESC DEL。
+
+### T80 找回两段式
+- 要做：design §2「两段式」整条：enter 进锁定态不 resume；锁定态 n / N 回绕、j / k 不回绕、enter resume、`/` 回输入框改查询、esc 清空回打字态；打字态空查询再 esc 退出；`agmux -r <关键词>` 直接进锁定态；底栏两态分别列键。
+- 为的是：用户习惯 nvim 的 `/foo<enter>` 再 n/N；现在打字态 enter 直接 resume，容易误开会话。
+- 做法：仿看板 `/` 的 typing / kept 两态（board.go 里现成），recall 模型加一个状态位；打字态上下键照旧。
+- 验收：单测 键 → 状态表（两态 × enter / esc / n / N / j / k / `/`）；embedded（看板里）同样走两态；黑盒 真 pty 打字 → enter → j → enter 才 exec 假 claude。
+
+### T81 ctrl+n / ctrl+p 滚预览
+- 默认 `preview_down = ["pgdown","ctrl+n"]`、`preview_up = ["pgup","ctrl+p"]`；golden 模板跟改；两态都能滚；看板也生效。
+- 验收：单测 + 黑盒各一条。
+
+### T82 三个粗边框
+- 输入框 / 列表 / 预览各一个粗边框（lipgloss ThickBorder），颜色 `[colors] recall_input` / `recall_list` / `recall_preview`（默认 `#ff8ebe` / `#6272a4` / `#bd93f9`），模板 + 校验 + golden；标题嵌在上边框：列表 `n/total`、预览会话名。窄屏（<100 列）只画前两个框。高度：三个框加起来不超过终端行数，列表行数相应减。
+- 验收：单测 三色从配置读到、默认值；黑盒 frame 里边框字符和颜色、100 / 99 列、24 行下不溢出；dev 真机截图贴这里。
+
+### T83 e2e（tester，与 T79 并行起步）
+- t79：真 pty 发 ESC DEL / 方向键 / ctrl+a / ctrl+e，看板 `/` 和找回各一组；t80：两态键表 + 只有锁定态 enter 才 exec；t81：ctrl+n/p；t82：边框字符与颜色、窄屏、矮屏；t74 / t76 / t77 里「打字态 enter 即 resume」的旧断言跟改。
+- tester（worktree-agmux-tester 3d2bcfe，先不合：t76 / t77 的 enter 已改成两次，合进去会在 957749a 上红）：t79 13×2 宿主（真光标读 tmux cursor_x/y、ESC DEL / M-BSpace / ctrl+w、中文宽度）、t80 两态各约 17 条 × 两宿主、t81、t82、夹具 lib_recall；二进制 `agmux config` 没有 `recall_input` 前整体 skip（88 条）。三点照准：(1) 打字态有查询时 esc 先清查询不退出（即 design §2「空查询再 esc 才退出」）；无命中列表标题 `0/0`；删词后光标在词原位置、前面空格留不留都接受。(2) 看板 `?` 里空查询 esc 回卡片不退 agmux。dev 做的如与此不同，以这三条为准。
+
+### T84 找回鼠标（用户 2026-10-28 追加，排在 T82 后）
+- 要做：design §2「鼠标」整条：单击选中、同行 400 ms 内双击确认、滚轮列表挪选中行 / 预览滚 3 行；`agmux -r` 的 Program 加 WithMouseCellMotion，看板嵌入时 recallUpdate 把 MouseMsg 交给 recall 模型而不是吞掉；ExecProcess 回来后鼠标重开（现有 recallEditedMsg 的处理照旧）。
+- 为的是：用户看板已经靠鼠标点卡片，找回也要能点。
+- 做法：bubbletea v1 没有双击事件，自己记上次点击的行和时间；行号 → 会话由 view 的布局反推（列表框内第几行 + 滚动偏移），T82 加边框后坐标要算上边框和标题行；看板 board.go 的 mouse() 已有滚轮 / 点击的写法。
+- 验收：单测 点击 → 选中、双击 → pick、隔行两次点不算双击、超时不算、滚轮两区各自生效、面板开着忽略；黑盒 真 pty 写 SGR 鼠标序列（`\x1b[<0;x;yM` / `m`、滚轮 64 / 65），`-r` 和看板 `?` 各一组；T83 的 tester 补 t84。
+- tester t84 写好（9e776c4，32 条，同样等 `recall_input` 出现再接线）。照准：双击在打字态也算确认（design §2 已写明）；双击 resume 的是被点的那行。
+- **用户 2026-10-28 改 T80**：列表已经筛过，n / N 没意义，去掉；enter 进「选择态」，j / k / 方向键挪选中，enter resume，其余（`/` 改查询、esc 清空、带参数启动即选择态）不变。docs 已改（design §2），tester t80 里 n / N 回绕的用例删掉，n / N 在选择态不做事。
+- dev 第十六批交付（worktree-agmux-dev-t77 b15f64d，合回 main a60cff2）：4bd541b T79 输入框 input.go 共用（变异 45 杀 44，1 等价）；f9e88fe T81（3 全杀）；4c19fdb + 965aa5e T80 两段式、去 n/N（37 全杀）；12362e5 T82 三个粗框（46 全杀）；b15f64d T84 鼠标（44 杀 40，4 等价）。dev 定的 8 条细节里 7 条照准：空查询 enter 也进选择态；选择态 quit 的非 esc 键结束本屏、esc 清空回输入态；选择态字母键按 [keys]，输入态只有方向键 / ctrl 键；看板 `?` 在选择态或空输入时回看板；双击两态都确认且清计时；矮屏 <7 行不画消息行、<6 行不画框；底栏两态分列。**改一条**：列表标题 `n/total` 的 n = 命中的会话数（像看板 `/` 的 3/14 和 fzf），不是光标位置。**未交付**：T79 的「真光标」（IME 候选框跟随）dev 用反显格代替，另立 T85。真机核过 option+backspace / Left 插字 / enter 进选择态；截图 /tmp/t82-shot-140x30.txt。
+### T85 找回输入框真光标（T79 遗留）
+- 要做：`agmux -r` 和看板 `?` 里输入态时终端真光标停在输入框光标处（IME 候选框跟着），选择态隐藏；复用看板 cursorOut 的机制，RunRecall 也包一层输出，坐标按 T82 版面算（输入框在第 2 行，列 = 框左边 + 2 + 光标前文本的显示宽度）。
+- 为的是：用户主要搜中文，候选框要贴着输入位置；tester 的 t79 已按真光标写（读 tmux cursor_x / y）。
+- 验收：单测 坐标函数（含中文 / 滚动的查询）；黑盒 tester t79 现成。
+- dev b4c7354（T85 真光标 + 标题 n = 命中数；合回 main 34f3e34）：坐标 = 边框 1 + " / " 3 + 光标前文字显示宽度，长查询按可见段算、indexing 占位扣掉；输入态显示、选择态 / 面板开着隐藏；standalone 用 cursorOut 包输出，看板 `?` 里走看板的 wantCursor；真 tmux 核过 `a优b` x=8、左移 7、选择态隐藏。变异 33 杀 32（1 需真 TTY）。标题 = 命中数 / 同筛选下可搜会话数，无查询时 n = total。**改**：有查询无命中显示 `0/total`（像 fzf），不是 `0/0`——撤回前面给 tester 的 0/0，dev 一行改掉。
+- dev ea694c4（无命中 `0/total`；合回 main 2376ff9）。**第十六批目标 2376ff9**（产品）。

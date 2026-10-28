@@ -270,7 +270,7 @@ func TestPreviewScrollKeys(t *testing.T) {
 	for i := 1; i <= 100; i++ {
 		fmt.Fprintf(&hist, "line %d\n", i)
 	}
-	for _, c := range []struct{ toml, up, down string }{{"", "pgup", "pgdown"}, {"[keys]\npreview_up = [\"ctrl+x\"]\npreview_down = [\"ctrl+q\"]\n", "ctrl+x", "ctrl+q"}} {
+	for _, c := range []struct{ toml, up, down string }{{"", "pgup", "pgdown"}, {"", "ctrl+p", "ctrl+n"}, {"[keys]\npreview_up = [\"ctrl+x\"]\npreview_down = [\"ctrl+q\"]\n", "ctrl+x", "ctrl+q"}} {
 		m := press1(t, withConfig(t, c.toml), "p")
 		tm, _ := m.Update(previewMsg{pane: "%1", text: hist.String()})
 		m = tm.(Model)
