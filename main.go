@@ -2,15 +2,18 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kackerx/agmux/internal/avatar"
@@ -62,9 +65,11 @@ commands:
   avatars print every avatar: image sets, then pixel sprites
   avatars import <sheet.png> --name <id> [--layout 30|19] [--force]
           cut a pi-agent-portrait sheet (6 × 5 cells; 19: 5 × 4) into the image set <id>
+  recall [--reindex] [--] [query...]      (also: agmux -r [query...])
+          find a closed session by what was said in it, and resume it where it was
   recall --dump [--reindex] [--] [query...]
-          find a closed session by what was said in it: one line per session that matches,
-          tab-separated: source, id, name, project, branch, mtime (UTC), hits, snippet
+          the sessions that match, one per line, tab-separated: source, id, name, project,
+          branch, mtime (UTC), hits, snippet
   statusline [-- <command>]
           Claude Code status line wrapper: saves the payload for the board, runs <command>
   config [--path]
@@ -97,7 +102,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return boardCmd(args[1:])
 		case "config":
 			return configCmd(args[1:])
-		case "recall":
+		case "recall", "-r":
 			return recallCmd(args[1:], stdout, stderr)
 		case "avatars":
 			if len(args) > 1 {
@@ -230,7 +235,7 @@ func show(w io.Writer, p *store.Poller) error {
 
 // recallCmd is `agmux recall --dump [--reindex] [query...]`: the sessions that match, one per line.
 func recallCmd(args []string, stdout, stderr io.Writer) int {
-	const usage = "usage: agmux recall --dump [--reindex] [--] [query...]"
+	const usage = "usage: agmux recall [--dump] [--reindex] [--] [query...]"
 	var dump, reindex bool
 	for len(args) > 0 && strings.HasPrefix(args[0], "--") {
 		if args[0] == "--" { // what follows is the query, even if it starts with --
@@ -248,10 +253,6 @@ func recallCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		args = args[1:]
 	}
-	if !dump {
-		fmt.Fprintf(stderr, "agmux: recall: only --dump is there so far\n%s\n", usage)
-		return 2
-	}
 	ix, err := openRecall()
 	if err != nil {
 		fmt.Fprintln(stderr, "agmux:", err)
@@ -263,15 +264,66 @@ func recallCmd(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	if err := ix.Update(); err != nil { // some transcript could not be read: say so, show the rest
-		fmt.Fprintln(stderr, "agmux: recall:", err)
+	if !dump {
+		if err := runRecall(ix, strings.Join(args, " ")); err != nil {
+			fmt.Fprintln(stderr, "agmux:", err)
+			return 1
+		}
+		return 0
+	}
+	failed := ix.Update() // some transcript that could not be read: said, and the rest shown, and the exit code says it
+	if failed != nil {
+		fmt.Fprintln(stderr, "agmux: recall:", failed)
 	}
 	one := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
 	for _, r := range ix.Search(strings.Join(args, " ")) {
 		fmt.Fprintln(stdout, strings.Join([]string{r.Source, one.Replace(r.ID), one.Replace(r.Title()), one.Replace(r.Project), one.Replace(r.Branch),
 			time.Unix(0, r.MTime).UTC().Format(time.RFC3339), strconv.Itoa(r.Hits), one.Replace(r.Snippet.Text)}, "\t"))
 	}
+	if failed != nil {
+		return 1
+	}
 	return 0
+}
+
+// runRecall is the recall screen; when the user resumes a session it ends by becoming the agent, in
+// the session's directory, in this very terminal.
+func runRecall(ix *recall.Index, query string) error {
+	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return errors.New("recall needs a terminal; agmux recall --dump prints the sessions instead")
+	}
+	avatar.LoadSets() // config.toml may name image sets
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	useLang(cfg.Language)
+	var live []store.Session
+	if p, err := store.NewPoller(); err == nil && p.Refresh() == nil { // one look at what runs; no tmux or no Claude: nothing runs
+		live = p.Sessions()
+	}
+	cwd, _ := os.Getwd()
+	res, err := board.RunRecall(ix, cfg, live, ix.ProjectOf(cwd), query)
+	if err != nil || res == nil {
+		return err
+	}
+	return execResume(res.Dir, res.Argv)
+}
+
+// syscallExec is syscall.Exec; the tests put their own in.
+var syscallExec = syscall.Exec
+
+// execResume becomes argv in dir: the terminal, the environment and the process stay, the program is replaced.
+func execResume(dir string, argv []string) error {
+	bin, err := exec.LookPath(argv[0])
+	if err != nil {
+		return err
+	}
+	if err := os.Chdir(dir); err != nil {
+		return err
+	}
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "PWD=") })
+	return syscallExec(bin, argv, append(env, "PWD="+dir)) // Chdir does not move $PWD, and tools believe it
 }
 
 // openRecall is the index of Claude Code's and pi's transcripts, cached under $XDG_CACHE_HOME/agmux/recall.

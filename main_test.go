@@ -386,10 +386,83 @@ func TestRecallDump(t *testing.T) {
 	if row := strings.TrimRight(out, "\n"); strings.Count(row, "\t") != 7 || strings.Contains(row, "\n") || !strings.Contains(row, "\tx y z\t") {
 		t.Errorf("columns: %q", out)
 	}
-	for _, args := range [][]string{{}, {"--bogus"}, {"--dump", "--bogus"}, {"'x"}} {
+	for _, args := range [][]string{{"--bogus"}, {"--dump", "--bogus"}} {
 		var out, errs bytes.Buffer
-		if code := run(append([]string{"recall"}, args...), &out, &errs); code != 2 || out.Len() != 0 || !strings.Contains(errs.String(), "usage: agmux recall --dump") {
+		if code := run(append([]string{"recall"}, args...), &out, &errs); code != 2 || out.Len() != 0 || !strings.Contains(errs.String(), "usage: agmux recall [--dump]") {
 			t.Errorf("recall %q: exit %d, %q", args, code, errs.String())
 		}
+	}
+	// the screen needs a terminal (a test has none); -r is the same command
+	for _, args := range [][]string{{"recall"}, {"recall", "'x"}, {"-r"}, {"-r", "x", "y"}} {
+		var out, errs bytes.Buffer
+		if code := run(args, &out, &errs); code != 1 || out.Len() != 0 || !strings.Contains(errs.String(), "needs a terminal") || !strings.Contains(errs.String(), "--dump") {
+			t.Errorf("%q: exit %d, %q", args, code, errs.String())
+		}
+	}
+	var viaR, viaRecall, errs bytes.Buffer
+	if run([]string{"-r", "--dump", "'left"}, &viaR, &errs) != 0 || run([]string{"recall", "--dump", "'left"}, &viaRecall, &errs) != 0 || viaR.String() != viaRecall.String() || viaR.Len() == 0 {
+		t.Errorf("-r --dump: %q, recall --dump: %q", viaR.String(), viaRecall.String())
+	}
+}
+
+// T76: resuming ends the process by becoming the agent, in the session's directory.
+func TestExecResume(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755)
+	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	wd, _ := os.Getwd()
+	defer os.Chdir(wd)
+	defer func(f func(string, []string, []string) error) { syscallExec = f }(syscallExec)
+	var gotBin, gotCwd string
+	var gotArgv, gotEnv []string
+	t.Setenv("PWD", "/somewhere/else")
+	syscallExec = func(b string, argv, env []string) error {
+		gotBin, gotArgv, gotEnv = b, argv, env
+		gotCwd, _ = os.Getwd()
+		return nil
+	}
+	if err := execResume(dir, []string{"claude", "--resume", "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	if real, _ := filepath.EvalSymlinks(dir); gotBin != bin || strings.Join(gotArgv, " ") != "claude --resume abc" || gotCwd != real {
+		t.Errorf("exec %q %q in %q, want %q in %q", gotBin, gotArgv, gotCwd, bin, real)
+	}
+	if err := execResume(dir, []string{"no-such-agent-xyz"}); err == nil {
+		t.Error("a program that is not there is an error")
+	}
+	var pwds []string
+	for _, kv := range gotEnv {
+		if strings.HasPrefix(kv, "PWD=") {
+			pwds = append(pwds, kv)
+		}
+	}
+	if len(pwds) != 1 || pwds[0] != "PWD="+dir {
+		t.Errorf("$PWD follows the directory: %q", pwds)
+	}
+	if err := execResume(filepath.Join(dir, "gone"), []string{"claude"}); err == nil {
+		t.Error("a directory that is gone is an error")
+	}
+}
+
+// A transcript that can not be read is said and the rest is still listed; the exit code is 1.
+func TestRecallDumpExitsOneWhenATranscriptIsUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	claude := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	good := filepath.Join(claude, "projects", "-w", "good.jsonl")
+	bad := filepath.Join(claude, "projects", "-w", "bad.jsonl")
+	os.MkdirAll(filepath.Dir(good), 0o755)
+	line := `{"type":"user","cwd":"/w","message":{"role":"user","content":"a sentence in a session"}}` + "\n"
+	os.WriteFile(good, []byte(line), 0o644)
+	os.WriteFile(bad, []byte(line), 0o000)
+	var out, errs bytes.Buffer
+	code := run([]string{"recall", "--dump"}, &out, &errs)
+	if code != 1 || !strings.Contains(out.String(), "good") || !strings.Contains(errs.String(), "bad.jsonl") {
+		t.Errorf("exit %d, out %q, err %q", code, out.String(), errs.String())
 	}
 }

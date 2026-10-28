@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kackerx/agmux/internal/gitrepo"
 )
 
 // branchIn is the gitBranch of the last entry of the tail that has one; "HEAD" is what Claude Code
@@ -72,11 +73,6 @@ func pendingIn(lines [][]byte) string {
 
 type repoInfo struct{ project, root string }
 
-// gitCommonDir asks git for the absolute path of the repo's .git of a directory; the tests count the calls.
-var gitCommonDir = func(cwd string) ([]byte, error) {
-	return exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
-}
-
 type branchInfo struct {
 	name string
 	at   time.Time
@@ -116,13 +112,8 @@ func (p *Poller) repo(cwd string) (project, root string) {
 	if r, ok := p.repos[cwd]; ok {
 		return r.project, r.root
 	}
-	r := repoInfo{project: filepath.Base(cwd)}
-	if out, err := gitCommonDir(cwd); err == nil {
-		if common := strings.TrimSpace(string(out)); common != "" {
-			r.root = filepath.Dir(common)
-			r.project = filepath.Base(r.root)
-		}
-	}
+	g := gitrepo.Lookup(cwd)
+	r := repoInfo{project: g.Project, root: g.Root}
 	if p.repos == nil {
 		p.repos = map[string]repoInfo{}
 	}

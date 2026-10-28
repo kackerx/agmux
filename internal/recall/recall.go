@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -71,6 +72,10 @@ const (
 	maxLines = 300 // sentences kept per role in a session
 )
 
+// pasted is a block of what the user pasted, which Claude Code wraps as <pasted_content id=…>…</pasted_content …>:
+// the pasted text is not a sentence (it can be pages), what is written around it is.
+var pasted = regexp.MustCompile(`(?s)<pasted_content\b[^>]*>.*?</pasted_content\b[^>]*>`)
+
 // noise are the starts of what a transcript holds that nobody said: the harness's own messages.
 // [Image #n] is not among them: the user said that.
 var noise = []string{
@@ -81,7 +86,7 @@ var noise = []string{
 // Clean is the sentence a text makes: white space folded to single spaces, cut to maxText characters;
 // ok is false for what is noise (see noise) or too short to find anything by.
 func Clean(text string) (s string, ok bool) {
-	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(pasted.ReplaceAllString(text, ""))
 	for _, n := range noise {
 		if strings.HasPrefix(text, n) {
 			return "", false

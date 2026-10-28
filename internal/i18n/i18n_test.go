@@ -103,8 +103,8 @@ func TestKeysInTheSourceAndTheTablesMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	for k := range en {
-		// status.* and mode.* are built from the state / grouping name
-		if !used[k] && !strings.HasPrefix(k, "status.") && !strings.HasPrefix(k, "mode.") && !strings.Contains(src.String(), `"`+k+`"`) {
+		// status.*, mode.* and recall.scope* are built from the state / grouping / scope name
+		if !used[k] && !strings.HasPrefix(k, "status.") && !strings.HasPrefix(k, "mode.") && !strings.HasPrefix(k, "recall.scope") && !strings.Contains(src.String(), `"`+k+`"`) {
 			t.Errorf("nothing asks for %q", k)
 		}
 	}

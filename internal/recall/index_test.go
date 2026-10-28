@@ -178,7 +178,7 @@ func TestUpdateReadsAgainWhatShrankOrChangedVersion(t *testing.T) {
 	// a cache of another format is read again
 	cache := filepath.Join(w.cache, "claude-s1.json")
 	b, _ := os.ReadFile(cache)
-	os.WriteFile(cache, []byte(strings.Replace(string(b), `"v":1`, `"v":0`, 1)), 0o644)
+	os.WriteFile(cache, []byte(strings.Replace(string(b), fmt.Sprintf(`"v":%d`, Version), `"v":0`, 1)), 0o644)
 	w.update()
 	if got := w.src.readsOf("s1.jsonl"); len(got) != 3 || got[2] != 0 {
 		t.Errorf("old cache version: reads %v", got)
@@ -375,13 +375,21 @@ func TestProject(t *testing.T) {
 	run("commit", "-q", "--allow-empty", "-m", "x")
 	wt := filepath.Join(dir, "ledger.worktrees", "audit")
 	run("worktree", "add", "-q", "-b", "audit", wt)
+	os.MkdirAll(filepath.Join(wt, "pkg", "api"), 0o755) // a session may be in a directory of the worktree
+	// a repository whose git directory is elsewhere is not a worktree, and is named after its checkout
+	sep := filepath.Join(dir, "sep")
+	os.MkdirAll(filepath.Join(dir, "gitdata"), 0o755)
+	if out, err := exec.Command("git", "init", "-q", "--separate-git-dir", filepath.Join(dir, "gitdata", "real.git"), sep).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
 	ix := &Index{}
-	for cwd, want := range map[string]string{
-		repo: "ledger", wt: "ledger", filepath.Join(wt, "."): "ledger",
-		dir: filepath.Base(dir), filepath.Join(dir, "gone", "api"): "api", "": "",
+	for cwd, want := range map[string][2]string{
+		sep: {"sep", ""}, filepath.Join(wt, "pkg", "api"): {"ledger", "audit"},
+		repo: {"ledger", ""}, wt: {"ledger", "audit"}, filepath.Join(wt, "."): {"ledger", "audit"},
+		filepath.Join(repo, "sub"): {"sub", ""}, dir: {filepath.Base(dir), ""}, filepath.Join(dir, "gone", "api"): {"api", ""}, "": {"", ""},
 	} {
-		if got := ix.project(cwd); got != want {
-			t.Errorf("project(%q) = %q, want %q", cwd, got, want)
+		if p, w := ix.project(cwd); p != want[0] || w != want[1] {
+			t.Errorf("project(%q) = %q, %q; want %q, %q", cwd, p, w, want[0], want[1])
 		}
 	}
 }
@@ -458,5 +466,117 @@ func TestSaveRemovesItsTempFileOnFailure(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".tmp-*")); len(left) != 0 {
 		t.Errorf("temp files %v", left)
+	}
+}
+
+// The command that opens a session again comes from its own source; an unknown one has none.
+func TestResumeIsOfTheSource(t *testing.T) {
+	ix := &Index{Sources: []Source{Claude{}, Pi{}}}
+	if got := ix.Resume(&Entry{Source: "claude", Head: Head{ID: "c1", Path: "/p/c1.jsonl"}}); strings.Join(got, " ") != "claude --resume c1" {
+		t.Errorf("claude: %q", got)
+	}
+	if got := ix.Resume(&Entry{Source: "pi", Head: Head{ID: "p1", Path: "/p/p1.jsonl"}}); strings.Join(got, " ") != "pi --session /p/p1.jsonl" {
+		t.Errorf("pi: %q", got)
+	}
+	if got := ix.Resume(&Entry{Source: "codex"}); got != nil {
+		t.Errorf("codex: %q", got)
+	}
+}
+
+// Several transcripts are read at once and the newer ones take longer: Entries is newest first all the
+// same, and at every moment of the build; Progress is told 1, 2, 3 … in that order.
+func TestUpdateWithManyWorkersKeepsTheOrder(t *testing.T) {
+	w := newWorld(t)
+	const n = 6
+	for i := range n {
+		p := w.transcript(fmt.Sprintf("s%d", i), finished(t))
+		at := time.Now().Add(-time.Duration(i) * time.Hour) // s0 is the newest
+		os.Chtimes(p, at, at)
+	}
+	w.src.onRead = func(p string) { // the newest is the slowest
+		var i int
+		fmt.Sscanf(filepath.Base(p), "s%d.jsonl", &i)
+		time.Sleep(time.Duration(n-i) * 15 * time.Millisecond)
+	}
+	ix := w.index()
+	ix.Workers = n
+	var seen []int
+	var mu sync.Mutex
+	ix.Progress = func(done, total int) {
+		es := ix.Entries()
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, done)
+		for i := 1; i < len(es); i++ {
+			if es[i-1].MTime < es[i].MTime {
+				t.Errorf("during the build, after %d: entries are not newest first", done)
+			}
+		}
+	}
+	if err := ix.Update(); err != nil {
+		t.Fatal(err)
+	}
+	for i, e := range ix.Entries() {
+		if want := fmt.Sprintf("s%d", i); e.ID != want {
+			t.Errorf("entry %d is %s, want %s", i, e.ID, want)
+		}
+	}
+	for i, d := range seen {
+		if d != i+1 {
+			t.Errorf("Progress was told %v", seen)
+			break
+		}
+	}
+}
+
+// A temp file that a crashed write left is removed, a young one (another agmux may be writing it) is not.
+func TestUpdateRemovesOldTempFiles(t *testing.T) {
+	w := newWorld(t)
+	w.transcript("s1", finished(t))
+	os.MkdirAll(w.cache, 0o755)
+	old, young := filepath.Join(w.cache, ".tmp-old"), filepath.Join(w.cache, ".tmp-young")
+	os.WriteFile(old, []byte("x"), 0o644)
+	os.WriteFile(young, []byte("x"), 0o644)
+	at := time.Now().Add(-2 * time.Minute)
+	os.Chtimes(old, at, at)
+	w.update()
+	if _, err := os.Stat(old); err == nil {
+		t.Error("the old temp file stays")
+	}
+	if _, err := os.Stat(young); err != nil {
+		t.Error("the young one went:", err)
+	}
+}
+
+// A session's name may hold anything the user typed; it shows as one line.
+func TestTitleHasNoControlCharacters(t *testing.T) {
+	e := &Entry{Head: Head{Name: "a\x1b[0mb\nc\td\u202ee"}}
+	if got := e.Title(); got != "a [0mb c d e" {
+		t.Errorf("%q", got)
+	}
+	e = &Entry{Users: []Line{{Text: "first\rwords"}}}
+	if got := e.Title(); got != "first words" {
+		t.Errorf("%q", got)
+	}
+}
+
+// Transcripts of the same age are in the order of their paths, whichever was read first.
+func TestUpdateEqualAgesGoByPath(t *testing.T) {
+	w := newWorld(t)
+	at := time.Now().Add(-time.Hour)
+	for _, id := range []string{"b", "c", "a"} {
+		os.Chtimes(w.transcript(id, finished(t)), at, at)
+	}
+	ix := w.index()
+	ix.Workers = 1
+	if err := ix.Update(); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range ix.Entries() {
+		got = append(got, e.ID)
+	}
+	if strings.Join(got, " ") != "a b c" {
+		t.Errorf("%v", got)
 	}
 }

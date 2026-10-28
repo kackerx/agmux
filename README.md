@@ -26,6 +26,7 @@ go install github.com/kackerx/agmux@latest
 ```sh
 agmux board     # 全屏看板，建议开在 tmux 浮窗里
 agmux show      # 每个会话一行，制表符分隔：id、名字、分组（目录）、状态、模型、上下文%（没有是 --）、agent 定义（没有就空）、bg（后台会话，否则空）；接管道时就是这行纯文本，可以 cut / awk
+agmux recall    # 按聊过的内容找回已经关掉的会话（也可以 agmux -r [关键词]），见「找回会话」
 agmux avatars   # 打印全部头像：先是图片集（id、来源、各状态帧数），再是像素头像
 agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 sheet 切成图片集（见「头像图片」）
 ```
@@ -117,6 +118,26 @@ agmux setup --write   # 改 ~/.claude/settings.json 的 statusLine.command，原
 ### pi
 
 pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi 扩展知道有哪些会话。`agmux setup --write`（上面那条）在改状态栏之后顺手把扩展装到 `~/.pi/agent/extensions/agmux.js`（`$PI_CODING_AGENT_DIR` 优先；没有这个目录就跳过；已经一样就不动；你改过的或是别的版本不覆盖，只提示，删掉再装即可；不带 `--write` 只打印会做什么）。**已经在跑的 pi 会话要重启才会加载扩展**，之后每个有界面的 pi 会话在 `~/.pi/agent/agmux-sessions/<pid>.json` 里写自己的状态（idle / working / waiting：在等你回答对话框、正在跑的工具、名字），退出时删掉；`pi -p` 这类没有界面的不写。pi 会话按进程树找到所在的 tmux pane，卡片上没有模型和上下文（pi 没有状态栏数据）。ps 里有 `pi` 进程、却一个 pi 会话也没显示时，底栏提示一句：没装扩展是 `pi: run agmux setup --write`，装了是 `pi: restart the running pi sessions to show them`（每 30 秒看一次）；扩展留下的已退出会话的文件会被自动清掉。
+
+### 找回会话
+
+`agmux recall [关键词]`（等价于 `agmux -r [关键词]`）：只记得聊过什么、不记得是哪个 worktree 哪个会话时用。不需要 tmux，任何终端都行。读的是 Claude Code 的 `~/.claude/projects/*/*.jsonl`（`$CLAUDE_CONFIG_DIR` 优先）和 pi 的 `~/.pi/agent/sessions/*/*.jsonl`（`$PI_CODING_AGENT_DIR`），只读，不改它们；索引缓存在 `$XDG_CACHE_HOME/agmux/recall`（默认 `~/.cache/agmux/recall`），第一次打开会边建边出（顶栏 `indexing n / N`），之后增量更新，毫秒级。`agmux recall --reindex` 清缓存重建。
+
+一行一个会话：状态点（● 在跑 / ○ 已关）、名字、项目（worktree 写成 `主仓库.wt/目录`）、分支、多久以前、命中了几句、最匹配的那句；右边（终端 ≥ 100 列）是预览：会话卡加上全部命中的句子，每处上下各带一句，中间没命中的折成 `… n lines …`。你说的和 agent 说的（每段回复只取头 200 字）都搜，同分你说的排前面。语法同看板的 `/`（fzf：空格 = 且、`'精确`、`^前缀`、`后缀$`、`!排除`），匹配串是「来源 项目 分支 会话名 句子」，所以也可以直接打项目名、分支名；命中数只算句子本身。空查询 = 最近的会话。
+
+| 键 | 作用 |
+|---|---|
+| 打字 | 进查询（字母都是字符；动作键只有 ctrl / alt 组合和方向键） |
+| `↓` `↑` / `ctrl+d` `ctrl+u` | 选会话 / 翻页（[keys] `down` `up` `page_down` `page_up`） |
+| `pgup` `pgdown` | 滚预览（`preview_up` `preview_down`） |
+| `enter` | 恢复：recall 退出，在**同一个终端**里 `cd` 到会话目录再 `exec claude --resume <id>`（pi 是 `pi --session <文件>`）。在跑的会话不动，底栏说它在哪个 pane；目录没了、命令不在 PATH 里也只在底栏说 |
+| `ctrl+f` | 筛选面板：来源多选（只列本机有会话的来源）+ 范围单选（全部历史 / 当前项目）。面板里 `space` 勾选、`a` 全选、`A` 清空、`↓` `↑` 移动、`esc` 收起 |
+| `ctrl+t` | 不开面板，直接在「当前项目」和「全部历史」之间切 |
+| `ctrl+y` | 复制 `cd '<目录>' && claude --resume <id>`（pbcopy，没有就 wl-copy / xclip） |
+| `ctrl+o` | 用 `$EDITOR`（没设用 vi）打开 transcript |
+| `esc` | 三级：收起面板 → 清空查询 → 退出（`ctrl+c` 直接退出） |
+
+这些键都在 `[keys]`：`recall`（`?`，留给看板里进找回，目前看板还没接）、`recall_filter`、`recall_scope`、`recall_copy`、`recall_open`、`recall_toggle`、`recall_all`、`recall_none`。`agmux recall --dump [关键词]` 不开界面，一行一个会话（来源、id、名字、项目、分支、mtime、命中数、片段，制表符分隔）。
 
 ### 看过的 done 算已读
 

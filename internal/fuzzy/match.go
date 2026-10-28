@@ -3,8 +3,10 @@
 package fuzzy
 
 import (
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
@@ -106,4 +108,39 @@ func matchTerms(terms []term, s string) (Match, bool) {
 	slices.Sort(m.Pos)
 	m.Pos = slices.Compact(m.Pos)
 	return m, true
+}
+
+// minChunk is the fewest items worth a goroutine: matching one costs microseconds.
+const minChunk = 1500
+
+// FilterParallel is Filter with the items cut into pieces matched at once, one per CPU: the same
+// matches in the same order (best score first, equal scores in the items' order).
+func FilterParallel(pattern string, items []string) []Match {
+	n := min(runtime.NumCPU(), len(items)/minChunk)
+	if n < 2 {
+		return Filter(pattern, items)
+	}
+	size := (len(items) + n - 1) / n
+	parts := make([][]Match, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		lo, hi := i*size, min((i+1)*size, len(items))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			parts[i] = Filter(pattern, items[lo:hi])
+			for j := range parts[i] {
+				parts[i][j].Index += lo
+			}
+		}()
+	}
+	wg.Wait()
+	out := slices.Concat(parts...)
+	slices.SortStableFunc(out, func(a, b Match) int {
+		if a.Score != b.Score {
+			return b.Score - a.Score
+		}
+		return a.Index - b.Index
+	})
+	return out
 }

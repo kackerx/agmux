@@ -5,23 +5,27 @@ import (
 	"encoding/json"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"time"
+	"unicode"
+
+	"github.com/kackerx/agmux/internal/gitrepo"
 )
 
 // Version is the cache format: an entry of another version is read again from its transcript.
-const Version = 1
+const Version = 2
 
 // Entry is what is known of one transcript: its head, how far it has been read, and its sentences.
 // It is the cache file <cache dir>/<source>-<transcript name>.json.
 type Entry struct {
-	V       int    `json:"v"`
-	Source  string `json:"source"`
-	Project string `json:"project"` // the main repository's name for a worktree, else the directory's
+	V        int    `json:"v"`
+	Source   string `json:"source"`
+	Project  string `json:"project"`      // the main repository's name for a worktree, else the directory's
+	Worktree string `json:"wt,omitempty"` // the worktree's own directory name, "" when the directory is the main checkout (or not in git)
 	Head
 	MTime   int64  `json:"mtime"` // of the transcript, ns since the epoch
 	Size    int64  `json:"size"`
@@ -30,15 +34,19 @@ type Entry struct {
 	Replies []Line `json:"replies"`
 }
 
-// Title is the session's name; with none, the first thing you said.
+// Title is the session's name; with none, the first thing you said. Control characters (a name is
+// whatever the user typed) are spaces: it ends up on one line of a screen.
 func (e *Entry) Title() string {
-	if e.Name != "" {
-		return e.Name
+	t := e.Name
+	if t == "" && len(e.Users) > 0 {
+		t = e.Users[0].Text
 	}
-	if len(e.Users) > 0 {
-		return e.Users[0].Text
-	}
-	return ""
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return ' '
+		}
+		return r
+	}, t)
 }
 
 // Index is the entries of every transcript of its sources, kept in a cache directory.
@@ -51,11 +59,12 @@ type Index struct {
 	mu      sync.Mutex
 	entries []*Entry
 	gen     int // counts changes: what is derived from entries is stale when it moved
-	repos   map[string]string
+	repos   map[string][2]string
 
 	cached        *corpus // what Search matches, built from cachedEntries when gen was cachedGen
 	cachedEntries []*Entry
 	cachedGen     int
+	cachedKey     string
 }
 
 // Reset removes the cache: the next Update reads everything again.
@@ -105,16 +114,26 @@ func (ix *Index) Update() error {
 			}
 		}
 	}
+	// a temp file that a write left behind (a crash between the write and the rename); a young one
+	// may be another agmux's, writing right now
+	if tmps, _ := glob(ix.Dir, ".tmp-*"); len(tmps) > 0 {
+		for _, f := range tmps {
+			if fi, err := os.Stat(f); err == nil && time.Since(fi.ModTime()) > time.Minute {
+				os.Remove(f)
+			}
+		}
+	}
 	ix.mu.Lock()
 	ix.entries = nil
 	ix.gen++
 	ix.mu.Unlock()
 
 	var (
-		wg   sync.WaitGroup
-		next = make(chan job)
-		done int
-		fail error
+		wg     sync.WaitGroup
+		next   = make(chan job)
+		done   int
+		progMu sync.Mutex // done and Progress go together, so what Progress is told only goes up
+		fail   error
 	)
 	for range cmp.Or(ix.Workers, max(runtime.NumCPU(), 2)) {
 		wg.Add(1)
@@ -126,16 +145,23 @@ func (ix *Index) Update() error {
 				if err != nil && fail == nil {
 					fail = err
 				}
-				if e != nil {
-					ix.entries = append(ix.entries, e)
+				if e != nil { // in its place: newest first, now and while the rest is built
+					i, _ := slices.BinarySearchFunc(ix.entries, e, func(have, e *Entry) int {
+						if c := cmpInt(e.MTime, have.MTime); c != 0 {
+							return c
+						}
+						return strings.Compare(have.Path, e.Path)
+					})
+					ix.entries = slices.Insert(ix.entries, i, e)
 					ix.gen++
 				}
-				done++
-				n := done
 				ix.mu.Unlock()
+				progMu.Lock()
+				done++
 				if ix.Progress != nil {
-					ix.Progress(n, len(jobs))
+					ix.Progress(done, len(jobs))
 				}
+				progMu.Unlock()
 			}
 		}()
 	}
@@ -144,9 +170,6 @@ func (ix *Index) Update() error {
 	}
 	close(next)
 	wg.Wait()
-	ix.mu.Lock()
-	defer ix.mu.Unlock()
-	slices.SortStableFunc(ix.entries, func(a, b *Entry) int { return cmpInt(b.MTime, a.MTime) })
 	return fail
 }
 
@@ -188,7 +211,7 @@ func (ix *Index) entry(j job) (*Entry, error) {
 	e.Path, e.MTime, e.Size, e.Offset = j.path, mtime, size, end
 	e.add(lines)
 	if e.Project == "" {
-		e.Project = ix.project(e.CWD)
+		e.Project, e.Worktree = ix.project(e.CWD)
 	}
 	return e, save(cache, e)
 }
@@ -267,31 +290,48 @@ func save(path string, e *Entry) error {
 	return err
 }
 
-// project is the name of the repository the directory belongs to (a worktree is under its main one),
-// else the directory's own name; one question to git per directory.
-func (ix *Index) project(cwd string) string {
+// project is the name of the repository the directory belongs to and, for a linked worktree, the
+// name of the worktree's own directory (see gitrepo). One question to git per directory.
+func (ix *Index) project(cwd string) (project, worktree string) {
 	if cwd == "" {
-		return ""
+		return "", ""
 	}
 	ix.mu.Lock()
-	p, ok := ix.repos[cwd]
+	r, ok := ix.repos[cwd]
 	ix.mu.Unlock()
 	if ok {
-		return p
+		return r[0], r[1]
 	}
-	p = filepath.Base(cwd)
-	if _, err := os.Stat(cwd); err == nil {
-		if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
-			if common := strings.TrimSpace(string(out)); common != "" {
-				p = filepath.Base(filepath.Dir(common))
-			}
-		}
-	}
+	g := gitrepo.Lookup(cwd)
+	r[0], r[1] = g.Project, g.Worktree
 	ix.mu.Lock()
 	if ix.repos == nil {
-		ix.repos = map[string]string{}
+		ix.repos = map[string][2]string{}
 	}
-	ix.repos[cwd] = p
+	ix.repos[cwd] = r
 	ix.mu.Unlock()
+	return r[0], r[1]
+}
+
+// Resume is the command that opens e again, "" argv when its source is not one of the index's.
+func (ix *Index) Resume(e *Entry) []string {
+	for _, s := range ix.Sources {
+		if s.Name() == e.Source {
+			return s.Resume(e.Head)
+		}
+	}
+	return nil
+}
+
+// ProjectOf is the project of a directory, as the sessions' are named (see Entry.Project).
+func (ix *Index) ProjectOf(cwd string) string {
+	p, _ := ix.project(cwd)
 	return p
+}
+
+// Gen counts the changes of the entries: what is derived from them is stale when it moved.
+func (ix *Index) Gen() int {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	return ix.gen
 }

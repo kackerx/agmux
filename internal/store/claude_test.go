@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/kackerx/agmux/internal/gitrepo"
 )
 
 // claudeDir is a config dir with the given registry entries (file name → JSON) and jobs
@@ -343,9 +345,10 @@ func TestRepo(t *testing.T) {
 		t.Errorf("asked once per directory: %d kept", len(p.repos))
 	}
 	// asked once per directory: the second time git is not run
-	defer func(f func(string) ([]byte, error)) { gitCommonDir = f }(gitCommonDir)
+	defer func(f func(string) ([]byte, error)) { gitrepo.Query = f }(gitrepo.Query)
 	calls := 0
-	gitCommonDir = func(cwd string) ([]byte, error) { calls++; return nil, fmt.Errorf("no git") }
+	os.MkdirAll(filepath.Join(dir, "other"), 0o755) // gitrepo does not ask about a directory that is not there
+	gitrepo.Query = func(cwd string) ([]byte, error) { calls++; return nil, fmt.Errorf("no git") }
 	for i := 0; i < 3; i++ {
 		if project, root := p.repo(main); project != "shopcart" || root != main {
 			t.Errorf("a cached directory: %q %q", project, root)

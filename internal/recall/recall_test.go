@@ -126,6 +126,12 @@ func TestClean(t *testing.T) {
 		{"ok", "", false},
 		{"好的好", "好的好", false},  // 3 characters
 		{"好的好吗", "好的好吗", true}, // 4 characters, though 12 bytes
+		{"<pasted_content id=7> % npm login\nUsername: x\n</pasted_content id=7> 为什么登录了还是这样", "为什么登录了还是这样", true},
+		{"before <pasted_content id=1>aaa</pasted_content id=1> and <pasted_content id=2>bbb\nccc</pasted_content id=2> after", "before and after", true},
+		{"stuck<pasted_content id=6>zzz</pasted_content id=6>together", "stucktogether", true},
+		{"<pasted_content id=3>only pasted text, pages of it</pasted_content id=3>", "", false},
+		{"<pasted_content id=4>a</pasted_content id=4> ok", "", false}, // what is left is too short
+		{"an unfinished <pasted_content id=5> block stays", "an unfinished <pasted_content id=5> block stays", true},
 		{"say <system-reminder> in the middle", "say <system-reminder> in the middle", true},
 	} {
 		if got, ok := Clean(c.in); ok != c.ok || ok && got != c.out {
