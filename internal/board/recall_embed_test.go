@@ -86,7 +86,7 @@ func TestBoardOpensAndLeavesRecall(t *testing.T) {
 	}
 	m = openRecallOn(t, m)
 	v := rview(*m.rc)
-	if got := m.View(); got != m.rc.View() || !strings.Contains(v, " / ▏") || len(m.rc.results) != 4 {
+	if got := m.View(); got != m.rc.View() || !strings.Contains(v, " / ") || len(m.rc.results) != 4 {
 		t.Errorf("the board draws the recall screen:\n%s", v)
 	}
 	if !m.rc.embedded || m.rc.w != 140 || m.rc.h != 30 || m.rc.project == "" {
@@ -111,7 +111,7 @@ func TestBoardOpensAndLeavesRecall(t *testing.T) {
 	if m, quit = bpress(t, m, "esc"); m.rc != nil || quit {
 		t.Errorf("esc leaves for the board: rc %v quit %v", m.rc != nil, quit)
 	}
-	if strings.Contains(m.View(), " / ▏") || !strings.Contains(ansiStrip(m.View()), "0 sessions") {
+	if m.rc != nil || !strings.Contains(ansiStrip(m.View()), "0 sessions") {
 		t.Errorf("the board again:\n%s", ansiStrip(m.View()))
 	}
 	// ? opens it again, ? with nothing typed leaves, ? after text is text
@@ -161,7 +161,7 @@ func TestBoardResumeClosedSession(t *testing.T) {
 	} {
 		m, e := newEmb(t, c.clients, c.env, c.stay)
 		m = openRecallOn(t, m)
-		m, quit := bpress(t, m, "enter")
+		m, quit := bpress(t, m, "enter", "enter") // the first keeps the (empty) query, the second resumes
 		dir := e.w.dir("shopcart")
 		if c.inPlace {
 			res := RecallOutcome(m)
@@ -207,7 +207,7 @@ func TestBoardRecallEnterOnARunningSession(t *testing.T) {
 	} {
 		m, e := newEmb(t, c.clients, c.env, c.stay, live)
 		m = openRecallOn(t, m)
-		m, quit := bpress(t, m, "enter")
+		m, quit := bpress(t, m, "enter", "enter")
 		if sw := tmuxCalls(e.r, "switch-client"); !reflect.DeepEqual(sw, [][]string{{"tmux", "switch-client", "-c", c.client, "-t", "%5"}}) {
 			t.Errorf("%s: switch-client %q", c.name, sw)
 		}
@@ -222,7 +222,7 @@ func TestBoardRecallEnterOnARunningSession(t *testing.T) {
 	bg := store.Session{ID: "b1", Name: "cart-fix", SessionID: "s-cart", Background: true, Status: "idle"}
 	m, e := newEmb(t, userOnly, paneEnv, false, bg)
 	m = openRecallOn(t, m)
-	bpress(t, m, "enter")
+	bpress(t, m, "enter", "enter")
 	if len(tmuxCalls(e.r, "new-window")) != 1 || !strings.Contains(strings.Join(tmuxCalls(e.r, "new-window")[0], " "), "claude attach b1") {
 		t.Errorf("a background session is attached: %q", e.r.calls)
 	}
@@ -233,7 +233,7 @@ func TestBoardRecallEnterRefusals(t *testing.T) {
 	m, e := newEmb(t, userOnly, popupEnv, false)
 	m = openRecallOn(t, m)
 	m = btype(t, m, "legacy")
-	m, quit := bpress(t, m, "enter")
+	m, quit := bpress(t, m, "enter", "enter")
 	if quit || m.rc == nil || !strings.Contains(rview(*m.rc), "directory is gone: /no/such/dir/gone-project") || len(e.r.calls) != 0 {
 		t.Errorf("gone: quit %v calls %q", quit, e.r.calls)
 	}
@@ -241,7 +241,7 @@ func TestBoardRecallEnterRefusals(t *testing.T) {
 	m, e = newEmb(t, userOnly, popupEnv, false)
 	m = openRecallOn(t, m)
 	m.rc.lookPath = func(string) (string, error) { return "", fmt.Errorf("no") }
-	if m, quit = bpress(t, m, "enter"); quit || !strings.Contains(rview(*m.rc), "claude not found in PATH") || len(e.r.calls) != 0 {
+	if m, quit = bpress(t, m, "enter", "enter"); quit || !strings.Contains(rview(*m.rc), "claude not found in PATH") || len(e.r.calls) != 0 {
 		t.Errorf("no command: quit %v calls %q", quit, e.r.calls)
 	}
 
@@ -249,7 +249,7 @@ func TestBoardRecallEnterRefusals(t *testing.T) {
 	e.r.tmuxFail = map[string]error{"new-window": fmt.Errorf("no space for another window")}
 	m = openRecallOn(t, m)
 	m = btype(t, m, "'coupon")
-	m, quit = bpress(t, m, "enter")
+	m, quit = bpress(t, m, "enter", "enter")
 	if quit || m.rc == nil || !strings.Contains(rview(*m.rc), "new-window: no space for another window") || len(tmuxCalls(e.r, "switch-client")) != 0 {
 		t.Errorf("window failed: quit %v rc %v", quit, m.rc != nil)
 	}
@@ -259,13 +259,13 @@ func TestBoardRecallEnterRefusals(t *testing.T) {
 	m, e = newEmb(t, userOnly, popupEnv, false)
 	e.r.tmuxOut["new-window"] = "\n"
 	m = openRecallOn(t, m)
-	if m, quit = bpress(t, m, "enter"); quit || m.rc == nil || !strings.Contains(rview(*m.rc), "did not say which pane") {
+	if m, quit = bpress(t, m, "enter", "enter"); quit || m.rc == nil || !strings.Contains(rview(*m.rc), "did not say which pane") {
 		t.Errorf("no pane back: quit %v", quit)
 	}
 	// and no client to switch: said too, the board stays
 	m, e = newEmb(t, "", popupEnv, false)
 	m = openRecallOn(t, m)
-	if m, quit = bpress(t, m, "enter"); quit || !strings.Contains(rview(*m.rc), "no tmux client") {
+	if m, quit = bpress(t, m, "enter", "enter"); quit || !strings.Contains(rview(*m.rc), "no tmux client") {
 		t.Errorf("no client: quit %v\n%s", quit, rview(*m.rc))
 	}
 }
@@ -322,7 +322,7 @@ func TestBoardIgnoresStaleRecallMessages(t *testing.T) {
 func TestBoardRecallEnterOnARunningSessionWithNoPane(t *testing.T) {
 	m, e := newEmb(t, userOnly, paneEnv, false, store.Session{ID: "x1", SessionID: "s-cart", Status: "working"})
 	m = openRecallOn(t, m)
-	m, quit := bpress(t, m, "enter")
+	m, quit := bpress(t, m, "enter", "enter")
 	if quit || m.rc == nil || !strings.Contains(rview(*m.rc), "cart-fix is running") || len(e.r.calls) != 0 {
 		t.Errorf("quit %v calls %q", quit, e.r.calls)
 	}
@@ -364,7 +364,7 @@ func TestBoardRecallFailedWindowIsNotRepeated(t *testing.T) {
 	m, e := newEmb(t, userOnly, popupEnv, false)
 	e.r.tmuxFail = map[string]error{"new-window": fmt.Errorf("no space for another window")}
 	m = openRecallOn(t, m)
-	m, _ = bpress(t, m, "enter")
+	m, _ = bpress(t, m, "enter", "enter")
 	if !strings.Contains(rview(*m.rc), "no space for another window") {
 		t.Fatalf("the failure is said:\n%s", rview(*m.rc))
 	}
@@ -391,7 +391,7 @@ func TestBoardRecallEnterWhileTheWindowIsBeingMade(t *testing.T) {
 			}
 			m.cfg = c
 		}
-		m = openRecallOn(t, m)
+		m, _ = bpress(t, openRecallOn(t, m), "enter") // the query is kept: now enter resumes
 		tm, first := m.Update(key(jump))
 		if first == nil {
 			t.Fatalf("%s: no window asked for", jump)
@@ -401,11 +401,14 @@ func TestBoardRecallEnterWhileTheWindowIsBeingMade(t *testing.T) {
 				t.Errorf("%s then %s: a second window is asked for", jump, k)
 			}
 		}
-		// the rest of the screen is the user's meanwhile: they can type, and esc leaves it (the window comes anyway)
-		if typed, _ := tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}); typed.(Model).rc.query != "x" {
-			t.Errorf("%s: typing while the window is being made is held back", jump)
+		// the rest of the screen is the user's meanwhile: / edits the query again, and esc leaves it
+		// (the window comes anyway)
+		if typing, _ := tm.Update(key("/")); typing.(Model).rc.locked {
+			t.Errorf("%s: / while the window is being made is held back", jump)
 		}
-		if left, _ := tm.Update(key("esc")); left.(Model).rc != nil {
+		if once, _ := tm.Update(key("esc")); once.(Model).rc == nil || once.(Model).rc.locked {
+			t.Errorf("%s: esc while the window is being made does not give the input back", jump)
+		} else if left, _ := once.Update(key("esc")); left.(Model).rc != nil {
 			t.Errorf("%s: esc while the window is being made does not leave", jump)
 		}
 		m = tm.(Model)
@@ -425,10 +428,11 @@ func TestBoardRecallEnterWhileTheWindowIsBeingMade(t *testing.T) {
 func TestBoardRecallWaitSurvivesLeavingTheScreen(t *testing.T) {
 	m, e := newEmb(t, userOnly, popupEnv, false)
 	e.r.tmuxFail = map[string]error{"new-window": fmt.Errorf("no space for another window")}
-	m = openRecallOn(t, m)
+	m, _ = bpress(t, openRecallOn(t, m), "enter")
 	tm, first := m.Update(key("enter"))
+	tm, _ = tm.Update(key("esc")) // the input again
 	tm, _ = tm.Update(key("esc")) // back to the board
-	m = openRecallOn(t, tm.(Model))
+	m, _ = bpress(t, openRecallOn(t, tm.(Model)), "enter")
 	if _, again := m.Update(key("enter")); again != nil {
 		t.Error("enter on the reopened screen asked for a second window")
 	}
@@ -438,15 +442,14 @@ func TestBoardRecallWaitSurvivesLeavingTheScreen(t *testing.T) {
 	}
 	// the answer ended the wait for screens opened later too
 	m, _ = bpress(t, m, "esc", "esc")
-	m = openRecallOn(t, m)
+	m, _ = bpress(t, openRecallOn(t, m), "enter")
 	if _, again := m.Update(key("enter")); again == nil {
 		t.Error("enter does nothing on a screen opened after the answer")
 	}
 	// and so does an answer that is a window (--stay: the board is still there)
 	m, e = newEmb(t, stayClients, stayEnv, true)
-	m = openRecallOn(t, m)
-	m, _ = bpress(t, m, "enter")
-	m = openRecallOn(t, m)
+	m, _ = bpress(t, openRecallOn(t, m), "enter", "enter")
+	m, _ = bpress(t, openRecallOn(t, m), "enter")
 	if _, again := m.Update(key("enter")); again == nil || len(tmuxCalls(e.r, "new-window")) != 1 {
 		t.Errorf("after a window was made: enter asks again %v, new-window %d", again != nil, len(tmuxCalls(e.r, "new-window")))
 	}
@@ -483,7 +486,7 @@ func TestBoardRecallWindowNameIsTheTitle(t *testing.T) {
 	}
 	m = openRecallOn(t, m)
 	m = btype(t, m, "widget quota")
-	bpress(t, m, "enter")
+	bpress(t, m, "enter", "enter")
 	nw := tmuxCalls(e.r, "new-window")
 	if len(nw) != 1 || !strings.Contains(strings.Join(nw[0], "\x00"), "-n\x00renew widget quota\x00") {
 		t.Errorf("new-window %q", nw)

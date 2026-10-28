@@ -176,7 +176,7 @@ func TestRecallListAndTyping(t *testing.T) {
 		t.Errorf("snippet %+v", r.Snippet)
 	}
 	v := rview(m)
-	for _, want := range []string{" / ▏", "4 ", "cart-fix", "shopcart", "main", "1h", "3 ", "add a regression test for the coupon", "legacy", "1d"} {
+	for _, want := range []string{" / ", "4 ", "cart-fix", "shopcart", "main", "1h", "3 ", "add a regression test for the coupon", "legacy", "1d"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view lacks %q:\n%s", want, v)
 		}
@@ -233,39 +233,39 @@ func TestRecallEnter(t *testing.T) {
 	w := newRWorld(t)
 	w.fill()
 	m := w.model()
-	m, quit := rpress(t, m, "enter")
+	m, quit := rpress(t, m, "enter", "enter") // the first keeps the query (none here), the second resumes
 	res := RecallOutcome(m)
 	if !quit || res == nil || res.Dir != w.dir("shopcart") || strings.Join(res.Argv, " ") != "claude --resume s-cart" {
 		t.Errorf("claude: quit %v %+v", quit, res)
 	}
 	m = w.model()
-	m, quit = rpress(t, m, "down", "enter") // pi
+	m, quit = rpress(t, m, "down", "enter", "enter") // pi
 	res = RecallOutcome(m)
 	if !quit || res == nil || res.Dir != w.dir("api") || len(res.Argv) != 3 || res.Argv[0] != "pi" || res.Argv[1] != "--session" || !strings.HasSuffix(res.Argv[2], "_p-api.jsonl") {
 		t.Errorf("pi: quit %v %+v", quit, res)
 	}
 
 	m = w.model()
-	m, quit = rpress(t, rtype(t, m, "legacy"), "enter")
+	m, quit = rpress(t, rtype(t, m, "legacy"), "enter", "enter")
 	if quit || RecallOutcome(m) != nil || !strings.Contains(rview(m), "directory is gone: /no/such/dir/gone-project") {
 		t.Errorf("gone: quit %v\n%s", quit, rview(m))
 	}
 
 	m = w.model()
 	m.lookPath = func(string) (string, error) { return "", fmt.Errorf("no") }
-	m, quit = rpress(t, m, "enter")
+	m, quit = rpress(t, m, "enter", "enter")
 	if quit || RecallOutcome(m) != nil || !strings.Contains(rview(m), "claude not found in PATH") {
 		t.Errorf("no claude: quit %v\n%s", quit, rview(m))
 	}
 
 	live := store.Session{ID: "x1", SessionID: "s-cart", TmuxPane: "%5", Status: "working"}
 	m = w.model(live)
-	m, quit = rpress(t, m, "enter")
+	m, quit = rpress(t, m, "enter", "enter")
 	if quit || RecallOutcome(m) != nil || !strings.Contains(rview(m), "cart-fix is running (%5): jump to it from the board") {
 		t.Errorf("running: quit %v\n%s", quit, rview(m))
 	}
 	m = w.model(store.Session{SessionID: "s-cart"})
-	if m, _ = rpress(t, m, "enter"); !strings.Contains(rview(m), "cart-fix is running: ") && !strings.Contains(rview(m), "cart-fix is running") || strings.Contains(rview(m), "running (") {
+	if m, _ = rpress(t, m, "enter", "enter"); !strings.Contains(rview(m), "cart-fix is running: ") && !strings.Contains(rview(m), "cart-fix is running") || strings.Contains(rview(m), "running (") {
 		t.Errorf("running with no pane:\n%s", rview(m))
 	}
 	// a running pi session is found by its transcript
@@ -273,7 +273,7 @@ func TestRecallEnter(t *testing.T) {
 	if _, ok := m.liveOf(m.ix.Entries()[1]); !ok {
 		t.Error("by transcript")
 	}
-	if _, quit := rpress(t, rtype(t, w.model(), "zzzzqqq"), "enter"); quit {
+	if _, quit := rpress(t, rtype(t, w.model(), "zzzzqqq"), "enter", "enter"); quit {
 		t.Error("enter with nothing to resume does nothing")
 	}
 }
@@ -498,8 +498,8 @@ func TestRecallPreview(t *testing.T) {
 	if strings.Contains(v, "sentence number 0") || strings.Contains(v, "sentence number 8") {
 		t.Errorf("what is between shows as a note:\n%s", v)
 	}
-	if !strings.Contains(v, "╭") || !strings.Contains(v, "╰") {
-		t.Error("the box")
+	if !strings.Contains(v, "┏") || !strings.Contains(v, "┗") || strings.Count(v, "┏") != 3 {
+		t.Error("the three boxes")
 	}
 	// the matching characters are lit in the list and the preview
 	if raw := m.View(); strings.Count(raw, "48;2;242;208;107") < 2 {
@@ -527,10 +527,10 @@ func TestRecallPreview(t *testing.T) {
 	}
 	// too narrow for a preview: only the list
 	tm, _ := w.model().Update(tea.WindowSizeMsg{Width: 99, Height: 30})
-	if v := rview(tm.(recallModel)); strings.Contains(v, "╭") || !strings.Contains(v, "pv") {
+	if v := rview(tm.(recallModel)); strings.Count(v, "┏") != 2 || !strings.Contains(v, "pv") {
 		t.Errorf("99 columns:\n%s", v)
 	}
-	if tm, _ := w.model().Update(tea.WindowSizeMsg{Width: 100, Height: 30}); !strings.Contains(rview(tm.(recallModel)), "╭") {
+	if tm, _ := w.model().Update(tea.WindowSizeMsg{Width: 100, Height: 30}); strings.Count(rview(tm.(recallModel)), "┏") != 3 {
 		t.Error("100 columns has it")
 	}
 }
@@ -551,6 +551,12 @@ func TestRecallPreviewScroll(t *testing.T) {
 	if m, _ = rpress(t, m, "pgup", "pgup"); m.pvScroll != 0 {
 		t.Errorf("pgup stops at the top: %d", m.pvScroll)
 	}
+	if m, _ = rpress(t, m, "ctrl+p", "ctrl+p"); m.pvScroll != 0 { // T81: ctrl+n / ctrl+p are the default pgdown / pgup too
+		t.Errorf("ctrl+p: %d", m.pvScroll)
+	}
+	if m, _ = rpress(t, m, "ctrl+n"); m.pvScroll != 3 {
+		t.Errorf("ctrl+n: %d", m.pvScroll)
+	}
 	m, _ = rpress(t, m, "pgdown", "pgdown")
 	if m, _ = rpress(t, m, "down"); m.pvScroll != 0 || m.sel != 1 { // another session: its preview from the top
 		t.Errorf("down: scroll %d, cursor %d", m.pvScroll, m.sel)
@@ -565,8 +571,8 @@ func TestRecallIndexing(t *testing.T) {
 	m.indexing = true
 	m.progress.done.Store(3)
 	m.progress.total.Store(10)
-	if v := rview(m); !strings.Contains(v, "4 · indexing 3 / 10") {
-		t.Errorf("top bar: %s", strings.Split(v, "\n")[0])
+	if v := rview(m); !strings.Contains(strings.Split(v, "\n")[1], "indexing 3 / 10") || !strings.Contains(v, " 1/4 ") {
+		t.Errorf("the input box: %s", strings.Split(v, "\n")[1])
 	}
 	m.results, m.indexing = nil, true
 	if v := rview(m); strings.Contains(v, "no session matches") {
@@ -577,8 +583,8 @@ func TestRecallIndexing(t *testing.T) {
 	if m.indexing || len(m.results) != 4 || !strings.Contains(rview(m), "some transcripts could not be read: one bad transcript") {
 		t.Errorf("done: %v %d\n%s", m.indexing, len(m.results), rview(m))
 	}
-	if v := strings.Split(rview(m), "\n")[0]; strings.Contains(v, "indexing") || !strings.HasSuffix(strings.TrimSpace(v), "4") {
-		t.Errorf("top bar after: %q", v)
+	if v := strings.Split(rview(m), "\n")[1]; strings.Contains(v, "indexing") || !strings.Contains(rview(m), " 1/4 ") {
+		t.Errorf("input box after: %q", v)
 	}
 	// a tick picks up what the index has got since, and the cursor stays on its session
 	m, _ = rpress(t, m, "down")
@@ -685,16 +691,31 @@ func TestRecallFooterNamesOnlyKeysThatAct(t *testing.T) {
 	}
 	m.cfg = c
 	f := footerOf(m.View())
-	for _, want := range []string{"enter resume", "ctrl+q scope:all", "alt+y copy", "esc quit"} {
+	for _, want := range []string{"enter keep the query", "down/up move", "ctrl+q scope:all", "alt+y copy", "esc quit"} {
 		if !strings.Contains(f, want) {
 			t.Errorf("footer lacks %q: %s", want, f)
 		}
 	}
-	for _, not := range []string{"j resume", "f filter", "s scope", " y copy", "o open", "open"} {
+	for _, not := range []string{"j resume", "j keep", "f filter", "s scope", " y copy", "o open", "open", "resume"} {
 		if strings.Contains(f, not) {
 			t.Errorf("footer has %q: %s", not, f)
 		}
 	}
+	// a kept query is a list: every key of [keys] acts, the letters too (n / N are not among them)
+	if strings.Contains(footerOf(rtype(t, m, "x").View()), "next") {
+		t.Error("no next / prev in the input's footer")
+	}
+	m.locked = true
+	f = footerOf(m.View())
+	for _, want := range []string{"j resume", "/ edit", "f filter", "s scope:all", "y copy", "o open", "esc clear"} {
+		if !strings.Contains(f, want) {
+			t.Errorf("locked footer lacks %q: %s", want, f)
+		}
+	}
+	if strings.Contains(f, "next") {
+		t.Errorf("n / N are not keys of the list: %s", f)
+	}
+	m.locked = false
 	// the panel is not text: its letters are the keys, and they are named
 	m.panel = true
 	if f := footerOf(m.View()); !strings.Contains(f, "space tick") {
@@ -708,19 +729,19 @@ func TestRecallChinese(t *testing.T) {
 	w.fill()
 	m := w.model(store.Session{SessionID: "s-cart", TmuxPane: "%5"})
 	v := rview(m)
-	for _, want := range []string{"enter 恢复", "ctrl+f 筛选", "ctrl+t 范围:全部", "ctrl+y 复制", "ctrl+o 打开", "esc 退出"} {
+	for _, want := range []string{"enter 保留查询", "ctrl+f 筛选", "ctrl+t 范围:全部", "ctrl+y 复制", "ctrl+o 打开", "esc 退出"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("footer lacks %q:\n%s", want, footerOf(m.View()))
 		}
 	}
-	if m, _ = rpress(t, m, "enter"); !strings.Contains(rview(m), "cart-fix 在跑（%5）：到看板里跳过去") {
+	if m, _ = rpress(t, m, "enter", "enter"); !strings.Contains(rview(m), "cart-fix 在跑（%5）：到看板里跳过去") {
 		t.Errorf("running:\n%s", rview(m))
 	}
 	m, _ = rpress(t, m, "ctrl+f")
 	if v := rview(m); !strings.Contains(v, "来源") || !strings.Contains(v, "范围") || !strings.Contains(v, "(•) 全部历史") || !strings.Contains(v, "( ) 当前项目") || !strings.Contains(v, "space 勾选 · a 全选 · A 清空 · esc 收起") {
 		t.Errorf("panel:\n%s", v)
 	}
-	m, _ = rpress(t, m, "esc")
+	m, _ = rpress(t, m, "esc", "/") // the panel closes; / is the input again
 	m = rtype(t, m, "zzzzqqq")
 	if v := rview(m); !strings.Contains(v, "没有匹配的会话") || !strings.Contains(footerOf(m.View()), "esc 清除") {
 		t.Errorf("empty:\n%s", v)
@@ -810,7 +831,7 @@ func TestRecallPreviewScrollIsBounded(t *testing.T) {
 	max := m.previewScrollMax(r)
 	box := strings.Split(rview(m), "\n")
 	for i, l := range box {
-		if strings.Contains(l, "╰") && !strings.Contains(box[i-1], "bounds 29") {
+		if i > 3 && strings.Contains(l, "┗") && !strings.Contains(box[i-1], "bounds 29") {
 			t.Errorf("at the end of the scroll the last sentence is the last row of the box, not %q", box[i-1])
 		}
 	}
@@ -904,13 +925,13 @@ func TestRecallListScrolls(t *testing.T) {
 		w.claude(fmt.Sprintf("s%02d", i), w.dir("shopcart"), fmt.Sprintf("session-%02d", i), time.Duration(i+1)*time.Minute, fmt.Sprintf("u: sentence %d", i))
 	}
 	m := w.model()
-	tm, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 10})
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 12}) // 5 rows in the list's box
 	m = tm.(recallModel)
 	for range 9 {
 		m, _ = rpress(t, m, "down")
 	}
 	v := rview(m)
-	if !strings.Contains(v, "▌○ session-09") || strings.Contains(v, "session-00") || m.top != 3 {
+	if !strings.Contains(v, "▌○ session-09") || strings.Contains(v, "session-00") || m.top != 5 {
 		t.Errorf("top %d:\n%s", m.top, v)
 	}
 	for range 20 {
@@ -926,7 +947,7 @@ func TestRecallListScrolls(t *testing.T) {
 		t.Errorf("the start: %d top %d", m.sel, m.top)
 	}
 	m, _ = rpress(t, m, "ctrl+d")
-	if m.sel != 3 { // half of the 7 rows
+	if m.sel != 2 { // half of the 5 rows
 		t.Errorf("ctrl+d: %d", m.sel)
 	}
 	if m, _ = rpress(t, m, "ctrl+u"); m.sel != 0 {
@@ -977,7 +998,7 @@ func TestRecallMessageGoesAtTheNextKey(t *testing.T) {
 	w := newRWorld(t)
 	w.fill()
 	m := w.model()
-	m, _ = rpress(t, rtype(t, m, "legacy"), "enter")
+	m, _ = rpress(t, rtype(t, m, "legacy"), "enter", "enter")
 	if !strings.Contains(rview(m), "directory is gone") {
 		t.Fatal("no message")
 	}
@@ -991,7 +1012,7 @@ func TestRecallByNameShowsNoHits(t *testing.T) {
 	w := newRWorld(t)
 	w.claude("s-pv", w.dir("shopcart"), "pv", time.Hour, "u: nothing here about it")
 	m := rtype(t, w.model(), "'pv")
-	if row := strings.Split(rview(m), "\n")[1]; !strings.Contains(row, "  - nothing here") {
+	if row := strings.Split(rview(m), "\n")[4]; !strings.Contains(row, "  - nothing here") {
 		t.Errorf("row %q", row)
 	}
 }
@@ -1001,7 +1022,7 @@ func TestRecallSnippetShowsTheMatch(t *testing.T) {
 	w := newRWorld(t)
 	w.claude("s-long", w.dir("shopcart"), "long", time.Hour, "u: "+strings.Repeat("padding ", 12)+"the needle is here and then "+strings.Repeat("more ", 20))
 	m := rtype(t, w.model(), "'needle")
-	if row := strings.Split(rview(m), "\n")[1]; !strings.Contains(row, "needle") || !strings.Contains(row, "…") {
+	if row := strings.Split(rview(m), "\n")[4]; !strings.Contains(row, "needle") || !strings.Contains(row, "…") {
 		t.Errorf("row %q", row)
 	}
 }
@@ -1014,7 +1035,7 @@ func TestRecallSnippetColorByRole(t *testing.T) {
 	count := func(line string) int {
 		w := newRWorld(t)
 		w.claude("s", w.dir("shopcart"), "x", time.Hour, line)
-		return strings.Count(strings.Split(w.model().View(), "\n")[1], "38;2;97;113;163")
+		return strings.Count(strings.Split(w.model().View(), "\n")[4], "38;2;97;113;163")
 	}
 	if you, agent := count("u: a sentence that you said"), count("a: a sentence that the agent said"); agent != you+1 {
 		t.Errorf("muted spans: yours %d, the agent's %d", you, agent)

@@ -82,48 +82,77 @@ func stateColor(st string) lipgloss.Color {
 	return cMuted
 }
 
+// thickBox draws lines in a thick border of color c, w wide and h tall (borders included); the
+// title is set into the top border. Lines are cut to the box and padded to it.
+func thickBox(c lipgloss.Color, title string, lines []string, w, h int) []string {
+	if w < 2 || h < 2 {
+		return nil
+	}
+	inner := w - 2
+	top := fg(c, "┏"+strings.Repeat("━", inner)+"┓")
+	if title != "" && inner >= 6 {
+		t := ansi.Truncate(title, inner-4, "…")
+		top = fg(c, "┏━ ") + t + "\x1b[0m" + fg(c, " "+strings.Repeat("━", w-5-ansi.StringWidth(t))+"┓")
+	}
+	out := []string{top}
+	for i := range h - 2 {
+		l := ""
+		if i < len(lines) {
+			l = lines[i]
+		}
+		out = append(out, fg(c, "┃")+pad(ansi.Truncate(l, inner, ""), inner)+"\x1b[0m"+fg(c, "┃"))
+	}
+	return append(out, fg(c, "┗"+strings.Repeat("━", inner)+"┛"))
+}
+
 func (m recallModel) View() string {
 	if m.w == 0 {
 		return ""
 	}
-	bodyH := m.listRows()
-	lw := m.listW()
-	list := m.listLines(bodyH, lw)
-	var right []string
-	if m.previewOn() {
-		right = m.previewLines(bodyH, m.w-lw)
-	}
-	lines := []string{m.topBar()}
-	for i := range bodyH {
-		l := ""
-		if i < len(list) {
-			l = list[i]
+	lines := m.inputBox()
+	if bh := m.bodyH(); bh > 0 {
+		lw := m.listW()
+		body := thickBox(cRecallList, m.listTitle(), m.listLines(bh-2, lw-2), lw, bh)
+		if m.previewOn() {
+			title, content := m.previewParts(bh - 2)
+			pv := thickBox(cRecallPreview, title, content, m.w-lw, bh)
+			for i := range body {
+				body[i] += pv[i]
+			}
 		}
-		if right != nil {
-			l = pad(ansi.Truncate(l, lw, ""), lw) + right[i]
+		lines = append(lines, body...)
+		if m.panel {
+			lines = strings.Split(overlayAt(strings.Join(lines, "\n"), m.panelBox(), 2, 4, m.w), "\n")
 		}
-		lines = append(lines, l)
 	}
-	if m.panel {
-		lines = strings.Split(overlayAt(strings.Join(lines, "\n"), m.panelBox(), 1, 1, m.w), "\n")
+	if m.msgRow() {
+		lines = append(lines, ansi.Truncate(firstLine(m.msg), m.w, "…"))
 	}
-	lines = append(lines, ansi.Truncate(firstLine(m.msg), m.w, "…"), m.footer())
-	return strings.Join(lines, "\n")
+	if len(lines) >= m.h {
+		lines = lines[:max(m.h-1, 0)]
+	}
+	return strings.Join(append(lines, m.footer()), "\n")
 }
 
-// topBar is the query, and on the right how many sessions match, or how far the index is.
-func (m recallModel) topBar() string {
-	left := fg(cFocus, " / ") + m.query + "▏"
+// listTitle is where the cursor is in the list and how long it is: "3/42", "0/0" for none.
+func (m recallModel) listTitle() string {
+	n := 0
+	if len(m.results) > 0 {
+		n = m.sel + 1
+	}
+	return fmt.Sprintf("%d/%d", n, len(m.results))
+}
+
+// inputBox is the query in a box of its own; on the right how far the index is, while it is built.
+// The caret is there while the input has the keys.
+func (m recallModel) inputBox() []string {
 	var right string
 	if m.indexing {
 		right = fg(cMuted, i18n.T("recall.indexing", m.progress.done.Load(), m.progress.total.Load())+" ")
-	} else {
-		right = fg(cMuted, fmt.Sprintf("%d ", len(m.results)))
 	}
-	if m.indexing && len(m.results) > 0 {
-		right = fg(cMuted, fmt.Sprintf("%d · ", len(m.results))) + right
-	}
-	return spread(left, right, m.w, "…")
+	inner := m.w - 2
+	left := fg(cFocus, " / ") + queryView(m.query, m.qpos, !m.locked, inner-3-ansi.StringWidth(right)-1)
+	return thickBox(cRecallInput, "", []string{spread(left, right, inner, "…")}, m.w, 3)
 }
 
 // footer is the keys, each with its first configured key; esc closes the panel, clears the query
@@ -145,8 +174,22 @@ func (m recallModel) footer() string {
 	switch {
 	case m.panel:
 		parts = append(parts, i18n.T("recall.panel.hint", k("recall_toggle"), k("recall_all"), k("recall_none"), "esc"))
-	default:
-		add(m.cfg.FirstCtl("jump", "enter"), "recall.footer.resume")
+	case m.locked: // a kept query: every key of [keys] acts
+		add(k("jump"), "recall.footer.resume")
+		if d, u := k("down"), k("up"); d != "" && u != "" {
+			parts = append(parts, i18n.T("recall.footer.move", d, u))
+		}
+		add(k("search"), "recall.footer.edit")
+		add(k("recall_filter"), "recall.footer.filter")
+		add(k("recall_scope"), "recall.footer.scope", i18n.T("recall.scope_short."+scope))
+		add(k("recall_copy"), "recall.footer.copy")
+		add(k("recall_open"), "recall.footer.open")
+		parts = append(parts, i18n.T("search.clear", "esc"))
+	default: // the input: enter keeps the query, resuming is for the list
+		add(m.cfg.FirstCtl("jump", "enter"), "recall.footer.keep")
+		if d, u := m.cfg.FirstCtl("down", ""), m.cfg.FirstCtl("up", ""); d != "" && u != "" {
+			parts = append(parts, i18n.T("recall.footer.move", d, u))
+		}
 		add(kc("recall_filter"), "recall.footer.filter")
 		add(kc("recall_scope"), "recall.footer.scope", i18n.T("recall.scope_short."+scope))
 		add(kc("recall_copy"), "recall.footer.copy")
@@ -289,37 +332,26 @@ func (m recallModel) row(r recall.Result, sel bool, nw, pw, bw, sw int, now time
 
 // previewLines is the right side: the session's card, and what matched in it with a line of what was
 // said before and after, scrolled by pvScroll.
-func (m recallModel) previewLines(h, w int) []string {
+func (m recallModel) previewParts(rows int) (title string, content []string) {
 	r, ok := m.selected()
-	inner := previewInner(w)
-	border := cDim
-	title := ""
-	var content []string
-	if ok {
-		title = fg(cName, r.Title())
-		if s, live := m.liveOf(r.Entry); live {
-			st := stateOf(s)
-			title += fg(cMuted, " · ") + fg(stateColor(st), i18n.T("status."+st))
-		}
-		content = m.previewContent(r, inner)
-		off := min(m.pvScroll, max(len(content)-(h-3), 0))
-		content = content[off:]
+	if !ok {
+		return "", nil
 	}
-	out := []string{pad(ansi.Truncate(" "+title, w, "…"), w)}
-	out = append(out, " "+fg(border, "╭"+strings.Repeat("─", inner+2)+"╮"))
-	for i := range max(h-3, 0) {
-		l := ""
-		if i < len(content) {
-			l = content[i]
-		}
-		out = append(out, " "+fg(border, "│")+" "+pad(ansi.Truncate(l, inner, "")+"\x1b[0m", inner)+"\x1b[0m "+fg(border, "│"))
+	title = fg(cName, r.Title())
+	if s, live := m.liveOf(r.Entry); live {
+		st := stateOf(s)
+		title += fg(cMuted, " · ") + fg(stateColor(st), i18n.T("status."+st))
 	}
-	out = append(out, " "+fg(border, "╰"+strings.Repeat("─", inner+2)+"╯"))
-	for len(out) < h {
-		out = append(out, "")
+	all := m.previewContent(r, m.pvInner())
+	off := min(m.pvScroll, max(len(all)-rows, 0))
+	for _, l := range all[off:] {
+		content = append(content, " "+l)
 	}
-	return out[:h]
+	return title, content
 }
+
+// pvInner is the columns of text in the preview: its box less the borders and a space either side.
+func (m recallModel) pvInner() int { return max(m.w-m.listW()-4, 1) }
 
 // previewContent: the card (where, when, which agent), then the sentences.
 func (m recallModel) previewContent(r recall.Result, w int) []string {
@@ -334,7 +366,7 @@ func (m recallModel) previewContent(r recall.Result, w int) []string {
 
 // previewScrollMax is how far the preview of r can be scrolled down.
 func (m recallModel) previewScrollMax(r recall.Result) int {
-	return max(len(m.previewContent(r, previewInner(m.w-m.listW())))-(m.listRows()-3), 0)
+	return max(len(m.previewContent(r, m.pvInner()))-m.listRows(), 0)
 }
 
 // buildPreview is previewContent without the cache.

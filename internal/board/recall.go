@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -50,6 +49,10 @@ type recallModel struct {
 	pick     *recallPick // embedded: what enter chose, for the board to act on
 
 	query    string
+	qpos     int       // the caret in it, in runes (editQuery)
+	clickRow int       // the row of the last click on the list, for the double click
+	clickAt  time.Time // and when
+	locked   bool      // the query is kept (enter in the input): j / k choose, enter resumes, / edits again
 	results  []recall.Result
 	sel, top int
 	sources  []string        // those that have a session here
@@ -102,7 +105,7 @@ func NewRecall(ix *recall.Index, cfg *config.Config, live []store.Session, proje
 }
 
 func newRecallModel(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) recallModel {
-	m := recallModel{ix: ix, cfg: cfg, live: live, project: project, query: query, progress: &recallProgress{}, pvCache: &pvCache{}, indexing: true,
+	m := recallModel{ix: ix, cfg: cfg, live: live, project: project, query: query, qpos: len([]rune(query)), locked: query != "", progress: &recallProgress{}, pvCache: &pvCache{}, indexing: true,
 		now: time.Now, lookPath: exec.LookPath, copyToClip: copyToClipboard, unticked: map[string]bool{},
 		statDir: func(p string) error { _, err := os.Stat(p); return err },
 		editor: func() string {
@@ -135,7 +138,7 @@ func (m recallModel) Init() tea.Cmd {
 // is returned for the caller to run once the terminal is theirs again.
 func RunRecall(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) (*RecallResult, error) {
 	useConfig(cfg)
-	m, err := tea.NewProgram(NewRecall(ix, cfg, live, project, query), tea.WithAltScreen()).Run()
+	m, err := tea.NewProgram(NewRecall(ix, cfg, live, project, query), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return RecallOutcome(m), err
 }
 
@@ -167,10 +170,13 @@ func (m recallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.qgen == m.qgen { // an answer to a query that was typed over is not shown
 			m = m.show(msg.results, msg.keep)
 		}
-	case recallEditedMsg:
+	case tea.MouseMsg:
+		return m.mouse(msg)
+	case recallEditedMsg: // bubbletea v1 leaves the mouse off after ExecProcess
 		if msg.err != nil {
 			m.msg = fg(cRed, " "+firstLine(msg.err.Error()))
 		}
+		return m, tea.EnableMouseCellMotion
 	case tea.KeyMsg:
 		return m.key(msg)
 	}
@@ -248,7 +254,24 @@ func (m recallModel) visible() recallModel {
 	return m
 }
 
-func (m recallModel) listRows() int { return max(m.h-3, 1) }
+// The screen, top down: the query box (3 rows), the list and the preview side by side in boxes of
+// bodyH rows (borders included), the message line, the footer. Low terminals lose the message line,
+// then the boxes, so that nothing is taller than the terminal.
+func (m recallModel) bodyH() int {
+	if rows := m.h - 3 - 1 - 1; rows >= 3 {
+		return rows
+	}
+	if rows := m.h - 3 - 1; rows >= 3 {
+		return rows
+	}
+	return 0
+}
+
+// msgRow: there is room for the message line.
+func (m recallModel) msgRow() bool { return m.h >= 8 || m.bodyH() == 0 && m.h >= 5 }
+
+// listRows is the sessions the list shows at once: its box less the two borders.
+func (m recallModel) listRows() int { return max(m.bodyH()-2, 1) }
 
 func (m recallModel) previewOn() bool { return m.w >= previewMinTerm }
 
@@ -266,20 +289,82 @@ func (m recallModel) move(d int) recallModel {
 	return m.visible()
 }
 
-// esc: the panel closes, then the query clears, then the screen ends.
+// esc: the panel closes, then a kept query is dropped (a typed one too) and the input has the keys
+// again, then the screen ends.
 func (m recallModel) back() (tea.Model, tea.Cmd) {
 	switch {
 	case m.panel:
 		m.panel = false
-	case m.query != "":
-		m.query = ""
+	case m.locked || m.query != "":
+		m.locked, m.query, m.qpos = false, "", 0
 		return m.search(false)
-	case m.embedded:
-		m.leave = true
 	default:
-		return m, tea.Quit
+		return m.end()
 	}
 	return m, nil
+}
+
+// scrollPreview moves the preview d lines down (up when negative), to its ends and no further.
+func (m recallModel) scrollPreview(d int) recallModel {
+	if r, ok := m.selected(); ok && m.previewOn() {
+		m.pvScroll = min(max(m.pvScroll+d, 0), m.previewScrollMax(r))
+	}
+	return m
+}
+
+// doubleClick is how soon the second click on a row is a confirmation (bubbletea has no such event).
+const doubleClick = 400 * time.Millisecond
+
+// mouse: a click on a session selects it (the input / kept state does not change), a second click on
+// the same one within doubleClick confirms it like enter does; the wheel moves the cursor a row over
+// the list (no coming round) and scrolls the preview three lines over the preview. The query box,
+// the borders, the message line and the footer do nothing, nor does anything while the filter panel
+// is open. Where things are is what View draws: the boxes start at row 3, a box's first line of
+// content is under its top border.
+func (m recallModel) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
+	bh, lw := m.bodyH(), m.listW()
+	if m.panel || e.Action != tea.MouseActionPress || bh == 0 || e.Y < 3 || e.Y >= 3+bh {
+		return m, nil
+	}
+	inList := e.X < lw
+	switch e.Button {
+	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+		d := 1
+		if e.Button == tea.MouseButtonWheelUp {
+			d = -1
+		}
+		if inList {
+			return m.move(d), nil
+		}
+		return m.scrollPreview(3 * d), nil
+	case tea.MouseButtonLeft:
+		row := e.Y - 4
+		if !inList || e.X < 1 || e.X > lw-2 || row < 0 || row >= m.listRows() || m.top+row >= len(m.results) {
+			return m, nil
+		}
+		i, now := m.top+row, m.now()
+		double := !m.clickAt.IsZero() && m.clickRow == i && now.Sub(m.clickAt) <= doubleClick
+		m.msg, m.sel, m.pvScroll = "", i, 0
+		if !double {
+			m.clickRow, m.clickAt = i, now
+			return m, nil
+		}
+		m.clickAt = time.Time{}
+		if m.building || m.searching { // as enter: a window is being made, or the list is not the query's yet
+			return m, nil
+		}
+		return m.enter()
+	}
+	return m, nil
+}
+
+// end leaves the screen: back to the board when it is in one, else the program ends.
+func (m recallModel) end() (tea.Model, tea.Cmd) {
+	if m.embedded {
+		m.leave = true
+		return m, nil
+	}
+	return m, tea.Quit
 }
 
 func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -291,63 +376,72 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if s == "esc" || m.cfg.IsCtl("quit", s) {
 		return m.back()
 	}
-	// the key that opened this screen from the board closes it: a character only when nothing is typed
-	if m.embedded && (m.cfg.IsCtl("recall", s) || m.query == "" && !m.panel && m.cfg.Is("recall", s)) {
+	// the key that opened this screen from the board closes it: a character only when it is not text
+	// (a kept query, or nothing typed yet)
+	if m.embedded && (m.cfg.IsCtl("recall", s) || (m.locked || m.query == "") && !m.panel && m.cfg.Is("recall", s)) {
 		m.leave = true
 		return m, nil
 	}
 	if m.panel {
 		return m.panelKey(s)
 	}
+	// the two states: typing owns the letters (only keys that are not characters act), a kept query
+	// is a list to choose from and every key of [keys] acts
+	act := m.cfg.IsCtl
+	if m.locked {
+		act = m.cfg.Is
+		if m.cfg.Is("quit", s) { // esc went back above; q and the like end the screen
+			return m.end()
+		}
+	}
+	enter := s == "enter" || act("jump", s)
 	// the list on the screen is not the query's yet: not the sessions to act on; and a window is
-	// being made for the one picked: not a second one for it
-	resume := s == "enter" || m.cfg.IsCtl("jump", s)
-	if m.building && resume || m.searching && (resume || m.cfg.IsCtl("recall_copy", s) || m.cfg.IsCtl("recall_open", s)) {
+	// being made for the one picked: not a second one for it (enter in the input only keeps the query)
+	if m.locked && enter && (m.building || m.searching) || m.searching && (act("recall_copy", s) || act("recall_open", s)) {
 		return m, nil
 	}
 	switch {
-	case s == "enter" || m.cfg.IsCtl("jump", s):
-		return m.enter()
-	case m.cfg.IsCtl("down", s):
-		return m.move(1), nil
-	case m.cfg.IsCtl("up", s):
-		return m.move(-1), nil
-	case m.cfg.IsCtl("page_down", s):
-		return m.move(m.listRows() / 2), nil
-	case m.cfg.IsCtl("page_up", s):
-		return m.move(-m.listRows() / 2), nil
-	case m.cfg.IsCtl("preview_down", s):
-		if r, ok := m.selected(); ok && m.previewOn() {
-			m.pvScroll = min(m.pvScroll+3, m.previewScrollMax(r))
+	case enter:
+		if !m.locked { // in the input enter keeps the query: nothing is resumed yet
+			m.locked = true
+			return m, nil
 		}
+		return m.enter()
+	case m.locked && m.cfg.Is("search", s): // back to the input, the query as it was
+		m.locked, m.qpos = false, len([]rune(m.query))
 		return m, nil
-	case m.cfg.IsCtl("preview_up", s):
-		m.pvScroll = max(m.pvScroll-3, 0)
-		return m, nil
-	case m.cfg.IsCtl("recall_filter", s):
+	case act("down", s):
+		return m.move(1), nil
+	case act("up", s):
+		return m.move(-1), nil
+	case act("page_down", s):
+		return m.move(m.listRows() / 2), nil
+	case act("page_up", s):
+		return m.move(-m.listRows() / 2), nil
+	case act("preview_down", s):
+		return m.scrollPreview(3), nil
+	case act("preview_up", s):
+		return m.scrollPreview(-3), nil
+	case act("recall_filter", s):
 		m.panel, m.pcur = true, 0
 		return m, nil
-	case m.cfg.IsCtl("recall_scope", s):
+	case act("recall_scope", s):
 		m.scopeCWD = !m.scopeCWD
 		return m.search(true)
-	case m.cfg.IsCtl("recall_copy", s):
+	case act("recall_copy", s):
 		return m.copy(), nil
-	case m.cfg.IsCtl("recall_open", s):
+	case act("recall_open", s):
 		return m.open()
-	case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
-		if r := []rune(m.query); len(r) > 0 {
-			m.query = string(r[:len(r)-1])
+	}
+	if m.locked {
+		return m, nil
+	}
+	if q, p, ok := editQuery(m.query, m.qpos, k); ok { // the input's keys (input.go); the list only follows a change of the text
+		changed := q != m.query
+		m.query, m.qpos = q, p
+		if changed {
 			return m.search(false)
 		}
-	case (k.Type == tea.KeyRunes || k.Type == tea.KeySpace) && !k.Alt:
-		// a paste may carry \r, \t, ESC sequences: they'd tear the top bar
-		m.query += strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-				return ' '
-			}
-			return r
-		}, string(k.Runes))
-		return m.search(false)
 	}
 	return m, nil
 }

@@ -11,6 +11,9 @@
 # recall) may share keys with others.
 # While a prompt takes text (search, flash) letters are text: enter and jump's non-character keys
 # keep the filter, esc and quit's non-character keys cancel it; backspace, ctrl+h, ctrl+c are fixed.
+# The text box of search and recall has fixed editing keys too (not in [keys]): left / right move the caret,
+# home / ctrl+a and end / ctrl+e go to the start and the end, alt+backspace and ctrl+w delete the word before
+# it, anything printable goes in at the caret. [keys] left / right do not act while typing.
 up = ["k", "up"]              # default: k, up
 down = ["j", "down"]          # default: j, down
 left = ["h", "left"]          # default: h, left
@@ -22,8 +25,8 @@ fold = ["f"]                  # default: f — fold / unfold the focused group
 preview = ["p"]               # default: p — open / close the pane preview
 focus_preview = ["tab"]       # default: tab — pass keys through to the previewed pane
 leave_preview = ["tab"]       # default: tab — back to the board
-preview_up = ["pgup"]         # default: pgup — scroll the preview back
-preview_down = ["pgdown"]     # default: pgdown — scroll the preview forward
+preview_up = ["pgup", "ctrl+p"] # default: pgup, ctrl+p — scroll the preview back
+preview_down = ["pgdown", "ctrl+n"] # default: pgdown, ctrl+n — scroll the preview forward
 reply = ["i"]                 # default: i — type a reply into the focused session
 handoff = ["H"]               # default: H — send /handoff to the focused session
 search = ["/"]                # default: / — filter the cards by fuzzy search
@@ -75,6 +78,9 @@ bar_high = "#ff6188"          # default: #ff6188
 bar_empty = "#585b70"         # default: #585b70
 muted = "#6272a4"             # default: #6272a4 — secondary text, footer
 disabled = "#45475a"          # default: #45475a
+recall_input = "#ff8ebe"      # default: #ff8ebe — recall: the border of the query box
+recall_list = "#6272a4"       # default: #6272a4 — recall: the border of the session list
+recall_preview = "#bd93f9"    # default: #bd93f9 — recall: the border of the preview
 
 [layout]
 max_columns = 4               # default: 4 — 1 to 8; fewer columns are used when the terminal is narrow
