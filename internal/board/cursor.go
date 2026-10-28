@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // cursorOut is the board's stdout with one addition: bubbletea ends every frame by putting the
@@ -62,10 +63,34 @@ func (m Model) pvBox() (right []string, x, y int) {
 	return right, m.cardsW() + col, 1 + row // the region starts to the right of the cards, below the header row
 }
 
+// searchCount is what the top bar says on the right while a filter is on: how many cards it shows of
+// how many there are.
+func (m Model) searchCount(shown int) string {
+	return fmt.Sprintf("%d/%d ", shown, len(m.src.Sessions()))
+}
+
+// searchRoom is the cells the filter's text has in the top bar: what is between " / " and the count.
+func (m Model) searchRoom(shown int) int { return m.w - 3 - ansi.StringWidth(m.searchCount(shown)) - 1 }
+
+// searchCursor is the screen cell (0-based) of the / filter's caret, for the terminal's cursor (an
+// input method puts its candidates there): the top bar, after " / " and the text before the caret,
+// cut the way the bar cuts it. Only while the box has the keys; shown is how many cards it shows.
+func (m Model) searchCursor(shown int) (x, y int, ok bool) {
+	if !m.searching || m.rc != nil || m.w == 0 {
+		return 0, 0, false
+	}
+	return 3 + queryCaretCells(m.query, m.qpos, m.searchRoom(shown)), 0, true
+}
+
 // wantCursor: the terminal's cursor should be shown (on the pane's cursor) rather than hidden.
 func (m Model) wantCursor() bool {
 	if m.curOut != nil && m.rc != nil { // the recall screen: its input's caret
 		_, _, ok := m.rc.cursorAt()
+		return ok
+	}
+	if m.curOut != nil && m.searching { // the / filter's caret
+		ss, _ := m.shown()
+		_, _, ok := m.searchCursor(len(ss))
 		return ok
 	}
 	if m.curOut == nil || !m.previewOn() {
