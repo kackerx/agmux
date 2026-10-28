@@ -56,7 +56,7 @@ func (m Model) recallUpdate(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	case tea.MouseMsg:
 		return m, nil, true
-	case tea.KeyMsg, recallTickMsg, recallIndexedMsg, recallEditedMsg:
+	case tea.KeyMsg, recallTickMsg, recallIndexedMsg, recallFoundMsg, recallEditedMsg:
 		tm, cmd := m.rc.Update(msg)
 		rm := tm.(recallModel)
 		if _, edited := msg.(recallEditedMsg); edited { // bubbletea v1 leaves the mouse off after ExecProcess

@@ -678,8 +678,10 @@ func relTime(t, now time.Time) string {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	case d < 24*time.Hour:
 		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 365*24*time.Hour: // "1000d" would not fit the four cells a time has
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
+	return fmt.Sprintf("%dy", int(d.Hours()/24/365))
 }
 
 type footerKey struct {

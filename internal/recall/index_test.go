@@ -18,10 +18,14 @@ type spy struct {
 	mu     sync.Mutex
 	reads  map[string][]int64
 	fail   string
-	onRead func(path string)
+	onRead func(path string) // under the lock: the reads that call it go one at a time
+	hold   func(path string) // outside it: a read waits here while the others go on
 }
 
 func (s *spy) Read(path string, from int64) (Head, []Line, int64, error) {
+	if s.hold != nil {
+		s.hold(path)
+	}
 	s.mu.Lock()
 	if s.onRead != nil {
 		s.onRead(path)
@@ -175,10 +179,10 @@ func TestUpdateReadsAgainWhatShrankOrChangedVersion(t *testing.T) {
 		t.Errorf("only what the short file says: name %q users %q", e.Name, sentences(e.Users))
 	}
 
-	// a cache of another format is read again
+	// a cache of another format is read again: version 2 cleaned the sentences differently
 	cache := filepath.Join(w.cache, "claude-s1.json")
 	b, _ := os.ReadFile(cache)
-	os.WriteFile(cache, []byte(strings.Replace(string(b), fmt.Sprintf(`"v":%d`, Version), `"v":0`, 1)), 0o644)
+	os.WriteFile(cache, []byte(strings.Replace(string(b), fmt.Sprintf(`"v":%d`, Version), `"v":2`, 1)), 0o644)
 	w.update()
 	if got := w.src.readsOf("s1.jsonl"); len(got) != 3 || got[2] != 0 {
 		t.Errorf("old cache version: reads %v", got)
@@ -493,11 +497,22 @@ func TestUpdateWithManyWorkersKeepsTheOrder(t *testing.T) {
 		at := time.Now().Add(-time.Duration(i) * time.Hour) // s0 is the newest
 		os.Chtimes(p, at, at)
 	}
-	w.src.onRead = func(p string) { // the newest is the slowest
+	gates := make([]chan struct{}, n) // a read ends when its gate is opened: the newest is the last
+	for i := range gates {
+		gates[i] = make(chan struct{})
+	}
+	w.src.hold = func(p string) {
 		var i int
 		fmt.Sscanf(filepath.Base(p), "s%d.jsonl", &i)
-		time.Sleep(time.Duration(n-i) * 15 * time.Millisecond)
+		<-gates[i]
 	}
+	told := make(chan struct{}, n)
+	go func() { // the oldest first, the next one when the build has taken the one before
+		for i := n - 1; i >= 0; i-- {
+			close(gates[i])
+			<-told
+		}
+	}()
 	ix := w.index()
 	ix.Workers = n
 	var seen []int
@@ -507,6 +522,7 @@ func TestUpdateWithManyWorkersKeepsTheOrder(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		seen = append(seen, done)
+		told <- struct{}{}
 		for i := 1; i < len(es); i++ {
 			if es[i-1].MTime < es[i].MTime {
 				t.Errorf("during the build, after %d: entries are not newest first", done)

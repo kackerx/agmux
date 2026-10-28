@@ -35,7 +35,9 @@ type recallModel struct {
 	project    string          // the project of the directory agmux was started in: "this project"
 	progress   *recallProgress
 	indexing   bool // the index is being built (or brought up to date)
-	gen        int  // of the index when results were made
+	gen        int  // of the index when results were asked for
+	qgen       int  // the number (recallSeq) of the last search asked for: the answers of older ones are dropped
+	searching  bool // a search is out: the list is the one of the query before
 	now        func() time.Time
 	lookPath   func(string) (string, error)
 	statDir    func(string) error
@@ -77,6 +79,17 @@ type pvCache struct {
 }
 
 type recallTickMsg struct{}
+
+// recallSeq numbers the searches of every screen, so the answer to one of a screen that was left is
+// not taken for the answer of the one opened after it.
+var recallSeq atomic.Int64
+
+// recallFoundMsg is what a search found; qgen is the number of the query it was for.
+type recallFoundMsg struct {
+	qgen    int
+	keep    bool
+	results []recall.Result
+}
 type recallIndexedMsg struct{ err error }
 type recallEditedMsg struct{ err error }
 
@@ -134,17 +147,24 @@ func (m recallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 	case recallTickMsg: // what the index has so far, while it is built
-		if m.ix.Gen() != m.gen {
-			m = m.search(true)
+		var cmd tea.Cmd
+		if m.ix.Gen() != m.gen && !m.searching { // not over one that is out: a slow search would never be shown
+			m, cmd = m.search(true)
 		}
 		if m.indexing {
-			return m, recallTick()
+			cmd = tea.Batch(cmd, recallTick())
 		}
+		return m, cmd
 	case recallIndexedMsg:
 		m.indexing = false
-		m = m.search(true)
+		m, cmd := m.search(true)
 		if msg.err != nil {
 			m.msg = fg(cRed, " "+i18n.T("recall.index_error", firstLine(msg.err.Error())))
+		}
+		return m, cmd
+	case recallFoundMsg:
+		if msg.qgen == m.qgen { // an answer to a query that was typed over is not shown
+			m = m.show(msg.results, msg.keep)
 		}
 	case recallEditedMsg:
 		if msg.err != nil {
@@ -171,13 +191,9 @@ func (m recallModel) filter() recall.Filter {
 	return f
 }
 
-// search makes the results again. keep: the cursor stays on the session it is on, if it is still there.
-func (m recallModel) search(keep bool) recallModel {
-	var path string
-	if r, ok := m.selected(); ok {
-		path = r.Path
-	}
-	was := m.pvScroll
+// search asks for the results again, off the update loop (found comes back as a recallFoundMsg);
+// keep: the cursor then stays on the session it is on, if it is still there.
+func (m recallModel) search(keep bool) (recallModel, tea.Cmd) {
 	m.gen = m.ix.Gen()
 	m.sources = m.sources[:0:0]
 	for _, e := range m.ix.Entries() {
@@ -186,7 +202,20 @@ func (m recallModel) search(keep bool) recallModel {
 		}
 	}
 	slices.Sort(m.sources)
-	m.results = m.ix.SearchIn(m.query, m.filter())
+	m.qgen = int(recallSeq.Add(1))
+	m.searching = true
+	ix, query, f, qgen := m.ix, m.query, m.filter(), m.qgen
+	return m, func() tea.Msg { return recallFoundMsg{qgen, keep, ix.SearchIn(query, f)} }
+}
+
+// show puts the results found where the cursor can be on them.
+func (m recallModel) show(results []recall.Result, keep bool) recallModel {
+	var path string
+	if r, ok := m.selected(); ok {
+		path = r.Path
+	}
+	was := m.pvScroll
+	m.results, m.searching = results, false
 	m.sel = 0
 	if i := slices.IndexFunc(m.results, func(r recall.Result) bool { return r.Path == path }); keep && path != "" && i >= 0 {
 		m.sel = i
@@ -243,7 +272,7 @@ func (m recallModel) back() (tea.Model, tea.Cmd) {
 		m.panel = false
 	case m.query != "":
 		m.query = ""
-		m = m.search(false)
+		return m.search(false)
 	case m.embedded:
 		m.leave = true
 	default:
@@ -269,6 +298,10 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.panel {
 		return m.panelKey(s)
 	}
+	// the list on the screen is not the query's yet: not the sessions to act on
+	if m.searching && (s == "enter" || m.cfg.IsCtl("jump", s) || m.cfg.IsCtl("recall_copy", s) || m.cfg.IsCtl("recall_open", s)) {
+		return m, nil
+	}
 	switch {
 	case s == "enter" || m.cfg.IsCtl("jump", s):
 		return m.enter()
@@ -293,7 +326,7 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case m.cfg.IsCtl("recall_scope", s):
 		m.scopeCWD = !m.scopeCWD
-		return m.search(true), nil
+		return m.search(true)
 	case m.cfg.IsCtl("recall_copy", s):
 		return m.copy(), nil
 	case m.cfg.IsCtl("recall_open", s):
@@ -301,7 +334,7 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
 		if r := []rune(m.query); len(r) > 0 {
 			m.query = string(r[:len(r)-1])
-			return m.search(false), nil
+			return m.search(false)
 		}
 	case (k.Type == tea.KeyRunes || k.Type == tea.KeySpace) && !k.Alt:
 		// a paste may carry \r, \t, ESC sequences: they'd tear the top bar
@@ -311,7 +344,7 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return r
 		}, string(k.Runes))
-		return m.search(false), nil
+		return m.search(false)
 	}
 	return m, nil
 }
@@ -330,7 +363,7 @@ func (m recallModel) panelKey(s string) (tea.Model, tea.Cmd) {
 		m.panel = false
 	case c.IsCtl("recall_scope", s):
 		m.scopeCWD = !m.scopeCWD
-		return m.search(true), nil
+		return m.search(true)
 	case c.Is("recall_toggle", s) || s == "enter" || c.IsCtl("jump", s):
 		if m.pcur < len(m.sources) {
 			src := m.sources[m.pcur]
@@ -343,16 +376,16 @@ func (m recallModel) panelKey(s string) (tea.Model, tea.Cmd) {
 		} else {
 			m.scopeCWD = m.pcur == len(m.sources)+1
 		}
-		return m.search(true), nil
+		return m.search(true)
 	case c.Is("recall_all", s):
 		m.unticked = map[string]bool{}
-		return m.search(true), nil
+		return m.search(true)
 	case c.Is("recall_none", s):
 		m.unticked = map[string]bool{}
 		for _, src := range m.sources {
 			m.unticked[src] = true
 		}
-		return m.search(true), nil
+		return m.search(true)
 	}
 	return m, nil
 }

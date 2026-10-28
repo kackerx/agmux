@@ -64,14 +64,18 @@ func openRecallOn(t *testing.T, m Model) Model {
 	if m.rc == nil {
 		t.Fatal("? did not open the recall screen")
 	}
-	tm, _ = m.Update(recallIndexedMsg{})
-	return tm.(Model)
+	tm, cmd := m.Update(recallIndexedMsg{})
+	m = tm.(Model)
+	run(&m, cmd)
+	return m
 }
 
 func btype(t *testing.T, m Model, text string) Model {
 	t.Helper()
-	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
-	return tm.(Model)
+	tm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+	m = tm.(Model)
+	run(&m, cmd)
+	return m
 }
 
 func TestBoardOpensAndLeavesRecall(t *testing.T) {
@@ -345,8 +349,10 @@ func TestBoardRecallTickRefreshesTheResults(t *testing.T) {
 	if err := e.w.ix.Update(); err != nil {
 		t.Fatal(err)
 	}
-	tm, _ := m.Update(recallTickMsg{})
-	if got := len(tm.(Model).rc.results); got != before+1 {
+	tm, cmd := m.Update(recallTickMsg{})
+	m = tm.(Model)
+	run(&m, cmd)
+	if got := len(m.rc.results); got != before+1 {
 		t.Errorf("results %d → %d", before, got)
 	}
 }

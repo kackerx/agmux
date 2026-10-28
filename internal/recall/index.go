@@ -19,7 +19,7 @@ import (
 )
 
 // Version is the cache format: an entry of another version is read again from its transcript.
-const Version = 2
+const Version = 3
 
 // Entry is what is known of one transcript: its head, how far it has been read, and its sentences.
 // It is the cache file <cache dir>/<source>-<transcript name>.json.
