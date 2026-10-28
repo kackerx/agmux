@@ -582,3 +582,4 @@
 
 ### T78 e2e（tester，与 T75 并行起步）
 - 夹具：匿名化的 Claude / pi transcript 样本各几份（不同 cwd、worktree、有无名字、有噪音行）、`$XDG_CACHE_HOME` 指到临时目录、假 claude / pi / pbcopy / $EDITOR 脚本；真 pty 跑 `agmux -r`。
+- dev T74 清单（18 组字符串 + 7 处硬编码键）已过目，照准 5 点：(1) 新动作 `clear_filter`（esc，仅有过滤时）、`preview_up` / `preview_down`（pgup / pgdown，3 行）；(2) 打字态 / 锁死态的接受 = `jump` 的键、取消 = `quit` 里非单个可打印字符的键；backspace / ctrl+h / ctrl+c 固定不进 [keys]，模板头注一句；(3) recall_* 八个动作随 T76 / T77 再加；(4) control / store / tmux 的错误文案留英文；(5) `[ui] language` 校验 en|zh，`$AGMUX_LANG` 优先且非法值忽略，i18n 包内全局、测试默认 en。另：bgNote 里写死的 "enter or i" 改成 First(jump) / First(reply)；setup 的输出也翻，config 读不出时按 en。
