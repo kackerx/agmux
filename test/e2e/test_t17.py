@@ -9,7 +9,7 @@ from test_t11 import PreviewBase, pane_text, CAT_CMD
 from test_t3 import ready, last_text_row, border_colours, STATUS_COLOUR, C_FOCUS, find_cards, by_name
 
 DEFAULT_KEYS = ["up", "down", "left", "right", "page_down", "page_up", "jump", "fold", "preview", "focus_preview", "leave_preview",
-                "reply", "handoff", "search", "next_match", "prev_match", "flash", "group", "group_cwd", "group_project", "group_session", "group_state", "restart", "kill", "review", "avatar", "pin", "mark_read", "quit", "exit", "confirm"]
+                "preview_up", "preview_down", "reply", "handoff", "search", "next_match", "prev_match", "clear_filter", "flash", "group", "group_cwd", "group_project", "group_session", "group_state", "restart", "kill", "review", "avatar", "pin", "mark_read", "recall", "recall_filter", "recall_scope", "recall_copy", "recall_open", "recall_toggle", "recall_all", "recall_none", "quit", "exit", "confirm"]
 DEFAULT_COLOURS = ["working", "idle", "done", "attention", "focus", "match", "border", "name", "branch", "model", "effort", "agent", "dir",
                    "bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled"]
 
