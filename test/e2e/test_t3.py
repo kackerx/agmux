@@ -72,7 +72,7 @@ class Layout(unittest.TestCase):
                         self.assertGreater(tr, max(c.r for h in range(g // n * n - n, g // n * n) for c in gs[h][2]) + 4)
                 self.assertIn("agmux · 9 sessions", snap[0].text, "top bar")
                 bar = last_text_row(snap)
-                for k in (BAR_KEYS if W >= 170 else BAR_KEYS[:1]):  # the English key line is ~167 columns wide since T43 added `g group:cwd` (was ~133); narrower terminals truncate it with …
+                for k in (BAR_KEYS if W >= 210 else BAR_KEYS[:-1] if W >= 170 else BAR_KEYS[:1]):  # the English key line is ~167 columns wide since T43 added `g group:cwd` (was ~133), ~210 since e242a8b added `? recall` (`q quit` is the last: it is the first to go); narrower terminals truncate it with …
                     self.assertIn(k, bar, "bottom bar hints")
 
     def test_resize(self):
@@ -285,7 +285,7 @@ class StderrFooter(unittest.TestCase):
 
     def test_multiline_stderr(self):  # (T69: `r` ends the process and types the resume command into the pane: tmux is what can fail)
         env = Env(); self.addCleanup(env.cleanup); build_fixture(env); (env.fake / "tmux.fail").write_text("send-keys")
-        t = Term(env, w=200, h=50); self.addCleanup(t.close); self.assertTrue(ready(t))
+        t = Term(env, w=232, h=50); self.addCleanup(t.close); self.assertTrue(ready(t))  # (232: `q quit` fits since e242a8b added `? recall`)
         t.keys("r")
         self.assertTrue(wait(lambda: "boom from fake tmux" in t.text(), 8), t.text())
         rows = t.text().split("\n")

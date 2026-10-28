@@ -122,7 +122,7 @@ class Fold(unittest.TestCase):
         self.t.keys("i"); time.sleep(0.3)
         self.assertNotIn("keys go to the pane", foot(self.t, 4), "`s` on a folded title opens nothing and focuses nothing")
         self.t.keys("x"); time.sleep(0.3)
-        self.assertNotRegex(foot(self.t, 4), "kill .*\\?|y to confirm", "no kill confirm on a folded title")
+        self.assertNotRegex(foot(self.t, 4), "kill \\S+\\?|y to confirm", "no kill confirm on a folded title")
         self.t.keys("y")
         self.assertEqual(self.calls(), [], "a folded title has no session: H / r / d / s / x must do nothing (never act on a hidden card)")
         self.assertTrue(self.t.alive()); self.assertEqual(len([c for c in find_cards(self.t.snap()) if c.ok]), 7)
