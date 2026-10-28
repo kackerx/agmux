@@ -7,6 +7,7 @@ Oracle: `expect()` below is written from the spec text, not from the product cod
 right border, less the agent and one space. One case the spec leaves open and the orchestrator decided: `…last` does not fit but `last` does -> the bare `last` (no mark, no tail cut); the sweep checks it at every width."""
 import json, unittest
 from lib import *
+from lib_recall import cursor
 from test_t3 import by_name, C_FOCUS
 from test_t37 import SETTING, USER
 
@@ -170,9 +171,11 @@ class Highlight(Base):
         st = c.rows[3].cells; k = next(k for k, x in enumerate(st) if x[0] == "…")
         self.assertEqual(st[k][1], st[k - 1][1], f"status row: `…` in the detail colour: {c.line(3)!r}")
 
-    def test_the_top_bar_ellipsis_is_plain(self):
-        fixture(self.env, ["main"]); t = self.board(1); t.keys("/"); time.sleep(0.2); t.lit("q" * 60); time.sleep(0.5); top = t.snap()[0].cells; i = next(k for k, x in enumerate(top) if x[0] == "…")
-        self.assertEqual((top[i][1], top[i][2]), (top[i - 1][1], None), f"no background, the colour of the text before it: {t.snap()[0].text!r}")
+    def test_a_query_longer_than_the_top_bar_scrolls_so_the_caret_stays_in_view(self):
+        # (was test_the_top_bar_ellipsis_is_plain: T79's shared input does not cut a long query with `…` any more, it shows the part around the caret)
+        fixture(self.env, ["main"]); t = self.board(1); t.keys("/"); time.sleep(0.2); t.lit("q" * 60 + "rst"); time.sleep(0.6); top = t.snap()[0]
+        self.assertTrue(top.text.rstrip().endswith("0/1") or "/" in top.text, top.text); self.assertIn("qrst", top.text, "the end of the query, where the caret is, is what shows"); self.assertNotIn("…", top.text)
+        x, y, vis = cursor(t); self.assertTrue(vis and y == 0 and 0 < x < t.w, f"the real caret is on the top row, inside the screen: {(x, y, vis)}"); self.assertLessEqual(disp_width(top.text), t.w)
 
     def test_a_cut_branch_with_an_agent_keeps_the_hit_in_the_shown_part(self):
         fixture(self.env, ["feature-alert-with-long-name-for-test"], agents=[0]); t = self.board(1); self.search(t, "alert"); c = self.card(t)
