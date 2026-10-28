@@ -580,3 +580,30 @@ func TestUpdateEqualAgesGoByPath(t *testing.T) {
 		t.Errorf("%v", got)
 	}
 }
+
+// Two Updates at once (a screen opened again while the first is still being built) take turns: the
+// entries are whole, once each, and the cache files are not torn.
+func TestConcurrentUpdatesTakeTurns(t *testing.T) {
+	w := newWorld(t)
+	for i := range 5 {
+		w.transcript(fmt.Sprintf("s%d", i), finished(t))
+	}
+	ix := w.index()
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := ix.Update(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if es := ix.Entries(); len(es) != 5 {
+		t.Errorf("%d entries", len(es))
+	}
+	if left, _ := filepath.Glob(filepath.Join(w.cache, ".tmp-*")); len(left) != 0 {
+		t.Errorf("temp files %v", left)
+	}
+}

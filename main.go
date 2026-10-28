@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime/debug"
 	"slices"
 	"strconv"
@@ -24,7 +23,6 @@ import (
 	"github.com/kackerx/agmux/internal/recall"
 	"github.com/kackerx/agmux/internal/statusline"
 	"github.com/kackerx/agmux/internal/store"
-	"github.com/kackerx/agmux/internal/xdg"
 )
 
 // Set by the release build (-ldflags "-X main.version=…", .goreleaser.yaml); a go install has none.
@@ -253,7 +251,7 @@ func recallCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		args = args[1:]
 	}
-	ix, err := openRecall()
+	ix, err := recall.Default()
 	if err != nil {
 		fmt.Fprintln(stderr, "agmux:", err)
 		return 1
@@ -326,23 +324,6 @@ func execResume(dir string, argv []string) error {
 	return syscallExec(bin, argv, append(env, "PWD="+dir)) // Chdir does not move $PWD, and tools believe it
 }
 
-// openRecall is the index of Claude Code's and pi's transcripts, cached under $XDG_CACHE_HOME/agmux/recall.
-func openRecall() (*recall.Index, error) {
-	cache, err := xdg.CacheDir()
-	if err != nil {
-		return nil, err
-	}
-	claude, err := recall.ClaudeDir()
-	if err != nil {
-		return nil, err
-	}
-	agent, err := pi.Dir()
-	if err != nil {
-		return nil, err
-	}
-	return &recall.Index{Dir: filepath.Join(cache, "recall"), Sources: []recall.Source{recall.Claude{Dir: claude}, recall.Pi{Dir: agent}}}, nil
-}
-
 // configCmd is `agmux config [--path]`: the effective config (defaults + config.toml), or its path.
 func configCmd(args []string) int {
 	switch {
@@ -398,5 +379,9 @@ func runBoard(stay bool) error {
 	if err := p.Refresh(); err != nil {
 		return err
 	}
-	return board.Run(p, cfg, img, stay)
+	res, err := board.Run(p, cfg, img, stay)
+	if err != nil || res == nil {
+		return err
+	}
+	return execResume(res.Dir, res.Argv) // a session resumed from the board's recall screen, in the pane the board was in
 }

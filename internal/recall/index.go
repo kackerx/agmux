@@ -14,6 +14,8 @@ import (
 	"unicode"
 
 	"github.com/kackerx/agmux/internal/gitrepo"
+	"github.com/kackerx/agmux/internal/pi"
+	"github.com/kackerx/agmux/internal/xdg"
 )
 
 // Version is the cache format: an entry of another version is read again from its transcript.
@@ -56,6 +58,7 @@ type Index struct {
 	Progress func(done, total int) // called after each transcript is looked at (on any goroutine); may be nil
 	Workers  int                   // transcripts read at once; 0: a few per CPU
 
+	runMu   sync.Mutex // Update runs one at a time
 	mu      sync.Mutex
 	entries []*Entry
 	gen     int // counts changes: what is derived from entries is stale when it moved
@@ -89,6 +92,8 @@ type job struct {
 // again, one whose transcript is gone is deleted. The newest transcripts go first, and Entries
 // holds each as soon as it is done, so a caller may show what is there while the rest is built.
 func (ix *Index) Update() error {
+	ix.runMu.Lock() // one at a time: a second screen opened while the first is still being built waits for it
+	defer ix.runMu.Unlock()
 	if err := os.MkdirAll(ix.Dir, 0o755); err != nil {
 		return err
 	}
@@ -311,6 +316,23 @@ func (ix *Index) project(cwd string) (project, worktree string) {
 	ix.repos[cwd] = r
 	ix.mu.Unlock()
 	return r[0], r[1]
+}
+
+// Default is the index of Claude Code's and pi's transcripts, cached under $XDG_CACHE_HOME/agmux/recall.
+func Default() (*Index, error) {
+	cache, err := xdg.CacheDir()
+	if err != nil {
+		return nil, err
+	}
+	claude, err := ClaudeDir()
+	if err != nil {
+		return nil, err
+	}
+	agent, err := pi.Dir()
+	if err != nil {
+		return nil, err
+	}
+	return &Index{Dir: filepath.Join(cache, "recall"), Sources: []Source{Claude{Dir: claude}, Pi{Dir: agent}}}, nil
 }
 
 // Resume is the command that opens e again, "" argv when its source is not one of the index's.

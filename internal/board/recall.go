@@ -42,6 +42,10 @@ type recallModel struct {
 	copyToClip func(string) error
 	editor     func() string
 
+	embedded bool        // inside the board: leaving, resuming and jumping are the board's to do (leave, pick)
+	leave    bool        // embedded: the user is done, back to the board
+	pick     *recallPick // embedded: what enter chose, for the board to act on
+
 	query    string
 	results  []recall.Result
 	sel, top int
@@ -55,6 +59,14 @@ type recallModel struct {
 	w, h     int
 	msg      string
 	res      *RecallResult
+}
+
+// recallPick is what enter chose in a recall screen inside the board: a session that runs (to jump
+// to) or one that is closed and can be resumed (the command, where, and what to call its window).
+type recallPick struct {
+	live   *store.Session
+	resume *RecallResult
+	name   string
 }
 
 type recallProgress struct{ done, total atomic.Int64 }
@@ -72,6 +84,10 @@ type recallEditedMsg struct{ err error }
 // are not resumed), project the project of the current directory. The index is brought up to date
 // when the program starts (Init), and the screen shows what is there as it is built.
 func NewRecall(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) tea.Model {
+	return newRecallModel(ix, cfg, live, project, query)
+}
+
+func newRecallModel(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) recallModel {
 	m := recallModel{ix: ix, cfg: cfg, live: live, project: project, query: query, progress: &recallProgress{}, pvCache: &pvCache{}, indexing: true,
 		now: time.Now, lookPath: exec.LookPath, copyToClip: copyToClipboard, unticked: map[string]bool{},
 		statDir: func(p string) error { _, err := os.Stat(p); return err },
@@ -87,8 +103,11 @@ func NewRecall(ix *recall.Index, cfg *config.Config, live []store.Session, proje
 
 // RecallOutcome is what the user chose in a recall screen that has ended: nil if they just left.
 func RecallOutcome(m tea.Model) *RecallResult {
-	if r, ok := m.(recallModel); ok {
+	switch r := m.(type) {
+	case recallModel:
 		return r.res
+	case Model: // the board: what a recall screen inside it chose to resume in place
+		return r.rx.res
 	}
 	return nil
 }
@@ -225,6 +244,8 @@ func (m recallModel) back() (tea.Model, tea.Cmd) {
 	case m.query != "":
 		m.query = ""
 		m = m.search(false)
+	case m.embedded:
+		m.leave = true
 	default:
 		return m, tea.Quit
 	}
@@ -239,6 +260,11 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.msg = ""
 	if s == "esc" || m.cfg.IsCtl("quit", s) {
 		return m.back()
+	}
+	// the key that opened this screen from the board closes it: a character only when nothing is typed
+	if m.embedded && (m.cfg.IsCtl("recall", s) || m.query == "" && !m.panel && m.cfg.Is("recall", s)) {
+		m.leave = true
+		return m, nil
 	}
 	if m.panel {
 		return m.panelKey(s)
@@ -358,6 +384,10 @@ func (m recallModel) enter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if s, ok := m.liveOf(r.Entry); ok {
+		if m.embedded {
+			m.pick = &recallPick{live: &s, name: r.Title()}
+			return m, nil
+		}
 		if s.TmuxPane == "" {
 			m.msg = fg(cMuted, " "+i18n.T("recall.running_nopane", r.Title()))
 		} else {
@@ -378,6 +408,10 @@ func (m recallModel) enter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.res = &RecallResult{Dir: r.CWD, Argv: argv}
+	if m.embedded {
+		m.pick = &recallPick{resume: m.res, name: r.Title()}
+		return m, nil
+	}
 	return m, tea.Quit
 }
 

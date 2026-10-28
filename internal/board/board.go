@@ -25,6 +25,7 @@ import (
 	"github.com/kackerx/agmux/internal/execx"
 	"github.com/kackerx/agmux/internal/fuzzy"
 	"github.com/kackerx/agmux/internal/i18n"
+	"github.com/kackerx/agmux/internal/recall"
 	"github.com/kackerx/agmux/internal/store"
 )
 
@@ -120,18 +121,21 @@ type Model struct {
 
 	cfg    *config.Config
 	keymap map[string]string // key (as KeyMsg.String() spells it) → action
+
+	rc *recallModel // the recall screen, while it is on (T77); nil: the board
+	rx *recallIndex // what the recall screen is made of and what it asked for; shared by the copies of the Model
 }
 
 func New(src Source, run Runner) Model {
 	cfg := config.Default()
 	a := &attachedSrc{Source: src}
 	return Model{src: a, attached: a, run: run, now: time.Now, getenv: os.Getenv, folded: map[string]bool{}, keys: newSerial(),
-		cfg: cfg, keymap: cfg.KeyMap()}
+		cfg: cfg, keymap: cfg.KeyMap(), rx: &recallIndex{open: recall.Default}}
 }
 
 // Run polls p in the background and runs the board until the user quits. img is DetectImages's
 // answer: when it says pictures, they are uploaded first.
-func Run(p *store.Poller, cfg *config.Config, img ImageMode, stay bool) error {
+func Run(p *store.Poller, cfg *config.Config, img ImageMode, stay bool) (*RecallResult, error) {
 	var stayNote string
 	if stay && os.Getenv("TMUX") == "" {
 		stay, stayNote = false, "--stay only works inside tmux"
@@ -146,7 +150,7 @@ func Run(p *store.Poller, cfg *config.Config, img ImageMode, stay bool) error {
 	if img.On { // before the screen is taken over: bubbletea must not interleave with the upload
 		note, err := uploadImages(img, realRunner{})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		img.Note = note
 		useImages = true
@@ -162,11 +166,11 @@ func Run(p *store.Poller, cfg *config.Config, img ImageMode, stay bool) error {
 		m = m.say(cRed, strings.Join(lines, "; "))
 	}
 	m.curOut = &cursorOut{File: os.Stdout}
-	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithOutput(m.curOut)).Run()
+	final, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithOutput(m.curOut)).Run()
 	if err != nil && img.On && os.Getenv("TMUX") == "" { // the upload switched screens: bubbletea may not have switched back
 		io.WriteString(os.Stdout, "\x1b[?1049l")
 	}
-	return err
+	return RecallOutcome(final), err
 }
 
 type frameMsg struct{}
@@ -207,7 +211,14 @@ func (m Model) askPopup() tea.Cmd {
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.rc != nil {
+		if tm, cmd, handled := m.recallUpdate(msg); handled {
+			return tm, cmd
+		}
+	}
 	switch msg := msg.(type) {
+	case resumeWindowMsg:
+		return m.resumed(msg)
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		if m.pvFocus && !m.previewOn() { // not "session is gone": it isn't
@@ -713,6 +724,8 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 		m = m.scrollPreview(action == "preview_up")
 		cmd := m.capture()
 		return m, cmd
+	case "recall":
+		return m.openRecall()
 	case "search": // even when the filter shows nothing: / edits it
 		m.searching, m.searchFrom, m.msg = true, m.focus, ""
 		return m, nil
@@ -1317,6 +1330,9 @@ func (m Model) typingHint() string {
 func (m Model) View() string {
 	if m.w == 0 {
 		return ""
+	}
+	if m.rc != nil {
+		return m.rc.View()
 	}
 	_, _, focused, ok := m.current()
 	var right []string
