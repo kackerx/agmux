@@ -68,15 +68,28 @@ func queryCells(q string, pos int) int {
 	return ansi.StringWidth(string(r[:min(max(pos, 0), len(r))]))
 }
 
-// queryView is the input drawn in at most width cells: with the caret (a cell in reverse video,
-// a space at the end) when typing, else the plain text. When it does not fit, what is before the
-// caret goes from the left so the caret stays on screen.
-func queryView(q string, pos int, caret bool, width int) string {
+// queryShown is the part of the text that is drawn in width cells, and the caret in it: what is
+// before the caret goes from the left when the caret would not fit.
+func queryShown(q string, pos, width int) ([]rune, int) {
 	r := []rune(q)
 	pos = min(max(pos, 0), len(r))
 	for len(r) > 0 && width > 0 && ansi.StringWidth(string(r[:pos]))+1 > width && pos > 0 {
 		r, pos = r[1:], pos-1
 	}
+	return r, pos
+}
+
+// queryCaretCells is how many cells from the start of the drawn text the caret is at.
+func queryCaretCells(q string, pos, width int) int {
+	r, pos := queryShown(q, pos, width)
+	return ansi.StringWidth(string(r[:pos]))
+}
+
+// queryView is the input drawn in at most width cells: with the caret (a cell in reverse video,
+// a space at the end) when typing, else the plain text. When it does not fit, what is before the
+// caret goes from the left so the caret stays on screen.
+func queryView(q string, pos int, caret bool, width int) string {
+	r, pos := queryShown(q, pos, width)
 	if !caret {
 		return string(r)
 	}

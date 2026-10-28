@@ -109,6 +109,13 @@ func (m recallModel) View() string {
 	if m.w == 0 {
 		return ""
 	}
+	if m.curOut != nil {
+		if x, y, ok := m.cursorAt(); ok {
+			m.curOut.place(x, y)
+		} else {
+			m.curOut.place(-1, -1)
+		}
+	}
 	lines := m.inputBox()
 	if bh := m.bodyH(); bh > 0 {
 		lw := m.listW()
@@ -134,13 +141,12 @@ func (m recallModel) View() string {
 	return strings.Join(append(lines, m.footer()), "\n")
 }
 
-// listTitle is where the cursor is in the list and how long it is: "3/42", "0/0" for none.
+// listTitle is how many sessions the query found out of how many there are to search: "3/14"; "0/0" for none.
 func (m recallModel) listTitle() string {
-	n := 0
-	if len(m.results) > 0 {
-		n = m.sel + 1
+	if len(m.results) == 0 {
+		return "0/0"
 	}
-	return fmt.Sprintf("%d/%d", n, len(m.results))
+	return fmt.Sprintf("%d/%d", len(m.results), m.total)
 }
 
 // inputBox is the query in a box of its own; on the right how far the index is, while it is built.
@@ -150,9 +156,17 @@ func (m recallModel) inputBox() []string {
 	if m.indexing {
 		right = fg(cMuted, i18n.T("recall.indexing", m.progress.done.Load(), m.progress.total.Load())+" ")
 	}
-	inner := m.w - 2
-	left := fg(cFocus, " / ") + queryView(m.query, m.qpos, !m.locked, inner-3-ansi.StringWidth(right)-1)
-	return thickBox(cRecallInput, "", []string{spread(left, right, inner, "…")}, m.w, 3)
+	left := fg(cFocus, " / ") + queryView(m.query, m.qpos, !m.locked, m.inputRoom())
+	return thickBox(cRecallInput, "", []string{spread(left, right, m.w-2, "…")}, m.w, 3)
+}
+
+// inputRoom is the cells the query has in its box: what is between the border and the progress.
+func (m recallModel) inputRoom() int {
+	right := 0
+	if m.indexing {
+		right = ansi.StringWidth(i18n.T("recall.indexing", m.progress.done.Load(), m.progress.total.Load()) + " ")
+	}
+	return m.w - 2 - 3 - right - 1
 }
 
 // footer is the keys, each with its first configured key; esc closes the panel, clears the query

@@ -49,10 +49,13 @@ type recallModel struct {
 	pick     *recallPick // embedded: what enter chose, for the board to act on
 
 	query    string
-	qpos     int       // the caret in it, in runes (editQuery)
-	clickRow int       // the row of the last click on the list, for the double click
-	clickAt  time.Time // and when
-	locked   bool      // the query is kept (enter in the input): j / k choose, enter resumes, / edits again
+	qpos     int        // the caret in it, in runes (editQuery)
+	curOut   *cursorOut // where the terminal's cursor is put (nil: not here: in the board, or in a test)
+	curOn    bool       // the terminal's cursor is shown
+	total    int        // the sessions there are to search (with the panel's filter), for the list's title
+	clickRow int        // the row of the last click on the list, for the double click
+	clickAt  time.Time  // and when
+	locked   bool       // the query is kept (enter in the input): j / k choose, enter resumes, / edits again
 	results  []recall.Result
 	sel, top int
 	sources  []string        // those that have a session here
@@ -93,6 +96,7 @@ type recallFoundMsg struct {
 	qgen    int
 	keep    bool
 	results []recall.Result
+	total   int // the sessions there are to search: what the query found them among
 }
 type recallIndexedMsg struct{ err error }
 type recallEditedMsg struct{ err error }
@@ -138,7 +142,9 @@ func (m recallModel) Init() tea.Cmd {
 // is returned for the caller to run once the terminal is theirs again.
 func RunRecall(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) (*RecallResult, error) {
 	useConfig(cfg)
-	m, err := tea.NewProgram(NewRecall(ix, cfg, live, project, query), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	rm := newRecallModel(ix, cfg, live, project, query)
+	rm.curOut = &cursorOut{File: os.Stdout}
+	m, err := tea.NewProgram(rm, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithOutput(rm.curOut)).Run()
 	return RecallOutcome(m), err
 }
 
@@ -146,7 +152,34 @@ func recallTick() tea.Cmd {
 	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return recallTickMsg{} })
 }
 
+// Update is update, and then the terminal's cursor shown or hidden to match: it is the input's caret
+// while the input has the keys (only where the screen owns the terminal: curOut; in the board the
+// board does it).
 func (m recallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	tm, cmd := m.update(msg)
+	nm := tm.(recallModel)
+	if _, _, want := nm.cursorAt(); nm.curOut != nil && want != nm.curOn {
+		nm.curOn = want
+		show := tea.HideCursor
+		if want {
+			show = tea.ShowCursor
+		}
+		cmd = tea.Batch(cmd, show)
+	}
+	return nm, cmd
+}
+
+// cursorAt is the screen cell (0-based) for the terminal's cursor: in the query box, at the caret,
+// so that an input method puts its candidates there. Not while the keys are the list's (kept query)
+// or the filter panel's.
+func (m recallModel) cursorAt() (x, y int, ok bool) {
+	if m.w == 0 || m.locked || m.panel {
+		return 0, 0, false
+	}
+	return 1 + 3 + queryCaretCells(m.query, m.qpos, m.inputRoom()), 1, true // the border, " / "
+}
+
+func (m recallModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -168,6 +201,7 @@ func (m recallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case recallFoundMsg:
 		if msg.qgen == m.qgen { // an answer to a query that was typed over is not shown
+			m.total = msg.total
 			m = m.show(msg.results, msg.keep)
 		}
 	case tea.MouseMsg:
@@ -212,7 +246,14 @@ func (m recallModel) search(keep bool) (recallModel, tea.Cmd) {
 	m.qgen = int(recallSeq.Add(1))
 	m.searching = true
 	ix, query, f, qgen := m.ix, m.query, m.filter(), m.qgen
-	return m, func() tea.Msg { return recallFoundMsg{qgen, keep, ix.SearchIn(query, f)} }
+	return m, func() tea.Msg {
+		found := ix.SearchIn(query, f)
+		total := len(found)
+		if strings.TrimSpace(query) != "" {
+			total = len(ix.SearchIn("", f))
+		}
+		return recallFoundMsg{qgen, keep, found, total}
+	}
 }
 
 // show puts the results found where the cursor can be on them.
