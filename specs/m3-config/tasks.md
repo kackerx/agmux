@@ -654,3 +654,4 @@
 - 验收：CI 里这一步在 7f3d256 上会红（inputRoom），修后绿；t63 的 workflows 断言跟改。
 - dev 7a26fd1（删 inputRoom；recallModel.frame() 一次返回画面 + 光标，看板嵌入也用；deadcode 在 7f3d256 上报 7 个全清：inputRoom / NewRecall 删，previewLines / overlay / store.lastModel 搬进 _test.go，avatar.UseSets 改成生产可达的 LoadSetsFrom，store.SourceFunc 删、各测试包自带 3 行）+ fcb185c（T86：ci.yml 加 deadcode@v0.52.0 判输出为空；新建小 Makefile `make check` = vet / test -race / gofmt / tidy / deadcode）。合回 main fe3c052。**第十六批最终目标 fe3c052**，送 reviewer 复审 + tester。
 - reviewer 第三轮复审 fe3c052 通过，**第十六批 reviewer 整体通过**（LoadSetsFrom 与 UseSets 逐行等价、frame() 两条路径都只读一次进度、ci.yml 的 deadcode 步真会红；a60cff2 44 + T85 10 变异全杀；15360 屏无溢出）。建议 a 采纳：Makefile 的 deadcode 行 go run 失败时会悄悄绿 → `|| exit 1`（只动 Makefile，不进二进制，tester 在 fe3c052 的结果照算）。等 tester 整套。
+- dev bc643f7（Makefile deadcode 行 `|| exit 1`，合回 main a28cae4，只动 Makefile）。安装目标 = tester 通过后的 main。
