@@ -114,7 +114,25 @@ func (w *rworld) model(live ...store.Session) recallModel {
 	m.copyToClip = func(string) error { return nil }
 	m.indexing = false
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
-	return tm.(recallModel).search(false)
+	m, cmd := tm.(recallModel).search(false)
+	m, _ = rfeed(m, cmd)
+	return m
+}
+
+// rfeed runs the search the screen asked for and gives it the answer, as the runtime does; quit says
+// that the command was tea.Quit.
+func rfeed(m recallModel, cmd tea.Cmd) (recallModel, bool) {
+	if cmd == nil {
+		return m, false
+	}
+	switch msg := cmd().(type) {
+	case tea.QuitMsg:
+		return m, true
+	case recallFoundMsg:
+		tm, _ := m.Update(msg)
+		return tm.(recallModel), false
+	}
+	return m, false
 }
 
 func rpress(t *testing.T, m recallModel, keys ...string) (recallModel, bool) {
@@ -122,20 +140,18 @@ func rpress(t *testing.T, m recallModel, keys ...string) (recallModel, bool) {
 	quit := false
 	for _, k := range keys {
 		tm, cmd := m.Update(key(k))
-		m = tm.(recallModel)
-		if cmd != nil {
-			if _, ok := cmd().(tea.QuitMsg); ok {
-				quit = true
-			}
-		}
+		var q bool
+		m, q = rfeed(tm.(recallModel), cmd)
+		quit = quit || q
 	}
 	return m, quit
 }
 
 func rtype(t *testing.T, m recallModel, text string) recallModel {
 	t.Helper()
-	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
-	return tm.(recallModel)
+	tm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+	m, _ = rfeed(tm.(recallModel), cmd)
+	return m
 }
 
 func rids(m recallModel) string {
@@ -556,8 +572,8 @@ func TestRecallIndexing(t *testing.T) {
 	if v := rview(m); strings.Contains(v, "no session matches") {
 		t.Error("nothing is said to be missing while it is built")
 	}
-	tm, _ := m.Update(recallIndexedMsg{fmt.Errorf("one bad transcript")})
-	m = tm.(recallModel)
+	tm, cmd := m.Update(recallIndexedMsg{fmt.Errorf("one bad transcript")})
+	m, _ = rfeed(tm.(recallModel), cmd)
 	if m.indexing || len(m.results) != 4 || !strings.Contains(rview(m), "some transcripts could not be read: one bad transcript") {
 		t.Errorf("done: %v %d\n%s", m.indexing, len(m.results), rview(m))
 	}
@@ -569,11 +585,11 @@ func TestRecallIndexing(t *testing.T) {
 	was, _ := m.selected()
 	w.claude("s-new", w.dir("shopcart"), "fresh", 10*time.Minute, "u: a brand new session")
 	w.ix.Update()
-	tm, cmd := m.Update(recallTickMsg{})
-	m = tm.(recallModel)
-	if cmd != nil {
+	tm, cmd = m.Update(recallTickMsg{})
+	if _, ok := cmd().(recallFoundMsg); !ok { // a search, and no next tick
 		t.Error("it stops ticking when the index is done")
 	}
+	m, _ = rfeed(tm.(recallModel), cmd)
 	if now, _ := m.selected(); len(m.results) != 5 || m.results[0].ID != "s-new" || now.ID != was.ID {
 		t.Errorf("tick: %d results, first %s, selected %s (was %s)", len(m.results), m.results[0].ID, now.ID, was.ID)
 	}
@@ -657,6 +673,35 @@ func TestRecallKeysAreConfigurable(t *testing.T) {
 	}
 }
 
+// Letters are text in the list, so the footer names only a key that acts there: the first one that
+// is not a character; with none the action is left out, and resume is enter.
+func TestRecallFooterNamesOnlyKeysThatAct(t *testing.T) {
+	w := newRWorld(t)
+	w.fill()
+	m := w.model()
+	c, err := config.Parse("cfg", []byte("[keys]\njump = [\"j\"]\nrecall_filter = [\"f\"]\nrecall_scope = [\"s\", \"ctrl+q\"]\nrecall_copy = [\"y\", \"alt+y\"]\nrecall_open = [\"o\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.cfg = c
+	f := footerOf(m.View())
+	for _, want := range []string{"enter resume", "ctrl+q scope:all", "alt+y copy", "esc quit"} {
+		if !strings.Contains(f, want) {
+			t.Errorf("footer lacks %q: %s", want, f)
+		}
+	}
+	for _, not := range []string{"j resume", "f filter", "s scope", " y copy", "o open", "open"} {
+		if strings.Contains(f, not) {
+			t.Errorf("footer has %q: %s", not, f)
+		}
+	}
+	// the panel is not text: its letters are the keys, and they are named
+	m.panel = true
+	if f := footerOf(m.View()); !strings.Contains(f, "space tick") {
+		t.Errorf("panel footer: %s", f)
+	}
+}
+
 func TestRecallChinese(t *testing.T) {
 	zh(t)
 	w := newRWorld(t)
@@ -706,6 +751,45 @@ func TestRecallColumns(t *testing.T) {
 	tm, _ = m.Update(tea.WindowSizeMsg{Width: 50, Height: 12})
 	if v := rview(tm.(recallModel)); !strings.Contains(v, "the snippet") {
 		t.Errorf("narrow: the snippet stays:\n%s", v)
+	}
+	// a column goes only when the snippet would be left under 14 cells, and the branch before the
+	// project: name 10, project 10, branch 10 take 44 + 1 with 14 left for the snippet at 59
+	row := []recall.Result{{Entry: &recall.Entry{Project: strings.Repeat("p", 10), Head: recall.Head{Name: strings.Repeat("n", 10), Branch: strings.Repeat("b", 10)}}}}
+	for _, c := range []struct{ lw, pw, bw, sw int }{
+		{59, 10, 10, 14}, // just enough for all
+		{58, 10, 0, 24},  // one cell short: the branch goes, the project stays
+		{48, 10, 0, 14},  // just enough without the branch
+		{47, 0, 0, 24},   // one short again: the project goes too
+	} {
+		if _, pw, bw, sw := m.listColumns(row, c.lw); pw != c.pw || bw != c.bw || sw != c.sw {
+			t.Errorf("width %d: project %d branch %d snippet %d, want %d %d %d", c.lw, pw, bw, sw, c.pw, c.bw, c.sw)
+		}
+	}
+}
+
+// A window on a line shows its match: the part before it is cut by cells, not by runes, so a long
+// Chinese sentence (two cells a character) has the match in what is shown.
+func TestRecallWindowCutsByCells(t *testing.T) {
+	text := strings.Repeat("字", 56) + "优惠券"
+	pos := posIn("优惠券", text)
+	if len(pos) == 0 || pos[0] != 56 {
+		t.Fatalf("pos %v", pos)
+	}
+	for _, width := range []int{40, 30, 61} {
+		got, moved := window(text, pos, width)
+		if ansi.StringWidth(got) > width || !strings.Contains(got, "优惠券") || len(moved) == 0 || []rune(got)[moved[0]] != '优' {
+			t.Errorf("width %d: %q (%v)", width, got, moved)
+		}
+	}
+	// ascii is as it was: the match starts a third of the width in
+	ascii := strings.Repeat("a", 60) + "coupon"
+	if got, _ := window(ascii, posIn("coupon", ascii), 30); !strings.HasPrefix(got, "…"+strings.Repeat("a", 10)+"coupon") {
+		t.Errorf("ascii: %q", got)
+	}
+	// a match past the middle of the width is brought forward even when it would still fit
+	mid := strings.Repeat("a", 50) + "coupon" + strings.Repeat("b", 30)
+	if got, _ := window(mid, posIn("coupon", mid), 60); !strings.HasPrefix(got, "…") || !strings.Contains(got, "coupon") {
+		t.Errorf("middle: %q", got)
 	}
 }
 
@@ -1015,6 +1099,35 @@ func TestRecallPreviewIsCached(t *testing.T) {
 		rr, width := change(&mm)
 		if got := mm.previewContent(rr, width); len(got) == 1 && got[0] == "from the cache" {
 			t.Errorf("%s changed and the cache was used", name)
+		}
+	}
+}
+
+// The search runs off the update loop: what it found for a query that has been typed over by the time
+// it comes back is not shown, in whatever order the answers come; and enter does not act on a list
+// that is not the query's yet.
+func TestRecallAnswersOfAnOlderQueryAreDropped(t *testing.T) {
+	w := newRWorld(t)
+	w.fill()
+	letters := func(s string) tea.Msg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+	for _, newerFirst := range []bool{true, false} {
+		tm, c1 := w.model().Update(letters("l"))
+		tm, c2 := tm.Update(letters("egacy"))
+		if got := rids(tm.(recallModel)); got != "s-cart p-api s-ledger s-gone" {
+			t.Fatalf("until an answer comes the list is the old one: %q", got)
+		}
+		if m, quit := rpress(t, tm.(recallModel), "enter"); quit || m.res != nil || m.msg != "" {
+			t.Errorf("enter on a list that is not the query's: quit %v res %v msg %q", quit, m.res, m.msg)
+		}
+		older, newer := c1().(recallFoundMsg), c2().(recallFoundMsg)
+		if len(older.results) < 2 {
+			t.Fatalf("the older query found %d: the test needs it to differ", len(older.results))
+		}
+		for _, msg := range map[bool][]recallFoundMsg{true: {newer, older}, false: {older, newer}}[newerFirst] {
+			tm, _ = tm.Update(msg)
+		}
+		if m := tm.(recallModel); rids(m) != "s-gone" || m.searching {
+			t.Errorf("newer first %v: results %q searching %v", newerFirst, rids(m), m.searching)
 		}
 	}
 }

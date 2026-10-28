@@ -183,7 +183,7 @@ func run(m *Model, cmd tea.Cmd) (quit bool) {
 	switch msg := msg.(type) {
 	case tea.QuitMsg:
 		return true
-	case doneMsg, popupMsg, attachedMsg:
+	case doneMsg, popupMsg, attachedMsg, resumeWindowMsg, recallFoundMsg:
 		tm, next := m.Update(msg)
 		*m = tm.(Model)
 		return run(m, next)

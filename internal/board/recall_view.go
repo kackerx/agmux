@@ -36,8 +36,14 @@ func window(text string, pos []int, width int) (string, []int) {
 	}
 	r := []rune(text)
 	start := 0
-	if len(pos) > 0 && pos[0] > width/2 {
-		start = pos[0] - width/3
+	if len(pos) > 0 { // by cells, not runes: a Chinese sentence is twice as wide as it is long
+		cells := ansi.StringWidth(string(r[:pos[0]]))
+		if cells > width/2 {
+			for cells > width/3 {
+				cells -= ansi.StringWidth(string(r[start]))
+				start++
+			}
+		}
 	}
 	if start > 0 {
 		r = append([]rune{'…'}, r[start:]...)
@@ -121,9 +127,11 @@ func (m recallModel) topBar() string {
 }
 
 // footer is the keys, each with its first configured key; esc closes the panel, clears the query
-// or ends the screen, whichever it would do.
+// or ends the screen, whichever it would do. Outside the panel letters are text, so only a key that
+// is not a character is shown for an action (none: it is left out; resume is always enter).
 func (m recallModel) footer() string {
 	k := m.cfg.First
+	kc := func(action string) string { return m.cfg.FirstCtl(action, "") }
 	var parts []string
 	add := func(key, text string, args ...any) {
 		if key != "" {
@@ -138,11 +146,11 @@ func (m recallModel) footer() string {
 	case m.panel:
 		parts = append(parts, i18n.T("recall.panel.hint", k("recall_toggle"), k("recall_all"), k("recall_none"), "esc"))
 	default:
-		add(k("jump"), "recall.footer.resume")
-		add(k("recall_filter"), "recall.footer.filter")
-		add(k("recall_scope"), "recall.footer.scope", i18n.T("recall.scope_short."+scope))
-		add(k("recall_copy"), "recall.footer.copy")
-		add(k("recall_open"), "recall.footer.open")
+		add(m.cfg.FirstCtl("jump", "enter"), "recall.footer.resume")
+		add(kc("recall_filter"), "recall.footer.filter")
+		add(kc("recall_scope"), "recall.footer.scope", i18n.T("recall.scope_short."+scope))
+		add(kc("recall_copy"), "recall.footer.copy")
+		add(kc("recall_open"), "recall.footer.open")
 		if m.query != "" {
 			parts = append(parts, i18n.T("search.clear", "esc"))
 		} else {

@@ -36,6 +36,7 @@ agmux avatars import sheet.png --name me   # 把 pi-agent-portrait 格式的 she
 | 键 | 作用 |
 |---|---|
 | `j` `k` `h` `l` / 方向键 | 按屏幕位置在卡片间移动 |
+| `?` | 找回已经关掉的会话（见「找回会话」）；`esc` 或再按 `?` 回看板 |
 | `ctrl+d` / `ctrl+u`、卡片区滚轮 | 卡片多到一屏放不下时滚动：按键滚半个正文高，滚轮每格 3 行，都不动焦点；顶栏写着 `↓ more` / `↑ more` 表示上下还有卡。按键把焦点移出可见区时视图回到跟着焦点 |
 | `enter` / 再点一次卡片 | 跳到这个会话的 pane 并关掉看板 |
 | `/` | 模糊搜索：边打边过滤卡片（名字、分支、目录；fzf 语法：空格 = 且、`'精确`、`^前缀`、`后缀$`、`!排除`，有大写才区分大小写），命中的字符黄底深字；`enter` 保留过滤，`esc` 清空 |
@@ -137,7 +138,9 @@ pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi
 | `ctrl+o` | 用 `$EDITOR`（没设用 vi）打开 transcript |
 | `esc` | 三级：收起面板 → 清空查询 → 退出（`ctrl+c` 直接退出） |
 
-这些键都在 `[keys]`：`recall`（`?`，留给看板里进找回，目前看板还没接）、`recall_filter`、`recall_scope`、`recall_copy`、`recall_open`、`recall_toggle`、`recall_all`、`recall_none`。`agmux recall --dump [关键词]` 不开界面，一行一个会话（来源、id、名字、项目、分支、mtime、命中数、片段，制表符分隔）。
+看板里按 `?`（`[keys] recall`）就是同一个界面（同一个进程，在跑的会话用看板当前的会话表，不再单独查一遍）：`esc` 还是三级（面板 → 清查询 → 回看板），查询为空时再按 `?` 也回看板。`enter` 的去向看看板在哪：在跑的会话走看板自己的跳转；已经关了的会话——看板在普通 pane（或不在 tmux 里）就原地换成 `claude --resume`（看板退出），在 tmux 浮窗里（`display-popup`，或 `--stay`）就在你当前的 tmux session 里用会话目录开一个新窗口跑 resume 命令，再把你的 client 切过去（`--stay` 时看板留着）。
+
+这些键都在 `[keys]`：`recall`（`?`）、`recall_filter`、`recall_scope`、`recall_copy`、`recall_open`、`recall_toggle`、`recall_all`、`recall_none`。`agmux recall --dump [关键词]` 不开界面，一行一个会话（来源、id、名字、项目、分支、mtime、命中数、片段，制表符分隔）。
 
 ### 看过的 done 算已读
 

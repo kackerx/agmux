@@ -342,7 +342,7 @@ func TestMidTrunc(t *testing.T) {
 }
 
 func TestRelTime(t *testing.T) {
-	for d, want := range map[time.Duration]string{5 * time.Second: "5s", 3 * time.Minute: "3m", 5 * time.Hour: "5h", 50 * time.Hour: "2d", -time.Second: "0s"} {
+	for d, want := range map[time.Duration]string{5 * time.Second: "5s", 3 * time.Minute: "3m", 5 * time.Hour: "5h", 50 * time.Hour: "2d", 364 * 24 * time.Hour: "364d", 365 * 24 * time.Hour: "1y", 800 * 24 * time.Hour: "2y", 1090 * 24 * time.Hour: "2y", -time.Second: "0s"} {
 		if got := relTime(now.Add(-d), now); got != want {
 			t.Errorf("%v: %q want %q", d, got, want)
 		}
