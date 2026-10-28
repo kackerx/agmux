@@ -5,6 +5,7 @@ Defaults: `preview_down = ["pgdown", "ctrl+n"]`, `preview_up = ["pgup", "ctrl+p"
 Skipped until T79-T82 are in the binary (lib_recall.t83_ready())."""
 import re, subprocess, tempfile, time, unittest
 from lib import wait, plain_config
+from test_t82 import boxes
 from lib_recall import *
 from test_t11 import PreviewBase
 from test_t74 import PreviewKeys
@@ -14,9 +15,13 @@ PLAIN = dict(TMUX="/tmp/fake-tmux,1,0", TMUX_PANE="%1")
 
 
 def first_line(t):
-    """the number of the first `scrollme line NNN` in the right part of the screen (the preview), None when there is none"""
-    snap = t.snap(); x0 = int(t.w * 0.62); nums = [int(m.group(1)) for r in snap for m in [re.search(r"scrollme line (\d{3})", r.width_text(x0, len(r.cells)))] if m]
-    return min(nums) if nums else None
+    """1 + how many rows the preview has been scrolled since the first time this was asked of this terminal (the first call is made with the preview at the top): None when no preview shows. The preview starts with a
+    header (directory, agent, id, a blank row) before the first hit, so the first hit stays in view for the first rows of scrolling: what is followed is the row of `scrollme line 010`, which has 9 hits above it."""
+    snap = t.snap(); bs = boxes(t); x0 = max(b["c"] for b in bs) if len(bs) == 3 else int(t.w * 0.62)
+    row = next((r for r, rw in enumerate(snap) if "scrollme line 010" in rw.width_text(x0, len(rw.cells))), None)
+    if row is None: return None
+    if getattr(t, "_scroll_base", None) is None: t._scroll_base = row
+    return 1 + t._scroll_base - row
 
 
 @needs

@@ -47,12 +47,12 @@ class Frames:
 
     def test_titles_the_list_has_n_of_total_the_preview_the_session_name_the_input_none(self):
         t = self.start(140, 40); inp, lst, prv = self.three(t)
-        self.assertEqual(inp["title"], "", "the input box has no title"); self.assertRegex(lst["title"], r"^1/5$", "the first of the five sessions"); self.assertIn("cart-fix", prv["title"])
-        t.keys("Down"); self.assertTrue(wait(lambda: self.three(t)[1]["title"] == "2/5", 4), t.text()); self.assertTrue(wait(lambda: "Audit log export" in self.three(t)[2]["title"], 4), "the preview follows the selection")
-        t.lit("'coupon"); self.assertTrue(wait(lambda: self.three(t)[1]["title"] == "1/1" and "cart-fix" in self.three(t)[2]["title"], 5), t.text())
+        self.assertEqual(inp["title"], "", "the input box has no title"); self.assertEqual(lst["title"], "5/5", "no query: every session is a hit (2376ff9: the title counts hits / sessions that can be searched)"); self.assertIn("cart-fix", prv["title"])
+        t.keys("Down"); self.assertTrue(wait(lambda: "Audit log export" in self.three(t)[2]["title"], 4), "the preview follows the selection"); self.assertEqual(self.three(t)[1]["title"], "5/5", "the selection does not change the count"); self.assertTrue(wait(lambda: "Audit log export" in self.three(t)[2]["title"], 4), "the preview follows the selection")
+        t.lit("'coupon"); self.assertTrue(wait(lambda: self.three(t)[1]["title"] == "1/5" and "cart-fix" in self.three(t)[2]["title"], 5), t.text())
 
     def test_the_boxes_are_drawn_even_with_no_match_and_say_zero(self):
-        t = self.start(140, 40); t.lit("'zzqqxx-nothing"); self.assertTrue(wait(lambda: len(boxes(t)) >= 2 and sorted(boxes(t), key=lambda b: (b["c"], b["r"]))[1]["title"] == "0/0", 5), "GUESS: 0/0\n" + t.text())
+        t = self.start(140, 40); t.lit("'zzqqxx-nothing"); self.assertTrue(wait(lambda: len(boxes(t)) >= 2 and sorted(boxes(t), key=lambda b: (b["c"], b["r"]))[1]["title"] == "0/5", 5), "no hit: 0 / the 5 sessions there are (5a586a0)\n" + t.text())
 
     def test_under_100_columns_only_the_first_two_boxes(self):
         t = self.start(99, 40); bs = boxes(t); self.assertEqual(len(bs), 2, t.text()); inp, lst = sorted(bs, key=lambda b: b["r"]); self.assertTrue(near(inp["fg"], DEFAULT["input"]) and near(lst["fg"], DEFAULT["list"]))

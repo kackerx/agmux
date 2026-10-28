@@ -46,7 +46,7 @@ class TwoStage:
         t = self.start(); self.lock(t)
         for want in (1, 2, 3): t.keys("j"); self.until_sel(t, want, "j")
         t.keys("j"); time.sleep(0.5); self.until_sel(t, 3, "j at the last row stays"); t.keys("k"); self.until_sel(t, 2)
-        t.keys("k", "k"); self.until_sel(t, 0); t.keys("k"); time.sleep(0.5); self.until_sel(t, 0, "k at the first row stays")
+        t.keys("k"); time.sleep(0.25); t.keys("k"); self.until_sel(t, 0); t.keys("k"); time.sleep(0.5); self.until_sel(t, 0, "k at the first row stays")
 
     def test_selecting_up_and_down_arrows_move_like_j_and_k(self):
         t = self.start(); self.lock(t); t.keys("Down"); self.until_sel(t, 1); t.keys("Up"); self.until_sel(t, 0); t.keys("Up"); time.sleep(0.4); self.until_sel(t, 0, "no wrap")

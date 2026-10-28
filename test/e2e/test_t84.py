@@ -21,7 +21,7 @@ POPUP = dict(TMUX="/tmp/fake-tmux,1,0")
 
 def list_row(t, name):
     """(row, column of the name) of the session `name` in the left 60% of the screen (the list), None when it is not shown"""
-    snap = t.snap(); x1 = int(t.w * 0.6)
+    snap = t.snap(); bs = sorted(boxes(t), key=lambda b: (b["c"], b["r"])); x1 = bs[1]["c2"] if len(bs) >= 2 else int(t.w * 0.6)  # the list box: the preview's title (the selected session's name) must not count as a list row
     for r, row in enumerate(snap):
         c = row.find(name)
         if 0 <= c < x1: return r, c
@@ -95,11 +95,22 @@ class Mouse:
         t.wheel(x, y, up=True, n=3); self.assertTrue(wait(lambda: first_line(t) == 1, 4)); t.wheel(x, y, up=True); time.sleep(0.5); self.assertEqual(first_line(t), 1, "stops at the top")
 
     # ---- the parts that do nothing
-    def test_clicks_and_the_wheel_on_the_input_box_the_frames_and_the_footer_do_nothing(self):
-        t = self.start(); self.click(t, "wrap-3"); self.until_sel(t, 2); bs = boxes(t); inp = sorted(bs, key=lambda b: (b["c"], b["r"]))[0]; lst = sorted(bs, key=lambda b: (b["c"], b["r"]))[1]
-        spots = [("input row", 3, inp["r"] + 1), ("input top border", 3, inp["r"]), ("list top border", 3, lst["r"]), ("list bottom border", 3, lst["r2"]), ("footer", 3, t.h - 1), ("footer, twice", 3, t.h - 1)]
-        for name, x, y in spots: t.click(x, y, n=2); t.wheel(x, y, up=False); time.sleep(0.4)
-        time.sleep(0.6); self.until_sel(t, 2, "nothing moved the selection"); self.assertEqual(self.resumed(), [], "and a double click on the input box or the footer is not a confirm"); self.assertTrue(t.alive())
+    def test_clicks_on_the_input_box_the_frames_and_the_footer_do_nothing_and_neither_does_the_wheel_on_the_input_box_and_the_footer(self):
+        t = self.start(); self.click(t, "wrap-3"); self.until_sel(t, 2); bs = sorted(boxes(t), key=lambda b: (b["c"], b["r"])); inp, lst = bs[0], bs[1]
+        for name, x, y in (("input row", 3, inp["r"] + 1), ("input top border", 3, inp["r"]), ("list top border", 3, lst["r"]), ("list bottom border", 3, lst["r2"]), ("footer", 3, t.h - 1)): t.click(x, y, n=2); time.sleep(0.3)
+        for name, x, y in (("input row", 3, inp["r"] + 1), ("input top border", 3, inp["r"]), ("footer", 3, t.h - 1)): t.wheel(x, y, up=False); t.wheel(x, y, up=True); time.sleep(0.3)
+        time.sleep(0.6); self.until_sel(t, 2, "nothing moved the selection"); self.assertEqual(self.resumed(), [], "and a double click on the input box, a border or the footer is not a confirm"); self.assertTrue(t.alive())
+
+    def test_a_wheel_on_the_border_of_the_list_counts_as_inside_it_a_click_there_does_not(self):
+        # 9cf6bec: the wheel on the list's frame scrolls the list; a click on the frame still does nothing
+        t = self.start(); self.click(t, "wrap-2"); self.until_sel(t, 1); lst = sorted(boxes(t), key=lambda b: (b["c"], b["r"]))[1]
+        t.wheel(3, lst["r"], up=False); self.until_sel(t, 2, "the wheel on the top border moves the selection"); t.wheel(3, lst["r2"], up=True); self.until_sel(t, 1, "and so does the one on the bottom border")
+        t.click(3, lst["r"], n=2); time.sleep(0.6); self.until_sel(t, 1, "a click on the border does nothing"); self.assertEqual(self.resumed(), [])
+
+    def test_a_wheel_on_the_border_of_the_preview_scrolls_the_preview(self):
+        t = self.start(scroll=True); t.lit("'scrollme"); self.assertTrue(wait(lambda: first_line(t) == 1, 6), t.text()); time.sleep(0.4); prv = sorted(boxes(t), key=lambda b: (b["c"], b["r"]))[2]
+        t.wheel(prv["c"] + 6, prv["r"], up=False); self.assertTrue(wait(lambda: first_line(t) == 4, 4), f"top border: {first_line(t)}"); t.wheel(prv["c"] + 6, prv["r2"], up=True); self.assertTrue(wait(lambda: first_line(t) == 1, 4), "bottom border")
+        t.click(prv["c"] + 6, prv["r"], n=2); time.sleep(0.5); self.assertEqual(first_line(t), 1); self.assertEqual(self.resumed(), [])
 
     def test_with_the_filter_panel_open_the_mouse_is_ignored(self):
         t = self.start(); self.until_sel(t, 0); t.keys("C-f"); time.sleep(0.7); x, y = int(t.w * 0.2), t.h // 2
@@ -151,14 +162,18 @@ class InsideTheBoard(Mouse, Base, unittest.TestCase):
         self.env.reg(self.ids[1], name="wrap-2", nameSource="user", tmux="sess:@1.%52", cwd=self.dirs[1]); t = self.start(args="board --stay", env=POPUP); x, y = self.at(t, "wrap-2"); t.click(x, y, n=2)
         self.assertTrue(wait(lambda: any("%52" in " ".join(c) for c in self.env.tmux_calls() if c and c[0] in ("switch-client", "select-pane", "select-window")), 5), str(self.env.tmux_calls())); self.assertEqual(self.resumed(), [])
 
-    def test_in_a_popup_a_double_click_makes_a_window_and_the_mouse_still_works_after_it(self):
+    def jumps_to(self, pane):
+        return any(pane in " ".join(c) for c in self.env.tmux_calls() if c and c[0] in ("switch-client", "select-pane", "select-window"))
+
+    def test_in_a_popup_a_double_click_makes_a_window_and_the_board_is_back_with_its_mouse(self):
         t = self.start(args="board --stay", env=POPUP); self.lock(t); x, y = self.at(t, "wrap-3"); t.click(x, y, n=2)
-        self.assertTrue(wait(lambda: [c for c in self.env.tmux_calls() if c and c[0] == "new-window"], 6), str(self.env.tmux_calls())); self.assertEqual(self.resumed(), [], "nothing is exec'd: a window was made"); time.sleep(1.0)
-        self.assertTrue(t.alive()); self.click(t, "wrap-1"); self.until_sel(t, 0, "the mouse still works after the window was made")
+        self.assertTrue(wait(lambda: [c for c in self.env.tmux_calls() if c and c[0] == "new-window"], 6), str(self.env.tmux_calls())); self.assertEqual(self.resumed(), [], "nothing is exec'd: a window was made")
+        self.assertTrue(wait(lambda: "live-one" in t.text() and not t.visible({"a": "wrap-1"}), 5), "the board is back (the recall screen closes once the window is made):\n" + t.text()); self.assertTrue(t.alive())
+        f = row_of(t, "live-one"); t.click(f[1] + 2, f[0], n=2); self.assertTrue(wait(lambda: self.jumps_to("%51"), 5), "the board's own mouse works: a double click on its card jumps: " + str(self.env.tmux_calls()))
 
-    def test_a_click_and_the_wheel_on_the_board_itself_are_not_swallowed_after_leaving_recall(self):
-        t = self.start(); t.esc(); self.assertTrue(wait(lambda: "live-one" in t.text() and not t.visible({"a": "wrap-1"}), 5), t.text()); f = row_of(t, "live-one"); self.assertIsNotNone(f); t.click(f[1] + 2, f[0]); time.sleep(0.6); self.assertTrue(t.alive())
-
+    def test_a_click_on_the_board_itself_is_not_swallowed_after_leaving_recall(self):
+        t = self.start(args="board --stay", env=POPUP); t.esc(); self.assertTrue(wait(lambda: "live-one" in t.text() and not t.visible({"a": "wrap-1"}), 5), t.text()); f = row_of(t, "live-one"); self.assertIsNotNone(f)
+        t.click(f[1] + 2, f[0], n=2); self.assertTrue(wait(lambda: self.jumps_to("%51"), 5), "a double click on a card jumps, as on any board: " + str(self.env.tmux_calls()))
 
 if __name__ == "__main__":
     unittest.main()
