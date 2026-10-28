@@ -444,3 +444,25 @@ func TestExecResume(t *testing.T) {
 		t.Error("a directory that is gone is an error")
 	}
 }
+
+// A transcript that can not be read is said and the rest is still listed; the exit code is 1.
+func TestRecallDumpExitsOneWhenATranscriptIsUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	claude := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	good := filepath.Join(claude, "projects", "-w", "good.jsonl")
+	bad := filepath.Join(claude, "projects", "-w", "bad.jsonl")
+	os.MkdirAll(filepath.Dir(good), 0o755)
+	line := `{"type":"user","cwd":"/w","message":{"role":"user","content":"a sentence in a session"}}` + "\n"
+	os.WriteFile(good, []byte(line), 0o644)
+	os.WriteFile(bad, []byte(line), 0o000)
+	var out, errs bytes.Buffer
+	code := run([]string{"recall", "--dump"}, &out, &errs)
+	if code != 1 || !strings.Contains(out.String(), "good") || !strings.Contains(errs.String(), "bad.jsonl") {
+		t.Errorf("exit %d, out %q, err %q", code, out.String(), errs.String())
+	}
+}

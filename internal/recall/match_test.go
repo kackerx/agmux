@@ -267,3 +267,14 @@ func TestChronoAndMatches(t *testing.T) {
 		t.Errorf("no times: %+v", l)
 	}
 }
+
+// Between sessions, a tie in score goes by who said the best sentence (you first), and only then by
+// the age of the transcript.
+func TestSearchTiesGoToWhatYouSaidThenToTheNewest(t *testing.T) {
+	yours := ent("yours", "claude", "p", "", "n", 100, []string{"the same sentence"}, nil)
+	agents := ent("agents", "claude", "p", "", "n", 300, nil, []string{"the same sentence"})
+	newer := ent("newer", "claude", "p", "", "n", 200, []string{"the same sentence"}, nil)
+	if got := ids(idx(agents, newer, yours).Search("'same")); got != "newer yours agents " {
+		t.Errorf("%q: yours (newer first), then the agent's though it is the newest", got)
+	}
+}

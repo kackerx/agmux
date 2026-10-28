@@ -271,13 +271,17 @@ func recallCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	if err := ix.Update(); err != nil { // some transcript could not be read: say so, show the rest
-		fmt.Fprintln(stderr, "agmux: recall:", err)
+	failed := ix.Update() // some transcript that could not be read: said, and the rest shown, and the exit code says it
+	if failed != nil {
+		fmt.Fprintln(stderr, "agmux: recall:", failed)
 	}
 	one := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
 	for _, r := range ix.Search(strings.Join(args, " ")) {
 		fmt.Fprintln(stdout, strings.Join([]string{r.Source, one.Replace(r.ID), one.Replace(r.Title()), one.Replace(r.Project), one.Replace(r.Branch),
 			time.Unix(0, r.MTime).UTC().Format(time.RFC3339), strconv.Itoa(r.Hits), one.Replace(r.Snippet.Text)}, "\t"))
+	}
+	if failed != nil {
+		return 1
 	}
 	return 0
 }

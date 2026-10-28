@@ -482,3 +482,101 @@ func TestResumeIsOfTheSource(t *testing.T) {
 		t.Errorf("codex: %q", got)
 	}
 }
+
+// Several transcripts are read at once and the newer ones take longer: Entries is newest first all the
+// same, and at every moment of the build; Progress is told 1, 2, 3 … in that order.
+func TestUpdateWithManyWorkersKeepsTheOrder(t *testing.T) {
+	w := newWorld(t)
+	const n = 6
+	for i := range n {
+		p := w.transcript(fmt.Sprintf("s%d", i), finished(t))
+		at := time.Now().Add(-time.Duration(i) * time.Hour) // s0 is the newest
+		os.Chtimes(p, at, at)
+	}
+	w.src.onRead = func(p string) { // the newest is the slowest
+		var i int
+		fmt.Sscanf(filepath.Base(p), "s%d.jsonl", &i)
+		time.Sleep(time.Duration(n-i) * 15 * time.Millisecond)
+	}
+	ix := w.index()
+	ix.Workers = n
+	var seen []int
+	var mu sync.Mutex
+	ix.Progress = func(done, total int) {
+		es := ix.Entries()
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, done)
+		for i := 1; i < len(es); i++ {
+			if es[i-1].MTime < es[i].MTime {
+				t.Errorf("during the build, after %d: entries are not newest first", done)
+			}
+		}
+	}
+	if err := ix.Update(); err != nil {
+		t.Fatal(err)
+	}
+	for i, e := range ix.Entries() {
+		if want := fmt.Sprintf("s%d", i); e.ID != want {
+			t.Errorf("entry %d is %s, want %s", i, e.ID, want)
+		}
+	}
+	for i, d := range seen {
+		if d != i+1 {
+			t.Errorf("Progress was told %v", seen)
+			break
+		}
+	}
+}
+
+// A temp file that a crashed write left is removed, a young one (another agmux may be writing it) is not.
+func TestUpdateRemovesOldTempFiles(t *testing.T) {
+	w := newWorld(t)
+	w.transcript("s1", finished(t))
+	os.MkdirAll(w.cache, 0o755)
+	old, young := filepath.Join(w.cache, ".tmp-old"), filepath.Join(w.cache, ".tmp-young")
+	os.WriteFile(old, []byte("x"), 0o644)
+	os.WriteFile(young, []byte("x"), 0o644)
+	at := time.Now().Add(-2 * time.Minute)
+	os.Chtimes(old, at, at)
+	w.update()
+	if _, err := os.Stat(old); err == nil {
+		t.Error("the old temp file stays")
+	}
+	if _, err := os.Stat(young); err != nil {
+		t.Error("the young one went:", err)
+	}
+}
+
+// A session's name may hold anything the user typed; it shows as one line.
+func TestTitleHasNoControlCharacters(t *testing.T) {
+	e := &Entry{Head: Head{Name: "a\x1b[0mb\nc\td\u202ee"}}
+	if got := e.Title(); got != "a [0mb c d e" {
+		t.Errorf("%q", got)
+	}
+	e = &Entry{Users: []Line{{Text: "first\rwords"}}}
+	if got := e.Title(); got != "first words" {
+		t.Errorf("%q", got)
+	}
+}
+
+// Transcripts of the same age are in the order of their paths, whichever was read first.
+func TestUpdateEqualAgesGoByPath(t *testing.T) {
+	w := newWorld(t)
+	at := time.Now().Add(-time.Hour)
+	for _, id := range []string{"b", "c", "a"} {
+		os.Chtimes(w.transcript(id, finished(t)), at, at)
+	}
+	ix := w.index()
+	ix.Workers = 1
+	if err := ix.Update(); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range ix.Entries() {
+		got = append(got, e.ID)
+	}
+	if strings.Join(got, " ") != "a b c" {
+		t.Errorf("%v", got)
+	}
+}

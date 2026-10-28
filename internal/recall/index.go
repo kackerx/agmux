@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"time"
+	"unicode"
+
+	"github.com/kackerx/agmux/internal/gitrepo"
 )
 
 // Version is the cache format: an entry of another version is read again from its transcript.
@@ -31,15 +34,19 @@ type Entry struct {
 	Replies []Line `json:"replies"`
 }
 
-// Title is the session's name; with none, the first thing you said.
+// Title is the session's name; with none, the first thing you said. Control characters (a name is
+// whatever the user typed) are spaces: it ends up on one line of a screen.
 func (e *Entry) Title() string {
-	if e.Name != "" {
-		return e.Name
+	t := e.Name
+	if t == "" && len(e.Users) > 0 {
+		t = e.Users[0].Text
 	}
-	if len(e.Users) > 0 {
-		return e.Users[0].Text
-	}
-	return ""
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return ' '
+		}
+		return r
+	}, t)
 }
 
 // Index is the entries of every transcript of its sources, kept in a cache directory.
@@ -107,16 +114,26 @@ func (ix *Index) Update() error {
 			}
 		}
 	}
+	// a temp file that a write left behind (a crash between the write and the rename); a young one
+	// may be another agmux's, writing right now
+	if tmps, _ := glob(ix.Dir, ".tmp-*"); len(tmps) > 0 {
+		for _, f := range tmps {
+			if fi, err := os.Stat(f); err == nil && time.Since(fi.ModTime()) > time.Minute {
+				os.Remove(f)
+			}
+		}
+	}
 	ix.mu.Lock()
 	ix.entries = nil
 	ix.gen++
 	ix.mu.Unlock()
 
 	var (
-		wg   sync.WaitGroup
-		next = make(chan job)
-		done int
-		fail error
+		wg     sync.WaitGroup
+		next   = make(chan job)
+		done   int
+		progMu sync.Mutex // done and Progress go together, so what Progress is told only goes up
+		fail   error
 	)
 	for range cmp.Or(ix.Workers, max(runtime.NumCPU(), 2)) {
 		wg.Add(1)
@@ -128,16 +145,23 @@ func (ix *Index) Update() error {
 				if err != nil && fail == nil {
 					fail = err
 				}
-				if e != nil {
-					ix.entries = append(ix.entries, e)
+				if e != nil { // in its place: newest first, now and while the rest is built
+					i, _ := slices.BinarySearchFunc(ix.entries, e, func(have, e *Entry) int {
+						if c := cmpInt(e.MTime, have.MTime); c != 0 {
+							return c
+						}
+						return strings.Compare(have.Path, e.Path)
+					})
+					ix.entries = slices.Insert(ix.entries, i, e)
 					ix.gen++
 				}
-				done++
-				n := done
 				ix.mu.Unlock()
+				progMu.Lock()
+				done++
 				if ix.Progress != nil {
-					ix.Progress(n, len(jobs))
+					ix.Progress(done, len(jobs))
 				}
+				progMu.Unlock()
 			}
 		}()
 	}
@@ -146,9 +170,6 @@ func (ix *Index) Update() error {
 	}
 	close(next)
 	wg.Wait()
-	ix.mu.Lock()
-	defer ix.mu.Unlock()
-	slices.SortStableFunc(ix.entries, func(a, b *Entry) int { return cmpInt(b.MTime, a.MTime) })
 	return fail
 }
 
@@ -269,9 +290,8 @@ func save(path string, e *Entry) error {
 	return err
 }
 
-// project is the name of the repository the directory belongs to (a worktree is under its main one),
-// else the directory's own name; and, for a linked worktree, its own directory's name. One question
-// to git per directory.
+// project is the name of the repository the directory belongs to and, for a linked worktree, the
+// name of the worktree's own directory (see gitrepo). One question to git per directory.
 func (ix *Index) project(cwd string) (project, worktree string) {
 	if cwd == "" {
 		return "", ""
@@ -282,21 +302,8 @@ func (ix *Index) project(cwd string) (project, worktree string) {
 	if ok {
 		return r[0], r[1]
 	}
-	r[0] = filepath.Base(cwd)
-	if _, err := os.Stat(cwd); err == nil {
-		if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir", "--show-toplevel").Output(); err == nil {
-			if f := strings.Split(strings.TrimSpace(string(out)), "\n"); len(f) == 3 {
-				common, gitDir, top := f[0], f[1], f[2]
-				r[0] = filepath.Base(top) // a submodule, a separate git dir: the checkout's own name
-				if filepath.Base(common) == ".git" {
-					r[0] = filepath.Base(filepath.Dir(common)) // a worktree is under the repository it was made from
-				}
-				if gitDir != common { // a linked worktree has a git dir of its own
-					r[1] = filepath.Base(top)
-				}
-			}
-		}
-	}
+	g := gitrepo.Lookup(cwd)
+	r[0], r[1] = g.Project, g.Worktree
 	ix.mu.Lock()
 	if ix.repos == nil {
 		ix.repos = map[string][2]string{}

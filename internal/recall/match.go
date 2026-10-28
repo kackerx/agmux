@@ -111,7 +111,9 @@ func (ix *Index) SearchIn(query string, f Filter) []Result {
 	}
 	best := map[int]*Result{}
 	onBody := map[int]bool{} // the session's snippet is a sentence that matched by its text
-	for i, m := range ms {   // best score first, a sentence of yours first among equals
+	// ms is best score first and, among equal scores, in the order of the items: a session's own
+	// sentences come yours first (Entry.Lines), so a tie inside a session goes to what you said
+	for i, m := range ms {
 		r := c.of[m.Index]
 		res := best[r.entry]
 		if res == nil {
@@ -129,9 +131,15 @@ func (ix *Index) SearchIn(query string, f Filter) []Result {
 	for _, r := range best {
 		out = append(out, *r)
 	}
-	slices.SortFunc(out, func(a, b Result) int {
+	slices.SortFunc(out, func(a, b Result) int { // score, then who said the best sentence (you first), then the newest transcript
 		if a.Score != b.Score {
 			return b.Score - a.Score
+		}
+		if you := a.Snippet.Role == '>'; you != (b.Snippet.Role == '>') {
+			if you {
+				return -1
+			}
+			return 1
 		}
 		if a.MTime != b.MTime {
 			return cmpInt(b.MTime, a.MTime)
