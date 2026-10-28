@@ -42,7 +42,7 @@ func (m Model) openRecall() (tea.Model, tea.Cmd) {
 	}
 	cwd, _ := os.Getwd()
 	rm := newRecallModel(m.rx.ix, m.cfg, m.src.Sessions(), m.rx.ix.ProjectOf(cwd), "")
-	rm.embedded, rm.w, rm.h = true, m.w, m.h
+	rm.embedded, rm.w, rm.h, rm.building = true, m.w, m.h, m.resuming
 	m.rc = &rm
 	return m, rm.Init()
 }
@@ -104,6 +104,8 @@ func (m Model) picked(p *recallPick) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	r, getenv, res, name := m.run, m.getenv, *p.resume, p.name
+	m.rc.building = true
+	m.resuming = true
 	return m, func() tea.Msg {
 		pane, err := newResumeWindow(r, getenv, res, name)
 		return resumeWindowMsg{pane, err}
@@ -113,6 +115,10 @@ func (m Model) picked(p *recallPick) (tea.Model, tea.Cmd) {
 // resumed: the window is there, go to it (the board's own jump: a popup closes, --stay keeps the
 // board); or say why it is not.
 func (m Model) resumed(msg resumeWindowMsg) (tea.Model, tea.Cmd) {
+	m.resuming = false // kept on the board: the screen that asked may be gone, another one open
+	if m.rc != nil {
+		m.rc.building = false
+	}
 	if msg.err != nil {
 		if m.rc != nil {
 			m.rc.msg = fg(cRed, " "+firstLine(msg.err.Error()))
@@ -143,9 +149,9 @@ func newResumeWindow(r Runner, getenv func(string) string, res RecallResult, nam
 		return "", fmt.Errorf("new-window: tmux did not say which session the client %s is in", pc.name)
 	}
 	args = append(args, "-t", "="+session+":")
-	args = append(args, "-c", res.Dir)
+	args = append(args, "-c", tmuxText(res.Dir))
 	if name != "" {
-		args = append(args, "-n", name)
+		args = append(args, "-n", tmuxText(name))
 	}
 	out, err := r.Tmux(append(append(args, "--"), res.Argv...)...)
 	if err != nil {

@@ -122,8 +122,9 @@ type Model struct {
 	cfg    *config.Config
 	keymap map[string]string // key (as KeyMsg.String() spells it) → action
 
-	rc *recallModel // the recall screen, while it is on (T77); nil: the board
-	rx *recallIndex // what the recall screen is made of and what it asked for; shared by the copies of the Model
+	rc       *recallModel // the recall screen, while it is on (T77); nil: the board
+	resuming bool         // a window is being made for a session resumed from it (kept here: the screen may be left meanwhile)
+	rx       *recallIndex // what the recall screen is made of and what it asked for; shared by the copies of the Model
 }
 
 func New(src Source, run Runner) Model {

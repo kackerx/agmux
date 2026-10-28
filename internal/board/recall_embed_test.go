@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/kackerx/agmux/internal/config"
 	"github.com/kackerx/agmux/internal/recall"
 	"github.com/kackerx/agmux/internal/store"
 )
@@ -374,6 +375,102 @@ func TestBoardRecallFailedWindowIsNotRepeated(t *testing.T) {
 	m, _ = bpress(t, m, "x")
 	if n := len(tmuxCalls(e.r, "new-window")); n != 1 {
 		t.Errorf("new-window ran %d times", n)
+	}
+}
+
+// While the window of the session picked is being made, a second enter makes no second one (two
+// agents would write the same transcript); once tmux has answered, enter works again.
+func TestBoardRecallEnterWhileTheWindowIsBeingMade(t *testing.T) {
+	for _, jump := range []string{"enter", "ctrl+g"} {
+		m, e := newEmb(t, userOnly, popupEnv, false)
+		e.r.tmuxFail = map[string]error{"new-window": fmt.Errorf("no space for another window")}
+		if jump != "enter" {
+			c, err := config.Parse("cfg", []byte("[keys]\njump = [\""+jump+"\"]\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.cfg = c
+		}
+		m = openRecallOn(t, m)
+		tm, first := m.Update(key(jump))
+		if first == nil {
+			t.Fatalf("%s: no window asked for", jump)
+		}
+		for _, k := range []string{jump, "enter"} { // enter is a resume key whatever jump is
+			if _, second := tm.Update(key(k)); second != nil {
+				t.Errorf("%s then %s: a second window is asked for", jump, k)
+			}
+		}
+		// the rest of the screen is the user's meanwhile: they can type, and esc leaves it (the window comes anyway)
+		if typed, _ := tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}); typed.(Model).rc.query != "x" {
+			t.Errorf("%s: typing while the window is being made is held back", jump)
+		}
+		if left, _ := tm.Update(key("esc")); left.(Model).rc != nil {
+			t.Errorf("%s: esc while the window is being made does not leave", jump)
+		}
+		m = tm.(Model)
+		run(&m, first) // tmux answers (here: no)
+		if n := len(tmuxCalls(e.r, "new-window")); n != 1 {
+			t.Errorf("%s: new-window ran %d times", jump, n)
+		}
+		if _, again := m.Update(key(jump)); again == nil { // the answer is in: enter asks again
+			t.Errorf("%s: enter does nothing after the window failed", jump)
+		}
+	}
+}
+
+// The wait is the board's, not the screen's: leaving the screen and opening it again while tmux
+// has not answered does not make enter ask for a second window, and the answer ends the wait on
+// the screen that is open then.
+func TestBoardRecallWaitSurvivesLeavingTheScreen(t *testing.T) {
+	m, e := newEmb(t, userOnly, popupEnv, false)
+	e.r.tmuxFail = map[string]error{"new-window": fmt.Errorf("no space for another window")}
+	m = openRecallOn(t, m)
+	tm, first := m.Update(key("enter"))
+	tm, _ = tm.Update(key("esc")) // back to the board
+	m = openRecallOn(t, tm.(Model))
+	if _, again := m.Update(key("enter")); again != nil {
+		t.Error("enter on the reopened screen asked for a second window")
+	}
+	run(&m, first) // the answer (no) arrives
+	if _, again := m.Update(key("enter")); again == nil {
+		t.Error("enter does nothing after the answer")
+	}
+	// the answer ended the wait for screens opened later too
+	m, _ = bpress(t, m, "esc", "esc")
+	m = openRecallOn(t, m)
+	if _, again := m.Update(key("enter")); again == nil {
+		t.Error("enter does nothing on a screen opened after the answer")
+	}
+	// and so does an answer that is a window (--stay: the board is still there)
+	m, e = newEmb(t, stayClients, stayEnv, true)
+	m = openRecallOn(t, m)
+	m, _ = bpress(t, m, "enter")
+	m = openRecallOn(t, m)
+	if _, again := m.Update(key("enter")); again == nil || len(tmuxCalls(e.r, "new-window")) != 1 {
+		t.Errorf("after a window was made: enter asks again %v, new-window %d", again != nil, len(tmuxCalls(e.r, "new-window")))
+	}
+}
+
+// tmux expands #S and #T in the -n and -c of new-window, and a directory with # in it silently
+// starts the window in $HOME: both are sent with ## for each #.
+func TestWindowNamesAndDirsAreEscapedForTmux(t *testing.T) {
+	r := &fakeRunner{tmuxOut: map[string]string{"list-clients": userOnly, "new-window": "%9\n"}}
+	if _, err := newResumeWindow(r, func(string) string { return "" }, RecallResult{Dir: "/w/proj#S#T", Argv: []string{"claude"}}, "tag #T 测试 #S"); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(tmuxCalls(r, "new-window")[0], "\x00")
+	if !strings.Contains(got, "\x00-c\x00/w/proj##S##T\x00") || !strings.Contains(got, "\x00-n\x00tag ##T 测试 ##S\x00") {
+		t.Errorf("new-window %q", got)
+	}
+	// the background attach window (T60) the same
+	r = &fakeRunner{tmuxOut: map[string]string{"new-window": "%9\n"}}
+	if _, err := attachWindow(r, store.Session{ID: "b1", Name: "tag #T 测试 #S", CWD: "/w/proj#S#T"}, 80, 24); err != nil {
+		t.Fatal(err)
+	}
+	got = strings.Join(tmuxCalls(r, "new-window")[0], "\x00")
+	if !strings.Contains(got, "\x00-c\x00/w/proj##S##T\x00") || !strings.Contains(got, "\x00-n\x00tag ##T 测试 ##S\x00") {
+		t.Errorf("attach new-window %q", got)
 	}
 }
 
