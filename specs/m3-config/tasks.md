@@ -555,3 +555,30 @@
 - 2026-10-20 18:25 已装 c597ae6（干净 clone，vcs.modified=false）。T64–T66 待用户验收（后台卡跟 blessmuse 组、备用进程不显示）；--stay 常驻看板要 Q 退了重开才用上新版。
 - tester（18565b6，套件 f36add1）：整套 1183 条 6374 s 零红。T70：`Env.write_show` 入口不变，lib 的 sync_registry 翻成 sessions / jobs / projects / statusline + 每会话一个活 sleep 进程（procStart 按 LC_ALL=C TZ=UTC ps）；假 claude / hunk / ps（藏本机真 pi）；fake tmux 日志一次调用一文件（修 t44 偶红）；done 旧语义用 rearm 表达。删 / 改的旧用例均为预期（子代理计数、ccmux 错误、spare、无名卡、空项目）。新 t67 42 / t68 24 / t69 20。没覆盖：真会话、真 bg、pi 多层爬树、hunk 真程序、Linux、kitty。**第十四批通过，目标 18565b6，装。M5 完成。**
 - 2026-10-21 03:26 已装 18565b6（干净 clone，vcs.modified=false）。只读核：登记里活 pid 非 spare 26 个 = `agmux show` 26 行，id 一一对应；pi 0（用户两个 pi 未重启）。T64–T73 待用户验收。
+
+## 第十五批 M6 找回会话 + 键位全可配 + 中英文（用户 2026-10-28「先来个 MVP」）
+设计 specs/m6-recall/design.md。顺序：T74（i18n + 键位）→ T75（索引 + 来源）→ T76（`agmux -r` 界面）→ T77（看板 `?` 入口）；tester T78 与 T75 起并行备夹具。做完由 dev 自己实测 fzf 耗时。
+
+### T74 `[ui] language` 中英文 + 键位全部进 `[keys]`
+- 为的是：用户要默认英文、可切中文；每个键可配。
+- 做法：design §5 §6。先 `git grep` 列出看板里全部用户可见字符串和硬编码按键，贴进 tasks.md 这一项下面让我过目后再改（清单一条一行）；`internal/i18n` 两张表；`[keys]` 补齐缺的动作并进模板 + golden。
+- 验收：单测两表 key 集合相等、缺 zh 回落、`$AGMUX_LANG=zh` 下底栏是中文；golden 更新；`agmux config` 回读；`go test ./...`。黑盒（tester）：zh / en 底栏、消息行、选择框各一例；新收进来的键改绑后生效、原键失效。
+
+### T75 recall 索引 + Claude / pi 来源
+- 为的是：按内容找回会话的数据底座，首建一次后每次打开毫秒级。
+- 做法：design §3 §4。`internal/recall`：Source 接口 + claude.go + pi.go + index.go（缓存、增量、首建协程、噪音过滤、去重、上限）。`agmux recall --dump [关键词]` 先出一个纯文本子命令（每行 `来源\tid\t名字\t项目\t分支\tmtime\t命中数\t片段`）给 tester 和自己验，T76 的界面在它之上。
+- 验收：单测 两来源各读一个真格式样本（夹具从真机匿名化抄）、增量续读（追加后只读新字节）、变短整读、文件消失删索引、噪音过滤表、去重、上限、缓存版本不符重建、原子写；`--dump` 在用户机器上首建耗时与第二次打开耗时各一个数字写进 tasks.md；fzf 对全量句子一次匹配的耗时写进 tasks.md。
+- 真机只读：不改任何 transcript；缓存目录只写 `$XDG_CACHE_HOME/agmux/recall`。
+
+### T76 `agmux -r` 界面
+- 为的是：主入口；design §2 的列表 / 预览 / 筛选面板 / 底栏 / enter / copy / open。
+- 做法：bubbletea 新 Model（internal/recall/ui 或 board 包内，取小的），复用 board 的预览框绘制、fuzzy 高亮、footer 风格；筛选面板照 T52 选择框的画法。enter 原地 exec：`syscall.Exec` 前恢复终端（tea 退出后），cd 用 `os.Chdir`。在跑的会话靠 store 的 Poller 一次 Refresh 合并（不轮询）。
+- 验收：单测 Model 的键 → 状态（筛选、范围、焦点、enter 三种情况、esc 三级）；黑盒（tester 真 pty）：打字筛选、高亮、预览命中、面板勾选、ctrl+t、ctrl+y（假 pbcopy）、ctrl+o（假 $EDITOR）、enter 对关了的会话 exec 假 claude / 假 pi 且 cwd 正确、在跑的不 exec、目录没了不 exec、窄屏无预览、首建进度行、`--reindex`。
+- dev 真机：用自己的历史会话搜几个词，截图贴 tasks.md。
+
+### T77 看板 `?` 入口
+- 做法：board 里按 `recall` 切到 T76 的 Model（同进程），esc / `?` 回看板；enter 关了的会话：普通 pane 原地 exec；popup / --stay（现有 stayFooter / popup 判定）→ 会话 cwd 下 `new-window -c <cwd> -n <名字> -- <resume argv>` 再 switch；在跑的 → jump。
+- 验收：单测三种 enter 路径；黑盒 假 tmux 下 popup / --stay 走 new-window，普通 pane 走 exec。
+
+### T78 e2e（tester，与 T75 并行起步）
+- 夹具：匿名化的 Claude / pi transcript 样本各几份（不同 cwd、worktree、有无名字、有噪音行）、`$XDG_CACHE_HOME` 指到临时目录、假 claude / pi / pbcopy / $EDITOR 脚本；真 pty 跑 `agmux -r`。
