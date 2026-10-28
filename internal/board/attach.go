@@ -54,6 +54,10 @@ func waitDrawn(r Runner, pane string) {
 	}
 }
 
+// tmuxText is text for the -n and -c of new-window / new-session: tmux expands formats in them
+// (#S, #T; a directory with a # in it would silently start the window in $HOME), and ## is a #.
+func tmuxText(s string) string { return strings.ReplaceAll(s, "#", "##") }
+
 // attachWindow runs `claude attach <id>` in a new window of the agmux-bg session (made if it isn't
 // there) and returns its pane. -d: the user's client stays where it is. A session with no client
 // has a window w × h cells (what the preview shows) to start with, and a window follows the client
@@ -68,10 +72,10 @@ func attachWindow(r Runner, s store.Session, w, h int) (string, error) {
 	}
 	args = append(args, "-d")
 	if s.Name != "" {
-		args = append(args, "-n", s.Name)
+		args = append(args, "-n", tmuxText(s.Name))
 	}
 	if s.CWD != "" {
-		args = append(args, "-c", s.CWD)
+		args = append(args, "-c", tmuxText(s.CWD))
 	}
 	out, err := r.Tmux(append(args, "-P", "-F", "#{pane_id}", "--", "claude", "attach", s.ID)...)
 	if err != nil {
