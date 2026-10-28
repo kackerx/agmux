@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -50,6 +49,7 @@ type recallModel struct {
 	pick     *recallPick // embedded: what enter chose, for the board to act on
 
 	query    string
+	qpos     int // the caret in it, in runes (editQuery)
 	results  []recall.Result
 	sel, top int
 	sources  []string        // those that have a session here
@@ -102,7 +102,7 @@ func NewRecall(ix *recall.Index, cfg *config.Config, live []store.Session, proje
 }
 
 func newRecallModel(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) recallModel {
-	m := recallModel{ix: ix, cfg: cfg, live: live, project: project, query: query, progress: &recallProgress{}, pvCache: &pvCache{}, indexing: true,
+	m := recallModel{ix: ix, cfg: cfg, live: live, project: project, query: query, qpos: len([]rune(query)), progress: &recallProgress{}, pvCache: &pvCache{}, indexing: true,
 		now: time.Now, lookPath: exec.LookPath, copyToClip: copyToClipboard, unticked: map[string]bool{},
 		statDir: func(p string) error { _, err := os.Stat(p); return err },
 		editor: func() string {
@@ -334,20 +334,13 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.copy(), nil
 	case m.cfg.IsCtl("recall_open", s):
 		return m.open()
-	case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
-		if r := []rune(m.query); len(r) > 0 {
-			m.query = string(r[:len(r)-1])
+	}
+	if q, p, ok := editQuery(m.query, m.qpos, k); ok { // the input's keys (input.go); the list only follows a change of the text
+		changed := q != m.query
+		m.query, m.qpos = q, p
+		if changed {
 			return m.search(false)
 		}
-	case (k.Type == tea.KeyRunes || k.Type == tea.KeySpace) && !k.Alt:
-		// a paste may carry \r, \t, ESC sequences: they'd tear the top bar
-		m.query += strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-				return ' '
-			}
-			return r
-		}, string(k.Runes))
-		return m.search(false)
 	}
 	return m, nil
 }

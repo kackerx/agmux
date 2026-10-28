@@ -94,6 +94,7 @@ type Model struct {
 	stay    bool            // --stay: jump never ends the board, quit only hides a popup (see hideBoard)
 
 	query      string // the / filter; "" = every card
+	qpos       int    // the caret in it, in runes (editQuery)
 	searching  bool   // the filter's input box has the keys
 	searchFrom string // the focus when / was pressed: esc puts it back
 
@@ -644,21 +645,8 @@ func (m Model) searchKey(k tea.KeyMsg) Model {
 	case m.cfg.IsCtl("quit", s):
 		m.searching, m.query, m.focus = false, "", m.searchFrom
 		m.focus = m.visibleFocus()
-	case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
-		if r := []rune(m.query); len(r) > 0 {
-			m.query = string(r[:len(r)-1])
-		}
-	case k.Type == tea.KeyRunes || k.Type == tea.KeySpace:
-		if k.Alt { // alt+e is a key, not the text "e"
-			break
-		}
-		// a paste may carry \r, \t, ESC sequences: they'd tear the top bar
-		m.query += strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) { // Cf: U+202E and friends
-				return ' '
-			}
-			return r
-		}, string(k.Runes))
+	default:
+		m.query, m.qpos, _ = editQuery(m.query, m.qpos, k)
 	}
 	return m
 }
@@ -728,7 +716,7 @@ func (m Model) do(action string) (tea.Model, tea.Cmd) {
 	case "recall":
 		return m.openRecall()
 	case "search": // even when the filter shows nothing: / edits it
-		m.searching, m.searchFrom, m.msg = true, m.focus, ""
+		m.searching, m.searchFrom, m.msg, m.qpos = true, m.focus, "", len([]rune(m.query))
 		return m, nil
 	case "group", "group_cwd", "group_project", "group_session", "group_state": // the next grouping, or the one named; every group open in it, the focus where it was
 		next := strings.TrimPrefix(action, "group_")
@@ -1347,12 +1335,9 @@ func (m Model) View() string {
 	ss, hits := m.shown()
 	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "" && !focused.Background, m.foldedNow(), m.cardsW(), right, hits, m.pin(), m.groupMode())
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
-		cursor := ""
-		if m.searching {
-			cursor = "▏"
-		}
 		lines := strings.SplitN(out, "\n", 3)
-		lines[0] = spread(fg(cFocus, " / ")+m.query+cursor, fg(cMuted, fmt.Sprintf("%d/%d ", len(ss), len(m.src.Sessions()))), m.w, "…")
+		count := fg(cMuted, fmt.Sprintf("%d/%d ", len(ss), len(m.src.Sessions())))
+		lines[0] = spread(fg(cFocus, " / ")+queryView(m.query, m.qpos, m.searching, m.w-3-ansi.StringWidth(count)-1), count, m.w, "…")
 		if len(ss) == 0 && len(lines) > 2 {
 			lines[1] = fg(cMuted, " "+i18n.T("search.no_match"))
 		}

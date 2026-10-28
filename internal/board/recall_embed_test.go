@@ -86,7 +86,7 @@ func TestBoardOpensAndLeavesRecall(t *testing.T) {
 	}
 	m = openRecallOn(t, m)
 	v := rview(*m.rc)
-	if got := m.View(); got != m.rc.View() || !strings.Contains(v, " / ▏") || len(m.rc.results) != 4 {
+	if got := m.View(); got != m.rc.View() || !strings.Contains(v, " / ") || len(m.rc.results) != 4 {
 		t.Errorf("the board draws the recall screen:\n%s", v)
 	}
 	if !m.rc.embedded || m.rc.w != 140 || m.rc.h != 30 || m.rc.project == "" {
@@ -111,7 +111,7 @@ func TestBoardOpensAndLeavesRecall(t *testing.T) {
 	if m, quit = bpress(t, m, "esc"); m.rc != nil || quit {
 		t.Errorf("esc leaves for the board: rc %v quit %v", m.rc != nil, quit)
 	}
-	if strings.Contains(m.View(), " / ▏") || !strings.Contains(ansiStrip(m.View()), "0 sessions") {
+	if m.rc != nil || !strings.Contains(ansiStrip(m.View()), "0 sessions") {
 		t.Errorf("the board again:\n%s", ansiStrip(m.View()))
 	}
 	// ? opens it again, ? with nothing typed leaves, ? after text is text

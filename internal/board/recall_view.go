@@ -113,7 +113,6 @@ func (m recallModel) View() string {
 
 // topBar is the query, and on the right how many sessions match, or how far the index is.
 func (m recallModel) topBar() string {
-	left := fg(cFocus, " / ") + m.query + "▏"
 	var right string
 	if m.indexing {
 		right = fg(cMuted, i18n.T("recall.indexing", m.progress.done.Load(), m.progress.total.Load())+" ")
@@ -123,6 +122,7 @@ func (m recallModel) topBar() string {
 	if m.indexing && len(m.results) > 0 {
 		right = fg(cMuted, fmt.Sprintf("%d · ", len(m.results))) + right
 	}
+	left := fg(cFocus, " / ") + queryView(m.query, m.qpos, true, m.w-3-ansi.StringWidth(right)-1)
 	return spread(left, right, m.w, "…")
 }
 

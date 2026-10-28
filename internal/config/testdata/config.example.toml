@@ -11,6 +11,9 @@
 # recall) may share keys with others.
 # While a prompt takes text (search, flash) letters are text: enter and jump's non-character keys
 # keep the filter, esc and quit's non-character keys cancel it; backspace, ctrl+h, ctrl+c are fixed.
+# The text box of search and recall has fixed editing keys too (not in [keys]): left / right move the caret,
+# home / ctrl+a and end / ctrl+e go to the start and the end, alt+backspace and ctrl+w delete the word before
+# it, anything printable goes in at the caret. [keys] left / right do not act while typing.
 up = ["k", "up"]              # default: k, up
 down = ["j", "down"]          # default: j, down
 left = ["h", "left"]          # default: h, left

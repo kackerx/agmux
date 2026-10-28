@@ -176,7 +176,7 @@ func TestRecallListAndTyping(t *testing.T) {
 		t.Errorf("snippet %+v", r.Snippet)
 	}
 	v := rview(m)
-	for _, want := range []string{" / ▏", "4 ", "cart-fix", "shopcart", "main", "1h", "3 ", "add a regression test for the coupon", "legacy", "1d"} {
+	for _, want := range []string{" / ", "4 ", "cart-fix", "shopcart", "main", "1h", "3 ", "add a regression test for the coupon", "legacy", "1d"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view lacks %q:\n%s", want, v)
 		}

@@ -170,6 +170,24 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyLeft}
 	case "up":
 		return tea.KeyMsg{Type: tea.KeyUp}
+	case "home":
+		return tea.KeyMsg{Type: tea.KeyHome}
+	case "end":
+		return tea.KeyMsg{Type: tea.KeyEnd}
+	case "ctrl+a":
+		return tea.KeyMsg{Type: tea.KeyCtrlA}
+	case "ctrl+e":
+		return tea.KeyMsg{Type: tea.KeyCtrlE}
+	case "ctrl+w":
+		return tea.KeyMsg{Type: tea.KeyCtrlW}
+	case "ctrl+h":
+		return tea.KeyMsg{Type: tea.KeyCtrlH}
+	case "ctrl+n":
+		return tea.KeyMsg{Type: tea.KeyCtrlN}
+	case "ctrl+p":
+		return tea.KeyMsg{Type: tea.KeyCtrlP}
+	case "alt+backspace": // kitty's option+backspace is ESC DEL
+		return tea.KeyMsg{Type: tea.KeyBackspace, Alt: true}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
@@ -1921,7 +1939,7 @@ func TestSearchFilter(t *testing.T) {
 	m, _ = press(t, m, "backspace", "r")
 	v := ansi.Strip(m.View())
 	lines := strings.Split(v, "\n")
-	if m.query != "thr" || !strings.HasPrefix(lines[0], " / thr▏") || !strings.HasSuffix(lines[0], "1/3 ") {
+	if m.query != "thr" || !strings.HasPrefix(lines[0], " / thr") || !strings.HasSuffix(lines[0], "1/3 ") {
 		t.Fatalf("query %q, top %q", m.query, lines[0])
 	}
 	if strings.Contains(v, "one") || strings.Contains(v, "two") || !strings.Contains(v, "three") || strings.Contains(v, "/a (") {
@@ -1934,7 +1952,7 @@ func TestSearchFilter(t *testing.T) {
 	if quit || m.searching || m.query != "thr" || m.focus != "b1" || len(r.calls) != 0 {
 		t.Fatalf("enter: searching %v query %q focus %s calls %q", m.searching, m.query, m.focus, r.calls)
 	}
-	if top := strings.Split(ansi.Strip(m.View()), "\n")[0]; strings.Contains(top, "▏") || !strings.Contains(top, "/ thr") {
+	if top := strings.Split(ansi.Strip(m.View()), "\n")[0]; !strings.Contains(top, "/ thr") {
 		t.Errorf("kept filter, box closed: %q", top)
 	}
 	m, _ = press(t, m, "/", "esc")
@@ -2191,7 +2209,7 @@ func TestSearchBoxClosesOnPassThrough(t *testing.T) {
 	m = typeKeys(t, m, "o")
 	tm, _ := m.Update(tea.MouseMsg{X: 150, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	m = tm.(Model)
-	if !m.pvFocus || m.searching || strings.Contains(strings.SplitN(ansi.Strip(m.View()), "\n", 2)[0], "▏") {
+	if !m.pvFocus || m.searching {
 		t.Fatalf("pvFocus %v searching %v", m.pvFocus, m.searching)
 	}
 	r.reset()
