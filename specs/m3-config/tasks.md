@@ -657,3 +657,4 @@
 - dev bc643f7（Makefile deadcode 行 `|| exit 1`，合回 main a28cae4，只动 Makefile）。安装目标 = tester 通过后的 main。
 - tester（c75e3c5，接线于 7f3d256，整套在 fe3c052 起跑）：t79 找回 13 绿 / 看板 `/` 10 红（产品：看板 `/` 输入时没放真光标，tmux 报 cursor 在底行不可见）；t80 / t81 / t82 / t84（36）/ t74 / t76 / t77 绿。测试跟改：预览滚动改跟踪固定命中行、list_row 限定列表框列范围、标题新语义、k 连发分开、t74 光标画法、边框滚轮会动、t63 deadcode。**我定：看板 `/` 也要真光标**（T79 写的是共用一个输入框，用户在看板也打中文；看板已有 cursorOut / wantCursor，坐标 = 顶栏 ` / ` 后光标前文字的显示宽度）→ T85 补，退 dev。
 - dev db987d9（看板 `/` 真光标：顶栏第 0 行、列 = 3 + 光标前文字显示宽度，裁剪同找回；只在 searching 时显示，kept / 其它提示隐藏，直通态逻辑未动；真 tmux 核过 `a优b` x=7；变异 17 全杀）。合回 main a0963c8。**第十六批最终目标 a0963c8**：reviewer 看 db987d9，tester 重跑 t79 看板组 + 整套。
+- reviewer db987d9 通过，**第十六批 reviewer 整体通过，最终目标 a0963c8**（变异 60 全杀）。建议 a（看板 View 里 Sessions() 读两次，总数位数变化那一帧光标差一格）→ 备忘，下一批顺手：View 先算一次计数串传给 searchRoom 和顶栏。等 tester。
