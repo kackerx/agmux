@@ -82,7 +82,7 @@ case "$1" in
     term=xterm-256color; [ -e "$d/tmux.termname" ] && term=$(cat "$d/tmux.termname")
     tab=$(printf '\\t'); while IFS="$tab" read -r a n s t y; do [ -z "$a$n$s" ] && continue; [ -z "$t" ] && t=$term; [ -z "$y" ] && {{ if [ -e "$d/tmux.tty" ]; then y=$(cat "$d/tmux.tty"); else y="$d/tty-$(printf %s "$n" | tr '/ ' '__')"; : >> "$y"; fi; }}; printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$a" "$n" "$s" "$t" "$y"; done < "$d/tmux.clients"; exit 0;;
   load-buffer) cat >> "$d/tmux.stdin"; exit 0;;
-  new-window) [ -e "$d/tmux.newwindow" ] && cat "$d/tmux.newwindow"; exit 0;;  # T77: `new-window -P` answers with the pane id a test puts in this file
+  new-window) [ -e "$d/tmux.newwindow.delay" ] && sleep "$(cat "$d/tmux.newwindow.delay")"; [ -e "$d/tmux.newwindow" ] && cat "$d/tmux.newwindow"; exit 0;;  # T77: `new-window -P` answers with the pane id a test puts in this file
   show-environment) f="$d/tmux.env.plain"; case " $* " in *" -h "*) f="$d/tmux.env";; esac  # -h: the hidden variable a launcher sets; without it: the plain session one
     if [ -e "$f" ]; then cat "$f"; exit 0; else echo "unknown variable: AGMUX_CLIENT" >&2; exit 1; fi;;
 esac

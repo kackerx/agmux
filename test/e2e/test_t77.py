@@ -84,6 +84,19 @@ class EnterClosed(Base):
         t = self.board("board --stay", **self.POPUP); self.recall(t, "'inner join"); t.keys("Enter"); self.assertTrue(wait(lambda: self.calls("new-window"), 6)); nw = self.calls("new-window")[0]
         self.assertEqual(nw[-3:], ["pi", "--session", str(self.c["pi_audit"][0])]); self.assertEqual(os.path.realpath(nw[nw.index("-c") + 1]), os.path.realpath(self.api_dir))
 
+    def test_enter_pressed_again_while_the_window_is_being_made_makes_one_window(self):
+        (self.env.fake / "tmux.newwindow.delay").write_text("1.5"); t = self.board("board --stay", **self.POPUP); self.recall(t)
+        for _ in range(4): t.keys("Enter"); time.sleep(0.15)
+        self.assertTrue(wait(lambda: self.calls("new-window"), 6)); time.sleep(2.5); self.assertEqual(len(self.calls("new-window")), 1, "487dd5a: enter while the first new-window is on its way does nothing")
+
+    def test_a_hash_in_the_name_or_the_directory_is_doubled_for_tmux(self):
+        d = self.env.home / "work" / "hash#dir"; d.mkdir(parents=True); sid = "17171717-0000-4000-8000-000000000017"
+        self.env.claude_file(str(d), sid, claude_lines(sid, str(d), "main", [("u", "a sentence in the hash directory")], title="fix#12"), age=1)
+        t = self.board("board --stay", **self.POPUP); t.keys("?"); self.assertTrue(wait(lambda: t.visible(NAMES) or "fix#12" in t.text(), 10)); time.sleep(0.4); t.lit("'hash directory"); time.sleep(0.6); t.keys("Enter")
+        self.assertTrue(wait(lambda: self.calls("new-window"), 6), t.text()); nw = self.calls("new-window")[0]
+        self.assertEqual(nw[nw.index("-n") + 1], "fix##12", "tmux formats -n and -c: a # would be eaten"); self.assertEqual(os.path.realpath(nw[nw.index("-c") + 1].replace("##", "#")), os.path.realpath(str(d))); self.assertIn("##", nw[nw.index("-c") + 1])
+        self.assertEqual(nw[-3:], ["claude", "--resume", sid], "the command itself is not a format: untouched")
+
     def test_a_vanished_directory_opens_nothing_and_the_footer_says_so(self):
         for args, env in (("board", self.PLAIN), ("board --stay", self.POPUP)):
             t = self.board(args, **env); self.recall(t, "'vanished helper"); t.keys("Enter"); time.sleep(1.0); self.assertEqual(self.env.ran("claude"), []); self.assertEqual(self.calls("new-window"), [], args); self.assertTrue(t.alive())
