@@ -646,3 +646,4 @@
 - dev b4c7354（T85 真光标 + 标题 n = 命中数；合回 main 34f3e34）：坐标 = 边框 1 + " / " 3 + 光标前文字显示宽度，长查询按可见段算、indexing 占位扣掉；输入态显示、选择态 / 面板开着隐藏；standalone 用 cursorOut 包输出，看板 `?` 里走看板的 wantCursor；真 tmux 核过 `a优b` x=8、左移 7、选择态隐藏。变异 33 杀 32（1 需真 TTY）。标题 = 命中数 / 同筛选下可搜会话数，无查询时 n = total。**改**：有查询无命中显示 `0/total`（像 fzf），不是 `0/0`——撤回前面给 tester 的 0/0，dev 一行改掉。
 - dev ea694c4（无命中 `0/total`；合回 main 2376ff9）。**第十六批目标 2376ff9**（产品）。
 - reviewer（2376ff9）：1 必改——input.go 的 queryCells 只剩测试在调（T85 实际用 queryCaretCells），删掉函数和两条断言。建议 a：滚轮落在列表 / 预览的边框上也生效，与 design 字面不符 → 我改 design：滚轮在边框上算框内（更顺手、少一个判断），点击边框仍不做事；b：建索引时 View 里两次读 progress 可能让光标差一格一帧 → 采纳，每帧读一次 room 传下去。已核：输入框 / 真光标 / 两态键归属 / 双击守卫 / 鼠标坐标 / 7680 屏不溢出 / 嵌入鼠标路由 / 配置 / 标题；变异 54 全杀。退回 dev。
+- dev 867af00（删 queryCells、两条断言改到 queryCaretCells；View 每帧读一次进度，progressText / roomFor / cursorAtFor；变异 7 杀 6，1 为原双读等价）。合回 main 7f3d256。**第十六批目标 7f3d256**，送 reviewer 复审 + tester。
