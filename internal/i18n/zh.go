@@ -102,7 +102,6 @@ var zh = map[string]string{
 	"recall.footer.resume":       "%s 恢复",
 	"recall.footer.keep":         "%s 保留查询",
 	"recall.footer.move":         "%s/%s 移动",
-	"recall.footer.cycle":        "%s/%s 下一个/上一个",
 	"recall.footer.edit":         "%s 改查询",
 	"recall.footer.filter":       "%s 筛选",
 	"recall.footer.scope":        "%s 范围:%s",

@@ -176,9 +176,6 @@ func (m recallModel) footer() string {
 		parts = append(parts, i18n.T("recall.panel.hint", k("recall_toggle"), k("recall_all"), k("recall_none"), "esc"))
 	case m.locked: // a kept query: every key of [keys] acts
 		add(k("jump"), "recall.footer.resume")
-		if n, p := k("next_match"), k("prev_match"); n != "" && p != "" {
-			parts = append(parts, i18n.T("recall.footer.cycle", n, p))
-		}
 		if d, u := k("down"), k("up"); d != "" && u != "" {
 			parts = append(parts, i18n.T("recall.footer.move", d, u))
 		}

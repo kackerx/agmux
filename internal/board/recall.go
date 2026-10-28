@@ -50,7 +50,7 @@ type recallModel struct {
 
 	query    string
 	qpos     int  // the caret in it, in runes (editQuery)
-	locked   bool // the query is kept (enter in the input): n / N / j / k choose, enter resumes, / edits again
+	locked   bool // the query is kept (enter in the input): j / k choose, enter resumes, / edits again
 	results  []recall.Result
 	sel, top int
 	sources  []string        // those that have a session here
@@ -284,15 +284,6 @@ func (m recallModel) move(d int) recallModel {
 	return m.visible()
 }
 
-// wrap moves the cursor d rows and comes round at the ends (n / N); move stops at them (j / k).
-func (m recallModel) wrap(d int) recallModel {
-	if n := len(m.results); n > 0 {
-		m.sel = (m.sel + d%n + n) % n
-		m.pvScroll = 0
-	}
-	return m.visible()
-}
-
 // esc: the panel closes, then a kept query is dropped (a typed one too) and the input has the keys
 // again, then the screen ends.
 func (m recallModel) back() (tea.Model, tea.Cmd) {
@@ -360,10 +351,6 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case m.locked && m.cfg.Is("search", s): // back to the input, the query as it was
 		m.locked, m.qpos = false, len([]rune(m.query))
 		return m, nil
-	case m.locked && m.cfg.Is("next_match", s):
-		return m.wrap(1), nil
-	case m.locked && m.cfg.Is("prev_match", s):
-		return m.wrap(-1), nil
 	case act("down", s):
 		return m.move(1), nil
 	case act("up", s):

@@ -110,7 +110,6 @@ var en = map[string]string{
 	"recall.footer.resume":       "%s resume",
 	"recall.footer.keep":         "%s keep the query",
 	"recall.footer.move":         "%s/%s move",
-	"recall.footer.cycle":        "%s/%s next/prev",
 	"recall.footer.edit":         "%s edit",
 	"recall.footer.filter":       "%s filter",
 	"recall.footer.scope":        "%s scope:%s",

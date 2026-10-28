@@ -701,13 +701,19 @@ func TestRecallFooterNamesOnlyKeysThatAct(t *testing.T) {
 			t.Errorf("footer has %q: %s", not, f)
 		}
 	}
-	// a kept query is a list: every key of [keys] acts, the letters too
+	// a kept query is a list: every key of [keys] acts, the letters too (n / N are not among them)
+	if strings.Contains(footerOf(rtype(t, m, "x").View()), "next") {
+		t.Error("no next / prev in the input's footer")
+	}
 	m.locked = true
 	f = footerOf(m.View())
-	for _, want := range []string{"j resume", "n/N next/prev", "/ edit", "f filter", "s scope:all", "y copy", "o open", "esc clear"} {
+	for _, want := range []string{"j resume", "/ edit", "f filter", "s scope:all", "y copy", "o open", "esc clear"} {
 		if !strings.Contains(f, want) {
 			t.Errorf("locked footer lacks %q: %s", want, f)
 		}
+	}
+	if strings.Contains(f, "next") {
+		t.Errorf("n / N are not keys of the list: %s", f)
 	}
 	m.locked = false
 	// the panel is not text: its letters are the keys, and they are named

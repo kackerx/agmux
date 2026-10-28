@@ -38,6 +38,7 @@ func TestRecallTwoStates(t *testing.T) {
 		{"locked: esc clears the query and gives the input back", locked, []string{"esc"}, false, "", false, false},
 		{"locked: esc, esc ends", locked, []string{"esc", "esc"}, false, "", true, false},
 		{"locked: letters are not text", locked, []string{"x", "y", "z"}, true, "o", false, false},
+		{"locked: n and N do nothing", locked, []string{"n", "N"}, true, "o", false, false},
 		{"locked: q ends the screen", locked, []string{"q"}, true, "o", true, false},
 		{"locked then / then enter locks again", locked, []string{"/", "enter"}, true, "o", false, false},
 	} {
@@ -46,7 +47,7 @@ func TestRecallTwoStates(t *testing.T) {
 			t.Errorf("%s: locked %v query %q quit %v chose %v; want %v %q %v %v", c.name, m.locked, m.query, quit, RecallOutcome(m) != nil, c.locked, c.query, c.quit, c.chose)
 		}
 	}
-	// n / N come round at the ends, j / k stop there
+	// j / k and the arrows stop at the ends; n / N are not keys of the list
 	m, _ := rpress(t, rtype(t, w.model(), ""), "enter")
 	if len(m.results) != 4 {
 		t.Fatalf("%d results", len(m.results))
@@ -55,15 +56,12 @@ func TestRecallTwoStates(t *testing.T) {
 		keys []string
 		sel  int
 	}{
-		{[]string{"N"}, 3}, {[]string{"N", "n"}, 0}, {[]string{"n"}, 1}, {[]string{"n", "n", "n", "n"}, 0},
+		{[]string{"N"}, 0}, {[]string{"n", "n"}, 0}, {[]string{"j", "n", "N"}, 1},
 		{[]string{"j", "j", "j", "j", "j"}, 3}, {[]string{"k"}, 0}, {[]string{"j", "k", "k", "k"}, 0}, {[]string{"down", "down", "up"}, 1},
 	} {
 		if got, _ := rpress(t, m, c.keys...); got.sel != c.sel {
 			t.Errorf("%v: cursor %d, want %d", c.keys, got.sel, c.sel)
 		}
-	}
-	if got, _ := rpress(t, m, "N", "N"); got.sel != 2 || got.pvScroll != 0 {
-		t.Errorf("N N: %d", got.sel)
 	}
 	// the caret is at the end of the query when / gives the input back; a new row has its preview from the top
 	m2, _ := rpress(t, locked(), "/")
@@ -80,12 +78,12 @@ func TestRecallTwoStates(t *testing.T) {
 	if m3.pvScroll != 3 {
 		t.Fatalf("the preview scrolls in the kept state too: %d", m3.pvScroll)
 	}
-	if got, _ := rpress(t, m3, "n"); got.sel == m3.sel || got.pvScroll != 0 {
-		t.Errorf("n: row %d→%d, preview %d", m3.sel, got.sel, got.pvScroll)
+	if got, _ := rpress(t, m3, "j"); got.sel == m3.sel || got.pvScroll != 0 {
+		t.Errorf("j: row %d→%d, preview %d", m3.sel, got.sel, got.pvScroll)
 	}
-	// nothing found: n / N do nothing
+	// nothing found: the keys do nothing
 	m, _ = rpress(t, rtype(t, w.model(), "zzzzqqq"), "enter")
-	if got, _ := rpress(t, m, "n", "N", "j", "k"); got.sel != 0 || !got.locked {
+	if got, _ := rpress(t, m, "j", "k"); got.sel != 0 || !got.locked {
 		t.Errorf("empty list: %d locked %v", got.sel, got.locked)
 	}
 	// the keys that are not letters work in both states: copy, the filter panel, the preview
