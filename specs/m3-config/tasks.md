@@ -652,3 +652,4 @@
 - 要做：`go run golang.org/x/tools/cmd/deadcode@<固定版本> ./...` 输出必须为空（它从 main 可达性算，只被 _test.go 用的函数会被报出来）；加进 ci.yml 和本地 `make check`（或现有的检查脚本）；现在报出来的先清掉。
 - 为的是：两轮审查各抓到一个只有测试在调的函数，不该再靠人眼。
 - 验收：CI 里这一步在 7f3d256 上会红（inputRoom），修后绿；t63 的 workflows 断言跟改。
+- dev 7a26fd1（删 inputRoom；recallModel.frame() 一次返回画面 + 光标，看板嵌入也用；deadcode 在 7f3d256 上报 7 个全清：inputRoom / NewRecall 删，previewLines / overlay / store.lastModel 搬进 _test.go，avatar.UseSets 改成生产可达的 LoadSetsFrom，store.SourceFunc 删、各测试包自带 3 行）+ fcb185c（T86：ci.yml 加 deadcode@v0.52.0 判输出为空；新建小 Makefile `make check` = vet / test -race / gofmt / tidy / deadcode）。合回 main fe3c052。**第十六批最终目标 fe3c052**，送 reviewer 复审 + tester。
