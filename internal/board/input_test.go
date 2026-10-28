@@ -131,8 +131,9 @@ func TestInputCaretIsDrawnWhileTyping(t *testing.T) {
 	w := newRWorld(t)
 	w.fill()
 	r := rtype(t, w.model(), "ab")
-	if r, _ = rpress(t, r, "left"); !strings.Contains(top(r.View()), "a"+rev+"b") {
-		t.Errorf("recall: %q", top(r.View()))
+	in := func(v string) string { return strings.Split(v, "\n")[1] } // the query box's row
+	if r, _ = rpress(t, r, "left"); !strings.Contains(in(r.View()), "a"+rev+"b") {
+		t.Errorf("recall: %q", in(r.View()))
 	}
 }
 

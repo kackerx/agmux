@@ -498,8 +498,8 @@ func TestRecallPreview(t *testing.T) {
 	if strings.Contains(v, "sentence number 0") || strings.Contains(v, "sentence number 8") {
 		t.Errorf("what is between shows as a note:\n%s", v)
 	}
-	if !strings.Contains(v, "╭") || !strings.Contains(v, "╰") {
-		t.Error("the box")
+	if !strings.Contains(v, "┏") || !strings.Contains(v, "┗") || strings.Count(v, "┏") != 3 {
+		t.Error("the three boxes")
 	}
 	// the matching characters are lit in the list and the preview
 	if raw := m.View(); strings.Count(raw, "48;2;242;208;107") < 2 {
@@ -527,10 +527,10 @@ func TestRecallPreview(t *testing.T) {
 	}
 	// too narrow for a preview: only the list
 	tm, _ := w.model().Update(tea.WindowSizeMsg{Width: 99, Height: 30})
-	if v := rview(tm.(recallModel)); strings.Contains(v, "╭") || !strings.Contains(v, "pv") {
+	if v := rview(tm.(recallModel)); strings.Count(v, "┏") != 2 || !strings.Contains(v, "pv") {
 		t.Errorf("99 columns:\n%s", v)
 	}
-	if tm, _ := w.model().Update(tea.WindowSizeMsg{Width: 100, Height: 30}); !strings.Contains(rview(tm.(recallModel)), "╭") {
+	if tm, _ := w.model().Update(tea.WindowSizeMsg{Width: 100, Height: 30}); strings.Count(rview(tm.(recallModel)), "┏") != 3 {
 		t.Error("100 columns has it")
 	}
 }
@@ -571,8 +571,8 @@ func TestRecallIndexing(t *testing.T) {
 	m.indexing = true
 	m.progress.done.Store(3)
 	m.progress.total.Store(10)
-	if v := rview(m); !strings.Contains(v, "4 · indexing 3 / 10") {
-		t.Errorf("top bar: %s", strings.Split(v, "\n")[0])
+	if v := rview(m); !strings.Contains(strings.Split(v, "\n")[1], "indexing 3 / 10") || !strings.Contains(v, " 1/4 ") {
+		t.Errorf("the input box: %s", strings.Split(v, "\n")[1])
 	}
 	m.results, m.indexing = nil, true
 	if v := rview(m); strings.Contains(v, "no session matches") {
@@ -583,8 +583,8 @@ func TestRecallIndexing(t *testing.T) {
 	if m.indexing || len(m.results) != 4 || !strings.Contains(rview(m), "some transcripts could not be read: one bad transcript") {
 		t.Errorf("done: %v %d\n%s", m.indexing, len(m.results), rview(m))
 	}
-	if v := strings.Split(rview(m), "\n")[0]; strings.Contains(v, "indexing") || !strings.HasSuffix(strings.TrimSpace(v), "4") {
-		t.Errorf("top bar after: %q", v)
+	if v := strings.Split(rview(m), "\n")[1]; strings.Contains(v, "indexing") || !strings.Contains(rview(m), " 1/4 ") {
+		t.Errorf("input box after: %q", v)
 	}
 	// a tick picks up what the index has got since, and the cursor stays on its session
 	m, _ = rpress(t, m, "down")
@@ -825,7 +825,7 @@ func TestRecallPreviewScrollIsBounded(t *testing.T) {
 	max := m.previewScrollMax(r)
 	box := strings.Split(rview(m), "\n")
 	for i, l := range box {
-		if strings.Contains(l, "╰") && !strings.Contains(box[i-1], "bounds 29") {
+		if i > 3 && strings.Contains(l, "┗") && !strings.Contains(box[i-1], "bounds 29") {
 			t.Errorf("at the end of the scroll the last sentence is the last row of the box, not %q", box[i-1])
 		}
 	}
@@ -919,13 +919,13 @@ func TestRecallListScrolls(t *testing.T) {
 		w.claude(fmt.Sprintf("s%02d", i), w.dir("shopcart"), fmt.Sprintf("session-%02d", i), time.Duration(i+1)*time.Minute, fmt.Sprintf("u: sentence %d", i))
 	}
 	m := w.model()
-	tm, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 10})
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 12}) // 5 rows in the list's box
 	m = tm.(recallModel)
 	for range 9 {
 		m, _ = rpress(t, m, "down")
 	}
 	v := rview(m)
-	if !strings.Contains(v, "▌○ session-09") || strings.Contains(v, "session-00") || m.top != 3 {
+	if !strings.Contains(v, "▌○ session-09") || strings.Contains(v, "session-00") || m.top != 5 {
 		t.Errorf("top %d:\n%s", m.top, v)
 	}
 	for range 20 {
@@ -941,7 +941,7 @@ func TestRecallListScrolls(t *testing.T) {
 		t.Errorf("the start: %d top %d", m.sel, m.top)
 	}
 	m, _ = rpress(t, m, "ctrl+d")
-	if m.sel != 3 { // half of the 7 rows
+	if m.sel != 2 { // half of the 5 rows
 		t.Errorf("ctrl+d: %d", m.sel)
 	}
 	if m, _ = rpress(t, m, "ctrl+u"); m.sel != 0 {
@@ -1006,7 +1006,7 @@ func TestRecallByNameShowsNoHits(t *testing.T) {
 	w := newRWorld(t)
 	w.claude("s-pv", w.dir("shopcart"), "pv", time.Hour, "u: nothing here about it")
 	m := rtype(t, w.model(), "'pv")
-	if row := strings.Split(rview(m), "\n")[1]; !strings.Contains(row, "  - nothing here") {
+	if row := strings.Split(rview(m), "\n")[4]; !strings.Contains(row, "  - nothing here") {
 		t.Errorf("row %q", row)
 	}
 }
@@ -1016,7 +1016,7 @@ func TestRecallSnippetShowsTheMatch(t *testing.T) {
 	w := newRWorld(t)
 	w.claude("s-long", w.dir("shopcart"), "long", time.Hour, "u: "+strings.Repeat("padding ", 12)+"the needle is here and then "+strings.Repeat("more ", 20))
 	m := rtype(t, w.model(), "'needle")
-	if row := strings.Split(rview(m), "\n")[1]; !strings.Contains(row, "needle") || !strings.Contains(row, "…") {
+	if row := strings.Split(rview(m), "\n")[4]; !strings.Contains(row, "needle") || !strings.Contains(row, "…") {
 		t.Errorf("row %q", row)
 	}
 }
@@ -1029,7 +1029,7 @@ func TestRecallSnippetColorByRole(t *testing.T) {
 	count := func(line string) int {
 		w := newRWorld(t)
 		w.claude("s", w.dir("shopcart"), "x", time.Hour, line)
-		return strings.Count(strings.Split(w.model().View(), "\n")[1], "38;2;97;113;163")
+		return strings.Count(strings.Split(w.model().View(), "\n")[4], "38;2;97;113;163")
 	}
 	if you, agent := count("u: a sentence that you said"), count("a: a sentence that the agent said"); agent != you+1 {
 		t.Errorf("muted spans: yours %d, the agent's %d", you, agent)

@@ -249,7 +249,24 @@ func (m recallModel) visible() recallModel {
 	return m
 }
 
-func (m recallModel) listRows() int { return max(m.h-3, 1) }
+// The screen, top down: the query box (3 rows), the list and the preview side by side in boxes of
+// bodyH rows (borders included), the message line, the footer. Low terminals lose the message line,
+// then the boxes, so that nothing is taller than the terminal.
+func (m recallModel) bodyH() int {
+	if rows := m.h - 3 - 1 - 1; rows >= 3 {
+		return rows
+	}
+	if rows := m.h - 3 - 1; rows >= 3 {
+		return rows
+	}
+	return 0
+}
+
+// msgRow: there is room for the message line.
+func (m recallModel) msgRow() bool { return m.h >= 8 || m.bodyH() == 0 && m.h >= 5 }
+
+// listRows is the sessions the list shows at once: its box less the two borders.
+func (m recallModel) listRows() int { return max(m.bodyH()-2, 1) }
 
 func (m recallModel) previewOn() bool { return m.w >= previewMinTerm }
 
