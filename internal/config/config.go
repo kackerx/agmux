@@ -32,7 +32,7 @@ var Actions = []string{
 var defaultKeys = map[string][]string{
 	"up": {"k", "up"}, "down": {"j", "down"}, "left": {"h", "left"}, "right": {"l", "right"},
 	"page_down": {"ctrl+d"}, "page_up": {"ctrl+u"},
-	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"tab"}, "preview_up": {"pgup"}, "preview_down": {"pgdown"},
+	"jump": {"enter"}, "fold": {"f"}, "preview": {"p"}, "focus_preview": {"tab"}, "leave_preview": {"tab"}, "preview_up": {"pgup", "ctrl+p"}, "preview_down": {"pgdown", "ctrl+n"},
 	// search / flash are T19 / T20
 	"reply": {"i"}, "handoff": {"H"}, "search": {"/"}, "next_match": {"n"}, "prev_match": {"N"}, "clear_filter": {"esc"}, "flash": {"s"}, "group": {"g"},
 	"group_cwd": {}, "group_project": {}, "group_session": {}, "group_state": {},

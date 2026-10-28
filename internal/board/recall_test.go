@@ -551,6 +551,12 @@ func TestRecallPreviewScroll(t *testing.T) {
 	if m, _ = rpress(t, m, "pgup", "pgup"); m.pvScroll != 0 {
 		t.Errorf("pgup stops at the top: %d", m.pvScroll)
 	}
+	if m, _ = rpress(t, m, "ctrl+p", "ctrl+p"); m.pvScroll != 0 { // T81: ctrl+n / ctrl+p are the default pgdown / pgup too
+		t.Errorf("ctrl+p: %d", m.pvScroll)
+	}
+	if m, _ = rpress(t, m, "ctrl+n"); m.pvScroll != 3 {
+		t.Errorf("ctrl+n: %d", m.pvScroll)
+	}
 	m, _ = rpress(t, m, "pgdown", "pgdown")
 	if m, _ = rpress(t, m, "down"); m.pvScroll != 0 || m.sel != 1 { // another session: its preview from the top
 		t.Errorf("down: scroll %d, cursor %d", m.pvScroll, m.sel)

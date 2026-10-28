@@ -636,6 +636,9 @@ func TestClearFilterPreviewScrollAndCtlKeys(t *testing.T) {
 	if c.KeyMap()["pgup"] != "preview_up" || c.KeyMap()["pgdown"] != "preview_down" {
 		t.Errorf("pgup %q pgdown %q", c.KeyMap()["pgup"], c.KeyMap()["pgdown"])
 	}
+	if c.KeyMap()["ctrl+p"] != "preview_up" || c.KeyMap()["ctrl+n"] != "preview_down" { // T81
+		t.Errorf("ctrl+p %q ctrl+n %q", c.KeyMap()["ctrl+p"], c.KeyMap()["ctrl+n"])
+	}
 	if _, err := Parse("cfg", []byte("[keys]\nquit = [\"esc\"]\nclear_filter = [\"esc\"]\nsearch = [\"ctrl+x\"]\n")); err != nil {
 		t.Errorf("esc for both: %v", err)
 	}
