@@ -588,3 +588,4 @@
 - dev f21ff8e（T74 退回 4 必改 + a b c e）；7c3334c（T75）：internal/recall（Source / Head{+Path,+Custom} / Line / Clean / eachLine、claude.go、pi.go、index.go、match.go）、xdg.CacheDir、`agmux recall --dump [--reindex] [--] [query...]`；缓存 `<来源>-<文件名>.json` 原子写、新→旧并发、续读 / 整读 / 删除规则齐全；噪音表加 `<command-message` `<bash-`；custom-title 优先于 ai-title（真机 8 例会被盖）。真机只读：独立 Python 实现对 261 Claude + 143 pi 全部 404 个缓存逐个一致。**耗时（热页缓存）**：首建 wall 1.5–4.3 s（3.8 GB + 174 MB，12,799 句，缓存 4.4 MB）；二次打开 26–77 ms（Update 22 ms）；fzf 单线程全量一次：单词 23–56 ms，两词 64–71 ms。变异 107 杀 100（7 等价 / 不可测）。
 - 我定（T76 一起做）：(1) 匹配超 50 ms → fuzzy.Filter 按 NumCPU 切块并行再按分数稳定合并（dev 估 10 ms 级），仍超再加 30 ms 防抖；(2) 命中数只算句子正文命中（对已命中的句子再按正文过滤一遍），列表排序仍用含前缀的匹配串；(3) Head.Path / Custom、pi 缓存按文件名、噪音两条照准；(4) 同 id 跨项目共用缓存名、原地改写续读、来源目录为空清缓存三条备忘。
 - tester 会话重起（-w 独立 worktree），派 T74 / T75 黑盒 + T76 / T77 用例骨架。
+- reviewer 复审 f21ff8e 通过无必改（4 必改 + a b c e 变异 15 杀 13，2 可接受）。**T74 reviewer 通过，目标 f21ff8e**；tester 黑盒进行中。T75 7c3334c 审查中。
