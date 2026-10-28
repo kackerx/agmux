@@ -62,12 +62,6 @@ func editQuery(q string, pos int, k tea.KeyMsg) (string, int, bool) {
 
 func isWordRune(c rune) bool { return unicode.IsLetter(c) || unicode.IsDigit(c) || c == '_' }
 
-// queryCells is how many cells the text before the caret takes (a Chinese character is two).
-func queryCells(q string, pos int) int {
-	r := []rune(q)
-	return ansi.StringWidth(string(r[:min(max(pos, 0), len(r))]))
-}
-
 // queryShown is the part of the text that is drawn in width cells, and the caret in it: what is
 // before the caret goes from the left when the caret would not fit.
 func queryShown(q string, pos, width int) ([]rune, int) {

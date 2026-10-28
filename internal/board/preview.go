@@ -95,19 +95,15 @@ func (m *Model) capture() tea.Cmd {
 	return m.keys.do(func() tea.Msg { return grab(r, pane, n) })
 }
 
-// previewLines renders the preview region: h lines, each exactly w wide.
+// previewBox renders the preview region: h lines, each exactly w wide, and the row and column of
+// the pane's cursor in them (-1 when it isn't drawn).
 //
 //	 sqlmux-orchestrator · %7 · ⏵ working · Bash
 //	╭──────────────────────────────╮
 //	│ …the pane's last lines…      │
 //	╰──────────────────────────────╯
-func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focused bool) []string {
-	out, _, _ := previewBox(s, ok, pv, w, h, scroll, focused)
-	return out
-}
-
-// previewBox is previewLines and the row and column of the pane's cursor in those lines: -1 when it
-// isn't drawn. Keys going to the pane (focused) with the cursor drawn, the terminal's own cursor
+//
+// Keys going to the pane (focused) with the cursor drawn, the terminal's own cursor
 // goes there: the cell is left as it is, but for a sequence that changes nothing, so that the
 // frame changes when the cursor moves and the cursor is put where it now is.
 func previewBox(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focused bool) ([]string, int, int) {

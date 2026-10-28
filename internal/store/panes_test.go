@@ -77,7 +77,7 @@ func TestFillPanes(t *testing.T) {
 		{ID: "f6", Pane: "%77", TmuxSession: "as recorded"}, // not in the listing
 		{ID: "g7", Pane: "%8", TmuxSession: "x"},
 	}
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(),
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir(),
 		Panes: func() (string, error) {
 			asked++
 			return "%1\tmain\t0\tzsh\n%3\tagmux-bg\t0\tclaude attach a7\n%4\tagmux-bg\t0\tclaude attach b2\n%5\tagmux-bg\t0\tclaude attach c3\n%9\tnew name\t0\tclaude\n%8\tagmux # main\t0\tclaude\n", fail

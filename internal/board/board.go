@@ -1321,14 +1321,15 @@ func (m Model) View() string {
 		return ""
 	}
 	if m.rc != nil {
+		view, x, y, ok := m.rc.frame()
 		if m.curOut != nil {
-			if x, y, ok := m.rc.cursorAt(); ok {
+			if ok {
 				m.curOut.place(x, y)
 			} else {
 				m.curOut.place(-1, -1)
 			}
 		}
-		return m.rc.View()
+		return view
 	}
 	_, _, focused, ok := m.current()
 	var right []string

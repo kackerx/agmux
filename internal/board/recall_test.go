@@ -108,7 +108,7 @@ func (w *rworld) model(live ...store.Session) recallModel {
 		w.t.Fatal(err)
 	}
 	cfg := config.Default()
-	m := NewRecall(w.ix, cfg, live, "shopcart", "").(recallModel)
+	m := newRecallModel(w.ix, cfg, live, "shopcart", "")
 	m.now = func() time.Time { return w.clock }
 	m.lookPath = func(s string) (string, error) { return "/bin/" + s, nil }
 	m.copyToClip = func(string) error { return nil }

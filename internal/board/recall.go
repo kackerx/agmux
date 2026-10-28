@@ -104,10 +104,6 @@ type recallEditedMsg struct{ err error }
 // NewRecall is the recall screen over ix. live are the sessions that run now (they get a dot and
 // are not resumed), project the project of the current directory. The index is brought up to date
 // when the program starts (Init), and the screen shows what is there as it is built.
-func NewRecall(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) tea.Model {
-	return newRecallModel(ix, cfg, live, project, query)
-}
-
 func newRecallModel(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) recallModel {
 	m := recallModel{ix: ix, cfg: cfg, live: live, project: project, query: query, qpos: len([]rune(query)), locked: query != "", progress: &recallProgress{}, pvCache: &pvCache{}, indexing: true,
 		now: time.Now, lookPath: exec.LookPath, copyToClip: copyToClipboard, unticked: map[string]bool{},
@@ -172,11 +168,14 @@ func (m recallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // cursorAt is the screen cell (0-based) for the terminal's cursor: in the query box, at the caret,
 // so that an input method puts its candidates there. Not while the keys are the list's (kept query)
 // or the filter panel's.
-func (m recallModel) cursorAt() (x, y int, ok bool) {
+func (m recallModel) cursorAt() (x, y int, ok bool) { return m.cursorAtFor(m.progressText()) }
+
+// cursorAtFor is cursorAt for the progress text the frame is drawn with.
+func (m recallModel) cursorAtFor(prog string) (x, y int, ok bool) {
 	if m.w == 0 || m.locked || m.panel {
 		return 0, 0, false
 	}
-	return 1 + 3 + queryCaretCells(m.query, m.qpos, m.inputRoom()), 1, true // the border, " / "
+	return 1 + 3 + queryCaretCells(m.query, m.qpos, m.roomFor(prog)), 1, true // the border, " / "
 }
 
 func (m recallModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {

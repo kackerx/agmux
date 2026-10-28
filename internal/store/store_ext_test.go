@@ -10,6 +10,11 @@ import (
 	"github.com/kackerx/agmux/internal/store"
 )
 
+// srcFunc is a Source that is a function.
+type srcFunc func() ([]store.Raw, error)
+
+func (f srcFunc) Sessions() ([]store.Raw, error) { return f() }
+
 func asst(m string) string { return `{"type":"assistant","message":{"model":"` + m + `"}}` }
 func bigAttachment() string {
 	return `{"type":"attachment","content":"` + strings.Repeat("A", 200<<10) + `"}`
@@ -21,7 +26,7 @@ func write(t *testing.T, p string, lines ...string) {
 	}
 }
 func newP(t *testing.T, raw *[]store.Raw) *store.Poller {
-	return &store.Poller{Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) { return *raw, nil })}, StateDir: t.TempDir()}
+	return &store.Poller{Sources: []store.Source{srcFunc(func() ([]store.Raw, error) { return *raw, nil })}, StateDir: t.TempDir()}
 }
 func model(p *store.Poller, id string) string {
 	for _, s := range p.Sessions() {

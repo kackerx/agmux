@@ -20,6 +20,11 @@ import (
 	"github.com/kackerx/agmux/internal/store"
 )
 
+// srcFunc is a Source that is a function.
+type srcFunc func() ([]store.Raw, error)
+
+func (f srcFunc) Sessions() ([]store.Raw, error) { return f() }
+
 // `agmux avatars` lists the image sets first (id, source, frames per state), then the sprites as
 // before; a set without idle frames is said on stderr, and a set named like a sprite replaces it.
 func TestAvatarsOutput(t *testing.T) {
@@ -132,7 +137,7 @@ func TestShowAgentColumn(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "s.jsonl")
 	os.WriteFile(log, []byte(`{"type":"agent-setting","agentSetting":"orchestrator"}`+"\n"), 0o644)
-	p := &store.Poller{StateDir: dir, Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) {
+	p := &store.Poller{StateDir: dir, Sources: []store.Source{srcFunc(func() ([]store.Raw, error) {
 		return []store.Raw{{ID: "a", Name: "one", Transcript: log}, {ID: "b", Name: "two"}, {ID: "c", Name: "three", Background: true}}, nil
 	})}}
 	var out bytes.Buffer

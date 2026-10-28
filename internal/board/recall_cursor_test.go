@@ -9,6 +9,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // cursorKind is what a cursor command (tea.ShowCursor / HideCursor) is, "" for anything else; a
@@ -75,13 +78,13 @@ func TestRecallCursorAt(t *testing.T) {
 	}
 	// a long query: the box shows it from where the caret fits, the cursor is at the end of what is shown
 	narrow := resized(t, w.model(), 40, 20)
-	room := narrow.inputRoom()
+	room := narrow.roomFor(narrow.progressText())
 	long := rtype(t, narrow, strings.Repeat("x", 100))
 	if x, _, ok := long.cursorAt(); !ok || x != 4+room-1 {
 		t.Errorf("long, caret at the end: %d (room %d)", x, room)
 	}
-	if x := 4 + room - 1; x > 40-2 {
-		t.Errorf("the cursor is outside the box: %d", x)
+	if x, _, _ := long.cursorAt(); x != 40-3 { // inside the box, one cell short of its border
+		t.Errorf("the cursor of a long query: %d, want %d", x, 40-3)
 	}
 	if long, _ = rpress(t, long, "home"); true {
 		if x, _, _ := long.cursorAt(); x != 4 {
@@ -91,8 +94,8 @@ func TestRecallCursorAt(t *testing.T) {
 	// the progress takes room from the query while the index is built
 	idx := resized(t, w.model(), 40, 20)
 	idx.indexing = true
-	if idx.inputRoom() >= narrow.inputRoom() {
-		t.Errorf("room while indexing %d, after %d", idx.inputRoom(), narrow.inputRoom())
+	if idx.roomFor(idx.progressText()) >= narrow.roomFor(narrow.progressText()) {
+		t.Errorf("room while indexing %d, after %d", idx.roomFor(idx.progressText()), narrow.roomFor(narrow.progressText()))
 	}
 	// not where the keys are the list's or the panel's, and not before there is a size
 	locked := rtype(t, w.model(), "ab")
@@ -112,6 +115,53 @@ func TestRecallCursorAt(t *testing.T) {
 	}
 	if _, _, ok := (recallModel{}).cursorAt(); ok {
 		t.Error("no size yet")
+	}
+}
+
+// One frame is drawn with one reading of the index's progress: the reversed cell of the caret and the
+// cursor are on the same cell whatever the progress says (it goes on while the frame is drawn: 99 → 100
+// is one cell more taken from the query, and a long query is cut by it).
+func TestRecallFrameUsesOneProgress(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+	w := newRWorld(t)
+	w.fill()
+	m := rtype(t, resized(t, w.model(), 40, 20), strings.Repeat("x", 60))
+	m.indexing = true
+	m.progress.done.Store(100)
+	m.progress.total.Store(100) // what the model says now
+	for _, prog := range []string{"", "indexing 99 / 100 ", "indexing 100 / 100 ", "indexing 5 / 100 "} {
+		row := strings.Split(strings.Join(m.inputBox(prog), "\n"), "\n")[1]
+		i := strings.Index(row, "\x1b[7m")
+		if i < 0 {
+			t.Fatalf("%q: no caret in %q", prog, row)
+		}
+		x, _, ok := m.cursorAtFor(prog)
+		if cell := ansi.StringWidth(row[:i]); !ok || cell != x {
+			t.Errorf("%q: the caret is drawn at %d, the cursor at %d", prog, cell, x)
+		}
+		if w := ansi.StringWidth(row); w != 40 {
+			t.Errorf("%q: the row is %d wide", prog, w)
+		}
+	}
+}
+
+// frame is the screen and the cursor's cell together: what View and cursorAt say, from one reading.
+func TestRecallFrameIsTheScreenAndTheCursor(t *testing.T) {
+	w := newRWorld(t)
+	w.fill()
+	m := rtype(t, w.model(), "ab")
+	view, x, y, ok := m.frame()
+	cx, cy, cok := m.cursorAt()
+	if view != m.View() || x != cx || y != cy || ok != cok || !ok {
+		t.Errorf("frame %d,%d %v; cursorAt %d,%d %v; same screen %v", x, y, ok, cx, cy, cok, view == m.View())
+	}
+	locked, _ := rpress(t, m, "enter")
+	if view, x, y, ok = locked.frame(); ok || view != locked.View() {
+		t.Errorf("kept: shown %v", ok)
+	}
+	if view, _, _, ok = (recallModel{}).frame(); view != "" || ok {
+		t.Errorf("no size: %q %v", view, ok)
 	}
 }
 
