@@ -234,7 +234,7 @@ class Keys(Base):
 
     def test_the_default_template_lists_the_new_actions_with_their_default_keys(self):
         out = plain_config(self.cli("config").stdout); keys = out.split("[keys]")[1].split("[colors]")[0]
-        for line in ('clear_filter = ["esc"]', 'preview_up = ["pgup"]', 'preview_down = ["pgdown"]'): self.assertIn(line, keys)
+        self.assertIn('clear_filter = ["esc"]', keys); self.assertRegex(keys, r'preview_up = \["pgup"(, "ctrl\+p")?\]'); self.assertRegex(keys, r'preview_down = \["pgdown"(, "ctrl\+n")?\]')  # T81 added ctrl+p / ctrl+n (test_t81 pins them)
         full = self.cli("config").stdout
         self.assertRegex(full, r'clear_filter = \["esc"\] +# default: esc'); self.assertRegex(full, r'language = "en" +# default: "en"')
 
