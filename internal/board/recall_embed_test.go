@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -319,6 +320,110 @@ func TestBoardRecallEnterOnARunningSessionWithNoPane(t *testing.T) {
 	m, quit := bpress(t, m, "enter")
 	if quit || m.rc == nil || !strings.Contains(rview(*m.rc), "cart-fix is running") || len(e.r.calls) != 0 {
 		t.Errorf("quit %v calls %q", quit, e.r.calls)
+	}
+}
+
+// The screen is only opened where the board has a size, and brings its own first commands.
+func TestBoardRecallNeedsASizeAndStartsItsWork(t *testing.T) {
+	m, _ := newEmb(t, userOnly, paneEnv, false)
+	n := m
+	n.w = 0
+	if tm, cmd := n.Update(key("?")); tm.(Model).rc != nil || cmd != nil {
+		t.Errorf("no size yet: rc %v cmd %v", tm.(Model).rc != nil, cmd != nil)
+	}
+	if tm, cmd := m.Update(key("?")); tm.(Model).rc == nil || cmd == nil {
+		t.Errorf("? starts the index tick: rc %v cmd %v", tm.(Model).rc != nil, cmd != nil)
+	}
+}
+
+// The tick of the screen is the screen's: what the index learned meanwhile shows up.
+func TestBoardRecallTickRefreshesTheResults(t *testing.T) {
+	m, e := newEmb(t, userOnly, paneEnv, false)
+	m = openRecallOn(t, m)
+	before := len(m.rc.results)
+	e.w.claude("s-new", e.w.dir("fresh"), "fresh-one", time.Minute, "u: zebra crossing")
+	if err := e.w.ix.Update(); err != nil {
+		t.Fatal(err)
+	}
+	tm, _ := m.Update(recallTickMsg{})
+	if got := len(tm.(Model).rc.results); got != before+1 {
+		t.Errorf("results %d → %d", before, got)
+	}
+}
+
+// The move that ends in a window: the screen is the user's again at once (no stale message while
+// tmux works), a failure is said on it, and the next key does not ask for a second window.
+func TestBoardRecallFailedWindowIsNotRepeated(t *testing.T) {
+	m, e := newEmb(t, userOnly, popupEnv, false)
+	e.r.tmuxFail = map[string]error{"new-window": fmt.Errorf("no space for another window")}
+	m = openRecallOn(t, m)
+	m, _ = bpress(t, m, "enter")
+	if !strings.Contains(rview(*m.rc), "no space for another window") {
+		t.Fatalf("the failure is said:\n%s", rview(*m.rc))
+	}
+	tm, cmd := m.Update(key("enter")) // the command is not run yet: tmux is working
+	if cmd == nil || tm.(Model).rc == nil || tm.(Model).rc.msg != "" {
+		t.Errorf("while the window is made the screen is clean: cmd %v", cmd != nil)
+	}
+	m, _ = bpress(t, m, "x")
+	if n := len(tmuxCalls(e.r, "new-window")); n != 1 {
+		t.Errorf("new-window ran %d times", n)
+	}
+}
+
+// The window is named by the session's title, the first thing said when it has no name.
+func TestBoardRecallWindowNameIsTheTitle(t *testing.T) {
+	m, e := newEmb(t, userOnly, popupEnv, false)
+	e.w.claude("s-anon", e.w.dir("anon"), "", time.Minute, "u: renew widget quota")
+	if err := e.w.ix.Update(); err != nil {
+		t.Fatal(err)
+	}
+	m = openRecallOn(t, m)
+	m = btype(t, m, "widget quota")
+	bpress(t, m, "enter")
+	nw := tmuxCalls(e.r, "new-window")
+	if len(nw) != 1 || !strings.Contains(strings.Join(nw[0], "\x00"), "-n\x00renew widget quota\x00") {
+		t.Errorf("new-window %q", nw)
+	}
+}
+
+// The mouse is the recall screen's to ignore: the board under it does not move.
+func TestBoardRecallMouseDoesNotReachTheBoard(t *testing.T) {
+	a := store.Session{ID: "a1", Name: "a", SessionID: "s-a", TmuxPane: "%5", Status: "idle", CWD: "/a"}
+	b := store.Session{ID: "b1", Name: "b", SessionID: "s-b", TmuxPane: "%6", Status: "idle", CWD: "/a"}
+	m, _ := newEmb(t, userOnly, paneEnv, false, a, b)
+	m = openRecallOn(t, m)
+	focus, scroll := m.focus, m.scroll
+	for _, ev := range []tea.MouseMsg{{X: 3, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}, {X: 3, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown}} {
+		tm, _ := m.Update(ev)
+		if mm := tm.(Model); mm.focus != focus || mm.scroll != scroll || mm.rc == nil {
+			t.Errorf("%v: focus %q→%q", ev.Button, focus, mm.focus)
+		}
+	}
+}
+
+// ? leaves only the screen that was opened by it, and only from the list with nothing typed.
+func TestRecallKeyLeavesOnlyAnEmbeddedList(t *testing.T) {
+	w := newRWorld(t)
+	w.fill()
+	m, _ := rpress(t, w.model(), "?")
+	if m.query != "?" || m.leave {
+		t.Errorf("standalone: ? is text: query %q leave %v", m.query, m.leave)
+	}
+	b, _ := newEmb(t, userOnly, paneEnv, false)
+	b = openRecallOn(t, b)
+	b, _ = bpress(t, b, "ctrl+f", "?")
+	if b.rc == nil || !b.rc.panel {
+		t.Errorf("? in the panel does not leave the screen: rc %v", b.rc != nil)
+	}
+}
+
+// The window failed after the user went back to the board: the board says it.
+func TestBoardSaysAWindowFailureAfterTheScreenWasLeft(t *testing.T) {
+	m, _ := newEmb(t, userOnly, popupEnv, false)
+	tm, _ := m.Update(resumeWindowMsg{err: fmt.Errorf("new-window: no space for another window")})
+	if v := ansiStrip(tm.(Model).View()); !strings.Contains(v, "no space for another window") {
+		t.Errorf("the board:\n%s", v)
 	}
 }
 
