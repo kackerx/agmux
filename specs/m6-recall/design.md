@@ -11,7 +11,7 @@
 - 两个入口一套界面：`agmux -r [关键词]`（= `agmux recall`，任何终端，不要 tmux）；看板里动作 `recall`（默认 `?`）。
 - resume 原地起：`agmux -r` 里 enter → agmux 退出，同一终端 `cd <cwd> && exec claude --resume <id>` / `pi --session <文件>`。在跑的会话 enter 不动，底栏说它在跑（看板里 enter 跳 pane）。目录没了 enter 不动，底栏说原因。
 - 看板里 enter 关了的会话：看板跑在普通 pane → 同上原地 exec（看板退出）；popup / --stay → 在会话 cwd 开 tmux 新窗口跑 resume 命令（T60 的 new-window 代码）再跳过去。
-- 空查询 = 最近的会话（按 transcript mtime），片段是最后一句。
+- 空查询 = 最近的会话（按 transcript mtime），片段是你最后说的一句（没有才用 agent 的最后一句）。
 - 筛选面板（`recall_filter`，默认 ctrl+f）：来源多选（只列本机有会话的来源，默认全选）+ 范围单选（当前项目 / 全部历史，默认全部）。面板键：上下 = `[keys] down/up`，勾选 `recall_toggle`（space），全选 `recall_all`（a），清空 `recall_none`（A），esc 收起。`recall_scope`（ctrl+t）不开面板直接切范围。勾选不记住（每次打开全选 + 全部）。
 - `recall_copy`（ctrl+y）复制 `cd '<cwd>' && claude --resume <id>` 整条；`recall_open`（ctrl+o）`$EDITOR` 开 transcript。
 - 窄于 100 列不画预览。fork（alt+enter）v1 不做。
