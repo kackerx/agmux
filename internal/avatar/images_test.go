@@ -25,7 +25,8 @@ import (
 func useSets(t *testing.T, fsys fstest.MapFS) []string {
 	t.Helper()
 	t.Cleanup(func() { Sets, problems = nil, nil })
-	return UseSets(fsys)
+	LoadSetsFrom(fstest.MapFS{}, fsys)
+	return problems
 }
 
 func writeFiles(root string, files map[string]string) error {

@@ -78,7 +78,7 @@ func TestRecallCursorAt(t *testing.T) {
 	}
 	// a long query: the box shows it from where the caret fits, the cursor is at the end of what is shown
 	narrow := resized(t, w.model(), 40, 20)
-	room := narrow.inputRoom()
+	room := narrow.roomFor(narrow.progressText())
 	long := rtype(t, narrow, strings.Repeat("x", 100))
 	if x, _, ok := long.cursorAt(); !ok || x != 4+room-1 {
 		t.Errorf("long, caret at the end: %d (room %d)", x, room)
@@ -94,8 +94,8 @@ func TestRecallCursorAt(t *testing.T) {
 	// the progress takes room from the query while the index is built
 	idx := resized(t, w.model(), 40, 20)
 	idx.indexing = true
-	if idx.inputRoom() >= narrow.inputRoom() {
-		t.Errorf("room while indexing %d, after %d", idx.inputRoom(), narrow.inputRoom())
+	if idx.roomFor(idx.progressText()) >= narrow.roomFor(narrow.progressText()) {
+		t.Errorf("room while indexing %d, after %d", idx.roomFor(idx.progressText()), narrow.roomFor(narrow.progressText()))
 	}
 	// not where the keys are the list's or the panel's, and not before there is a size
 	locked := rtype(t, w.model(), "ab")
@@ -143,6 +143,25 @@ func TestRecallFrameUsesOneProgress(t *testing.T) {
 		if w := ansi.StringWidth(row); w != 40 {
 			t.Errorf("%q: the row is %d wide", prog, w)
 		}
+	}
+}
+
+// frame is the screen and the cursor's cell together: what View and cursorAt say, from one reading.
+func TestRecallFrameIsTheScreenAndTheCursor(t *testing.T) {
+	w := newRWorld(t)
+	w.fill()
+	m := rtype(t, w.model(), "ab")
+	view, x, y, ok := m.frame()
+	cx, cy, cok := m.cursorAt()
+	if view != m.View() || x != cx || y != cy || ok != cok || !ok {
+		t.Errorf("frame %d,%d %v; cursorAt %d,%d %v; same screen %v", x, y, ok, cx, cy, cok, view == m.View())
+	}
+	locked, _ := rpress(t, m, "enter")
+	if view, x, y, ok = locked.frame(); ok || view != locked.View() {
+		t.Errorf("kept: shown %v", ok)
+	}
+	if view, _, _, ok = (recallModel{}).frame(); view != "" || ok {
+		t.Errorf("no size: %q %v", view, ok)
 	}
 }
 

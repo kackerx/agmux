@@ -11,6 +11,12 @@ import (
 	"github.com/kackerx/agmux/internal/store"
 )
 
+// previewLines is previewBox without the cursor.
+func previewLines(s store.Session, ok bool, pv previewMsg, w, h, scroll int, focused bool) []string {
+	out, _, _ := previewBox(s, ok, pv, w, h, scroll, focused)
+	return out
+}
+
 // ---- T61: the preview cuts a long line (T56's wrapping broke a TUI's boxes), and its width is configurable ----
 
 // cutBox is a preview 40 wide (35 columns inside) of the capture text.

@@ -20,7 +20,7 @@ func titled(t *testing.T, content string) (*Poller, string) {
 		t.Fatal(err)
 	}
 	raw := []Raw{{ID: "a", Project: "proj", Transcript: log}}
-	return &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}, log
+	return &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}, log
 }
 
 func nameOf(t *testing.T, p *Poller) string {
@@ -100,7 +100,7 @@ func TestTitleEdges(t *testing.T) {
 	// a summary is the name, and the transcript is not looked at; without a transcript, the project
 	p, log = titled(t, strings.Replace(titleLine, "%s", "from-jsonl", 1)+filler(200<<10))
 	raw := []Raw{{ID: "a", Name: "the summary", Project: "proj", Transcript: log}, {ID: "b", Project: "other"}, {ID: "c", Project: "gone", Transcript: log + ".missing"}}
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestTitleOtherFile(t *testing.T) {
 	}
 	other := filepath.Join(t.TempDir(), "b.jsonl")
 	os.WriteFile(other, []byte(strings.Replace(titleLine, "%s", "elsewhere", 1)+filler(300<<10)), 0o644) // longer than the first
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) {
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) {
 		return []Raw{{ID: "a", Project: "proj", Transcript: other}}, nil
 	})}
 	if got := nameOf(t, p); got != "elsewhere" {

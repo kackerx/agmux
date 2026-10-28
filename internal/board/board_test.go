@@ -22,6 +22,11 @@ import (
 
 var now = time.Date(2026, 10, 12, 4, 0, 0, 0, time.UTC)
 
+// srcFunc is a store.Source that is a function.
+type srcFunc func() ([]store.Raw, error)
+
+func (f srcFunc) Sessions() ([]store.Raw, error) { return f() }
+
 func fixture(t *testing.T) []store.Session {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir()) // no claude-agent records of the machine the test runs on
@@ -33,7 +38,7 @@ func fixture(t *testing.T) []store.Session {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	p := &store.Poller{Sources: []store.Source{store.SourceFunc(func() ([]store.Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
+	p := &store.Poller{Sources: []store.Source{srcFunc(func() ([]store.Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
 	was := slices.Clone(raw) // a session is done only after the poller saw it work
 	for i := range raw {
 		raw[i].Status = "working"

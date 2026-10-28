@@ -136,13 +136,22 @@ func Known(id string) bool {
 // reported by Problems.
 func LoadSets() {
 	sub, _ := fs.Sub(builtin, "sets")
-	all, problems1 := loadSets(sub, "builtin")
+	var user fs.FS
+	if dir, err := xdg.ConfigDir(); err == nil {
+		user = os.DirFS(path.Join(dir, "avatars"))
+	}
+	LoadSetsFrom(sub, user)
+}
+
+// LoadSetsFrom is LoadSets over the file systems given (the tests give their own; user may be nil).
+func LoadSetsFrom(builtinFS, user fs.FS) {
+	all, problems1 := loadSets(builtinFS, "builtin")
 	slices.SortStableFunc(all, func(a, b *Set) int { return builtinRank(a.ID) - builtinRank(b.ID) })
 	var problems2 []string
-	if dir, err := xdg.ConfigDir(); err == nil {
-		var user []*Set
-		user, problems2 = loadSets(os.DirFS(path.Join(dir, "avatars")), "user")
-		for _, u := range user {
+	if user != nil {
+		var us []*Set
+		us, problems2 = loadSets(user, "user")
+		for _, u := range us {
 			if i := slices.IndexFunc(all, func(s *Set) bool { return s.ID == u.ID }); i >= 0 {
 				all[i] = u
 			} else {
@@ -166,12 +175,6 @@ func builtinRank(id string) int {
 		return i
 	}
 	return len(builtinOrder)
-}
-
-// UseSets makes the sets under fsys the only ones; for tests. It returns what it skipped.
-func UseSets(fsys fs.FS) []string {
-	Sets, problems = loadSets(fsys, "user")
-	return problems
 }
 
 // pixelsVersion goes into every image ID and names what is uploaded of a file (the centered 3:2 part,

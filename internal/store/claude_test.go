@@ -384,7 +384,7 @@ func TestRecordedAgent(t *testing.T) {
 	}
 	log := filepath.Join(t.TempDir(), "s.jsonl")
 	os.WriteFile(log, []byte(`{"type":"agent-setting","agentSetting":"from-transcript"}`+"\n"), 0o644)
-	p := &Poller{StateDir: t.TempDir(), Sources: []Source{SourceFunc(func() ([]Raw, error) {
+	p := &Poller{StateDir: t.TempDir(), Sources: []Source{srcFunc(func() ([]Raw, error) {
 		return []Raw{
 			{ID: "1", SessionID: "named", Transcript: log}, {ID: "2", SessionID: "padded"}, {ID: "3", SessionID: "dash", Transcript: log},
 			{ID: "4", SessionID: "blank", Transcript: log}, {ID: "5", SessionID: "none", Transcript: log}, {ID: "6", SessionID: "none"},

@@ -104,10 +104,6 @@ type recallEditedMsg struct{ err error }
 // NewRecall is the recall screen over ix. live are the sessions that run now (they get a dot and
 // are not resumed), project the project of the current directory. The index is brought up to date
 // when the program starts (Init), and the screen shows what is there as it is built.
-func NewRecall(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) tea.Model {
-	return newRecallModel(ix, cfg, live, project, query)
-}
-
 func newRecallModel(ix *recall.Index, cfg *config.Config, live []store.Session, project, query string) recallModel {
 	m := recallModel{ix: ix, cfg: cfg, live: live, project: project, query: query, qpos: len([]rune(query)), locked: query != "", progress: &recallProgress{}, pvCache: &pvCache{}, indexing: true,
 		now: time.Now, lookPath: exec.LookPath, copyToClip: copyToClipboard, unticked: map[string]bool{},

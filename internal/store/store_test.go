@@ -19,6 +19,14 @@ import (
 	"github.com/kackerx/agmux/internal/avatar"
 )
 
+// srcFunc is a Source that is a function.
+type srcFunc func() ([]Raw, error)
+
+func (f srcFunc) Sessions() ([]Raw, error) { return f() }
+
+// lastModel is the model of the last assistant entry in the final 64KB of a transcript.
+func lastModel(path string) string { return modelIn(tailLines(path)) }
+
 func fixture(t *testing.T) []Raw {
 	t.Helper()
 	data, err := os.ReadFile("../../testdata/sessions.json")
@@ -50,7 +58,7 @@ func settle(t *testing.T, raw []Raw, p *Poller) {
 
 func poller(t *testing.T, raw []Raw) *Poller {
 	t.Setenv("XDG_STATE_HOME", t.TempDir()) // no claude-agent records of the machine the test runs on
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +78,7 @@ func byID(t *testing.T, ss []Session, id string) Session {
 
 func TestFixture(t *testing.T) {
 	raw := fixture(t)
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
 	settle(t, raw, p)
 	ss := p.Sessions()
 	if len(ss) != len(raw) || len(ss) == 0 {
@@ -100,7 +108,7 @@ func TestFixture(t *testing.T) {
 
 func TestHUD(t *testing.T) {
 	raw := fixture(t)[:1]
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
 	hud := filepath.Join(p.StateDir, raw[0].SessionID+".json")
 	for _, c := range []struct {
 		body   string
@@ -135,7 +143,7 @@ func TestHUDModelBeatsJSONL(t *testing.T) {
 	if err := os.WriteFile(log, []byte(`{"type":"assistant","message":{"model":"claude-opus-5-5"}}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) {
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) {
 		return []Raw{{ID: "a", SessionID: "n1", Transcript: log}}, nil
 	})}, StateDir: dir}
 	p.Refresh()
@@ -189,7 +197,7 @@ func TestLastModel(t *testing.T) {
 func TestRefreshErrorKeepsSessions(t *testing.T) {
 	p := poller(t, fixture(t))
 	n := len(p.Sessions())
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}
 	if p.Refresh() == nil || p.Err() == nil || len(p.Sessions()) != n {
 		t.Fatalf("failed poll should keep %d sessions and expose the error", n)
 	}
@@ -199,7 +207,7 @@ func TestModelCache(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "s.jsonl")
 	raw := []Raw{{ID: "a", Transcript: log}}
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: dir}
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: dir}
 	write := func(body string) {
 		if err := os.WriteFile(log, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
@@ -233,7 +241,7 @@ func TestStatusAndDone(t *testing.T) {
 		status string
 		done   bool
 	}{"idle": {"idle", true}, "idle, no time": {"idle", false}, "idle, never seen working": {"idle", false}, "working": {"working", false}, "waiting": {"waiting", false}}
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, StateDir: t.TempDir()}
 	was := slices.Clone(raw)
 	for i := range raw {
 		if raw[i].ID != "idle, never seen working" {
@@ -264,7 +272,7 @@ func TestCorruptAvatarsShownNotFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("corrupt avatars.json must not stop the board: %v", err)
 	}
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return []Raw{{ID: "a"}}, nil })}
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) { return []Raw{{ID: "a"}}, nil })}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +291,7 @@ func TestAvatarsByName(t *testing.T) {
 	b.Set("orch", "bot-01")
 	p := &Poller{StateDir: dir, Avatars: b, AvatarDefault: "bot-05",
 		AvatarBind: map[string]string{"orch": "bot-02", "dev": "bot-03", "id-3": "bot-04"},
-		Sources: []Source{SourceFunc(func() ([]Raw, error) {
+		Sources: []Source{srcFunc(func() ([]Raw, error) {
 			return []Raw{{ID: "id-1", Name: "orch"}, {ID: "id-2", Name: "dev"}, {ID: "id-3"}, {ID: "id-4", Project: "proj"}}, nil
 		})}}
 	if err := p.Refresh(); err != nil {
@@ -306,7 +314,7 @@ func TestAvatarsByName(t *testing.T) {
 		t.Errorf("avatars.json: %s", data)
 	}
 	// no summary, same project: one name, one binding; both cards change at once
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) {
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) {
 		return []Raw{{ID: "p1", Project: "proj"}, {ID: "p2", Project: "proj"}, {ID: "id-3"}}, nil
 	})}
 	p.Refresh()
@@ -364,7 +372,7 @@ func TestPollFollowsAvatarsFile(t *testing.T) {
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	os.WriteFile(path, []byte("{oops"), 0o644)
 	p, _ := NewPoller()
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return []Raw{{ID: "a", Name: "n"}}, nil })}
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) { return []Raw{{ID: "a", Name: "n"}}, nil })}
 	p.Refresh()
 	if p.Err() == nil {
 		t.Fatal("broken file: error")
@@ -398,13 +406,13 @@ func TestSetAvatarWriteErrorNotAvatarErr(t *testing.T) {
 
 // An image set's ID is as good as a sprite's in a binding, [avatars.bind] or default.
 func TestAvatarImageSetIDs(t *testing.T) {
-	avatar.UseSets(fstest.MapFS{"kit/idle/1.png": &fstest.MapFile{Data: pngOf("x")}})
-	t.Cleanup(func() { avatar.UseSets(fstest.MapFS{}) })
+	avatar.LoadSetsFrom(fstest.MapFS{}, fstest.MapFS{"kit/idle/1.png": &fstest.MapFile{Data: pngOf("x")}})
+	t.Cleanup(func() { avatar.LoadSetsFrom(fstest.MapFS{}, fstest.MapFS{}) })
 	dir := t.TempDir()
 	b, _ := avatar.LoadBindings(filepath.Join(dir, "avatars.json"))
 	b.Set("orch", "kit")
 	p := &Poller{StateDir: dir, Avatars: b, AvatarDefault: "kit", AvatarBind: map[string]string{"dev": "kit", "gone": "no-such-set"},
-		Sources: []Source{SourceFunc(func() ([]Raw, error) {
+		Sources: []Source{srcFunc(func() ([]Raw, error) {
 			return []Raw{{ID: "1", Name: "orch"}, {ID: "2", Name: "dev"}, {ID: "3", Name: "gone"}}, nil
 		})}}
 	if err := p.Refresh(); err != nil {
@@ -446,7 +454,7 @@ func TestAvatarState(t *testing.T) {
 	} {
 		c.r.ID = "id"
 		raw := []Raw{c.r}
-		p := &Poller{StateDir: t.TempDir(), Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}}
+		p := &Poller{StateDir: t.TempDir(), Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}}
 		settle(t, raw, p)
 		if got := p.Sessions()[0].AvatarState; got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
@@ -521,7 +529,7 @@ func TestAgentIn(t *testing.T) {
 func TestAgentSources(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "s.jsonl")
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return []Raw{{ID: "a", Transcript: log}, {ID: "b"}}, nil })}, StateDir: dir}
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return []Raw{{ID: "a", Transcript: log}, {ID: "b"}}, nil })}, StateDir: dir}
 	as := func(n string) string { return `{"type":"agent-setting","agentSetting":"` + n + `"}` + "\n" }
 	pad := `{"type":"user","pad":"` + strings.Repeat("x", tailBytes) + `"}` + "\n" // longer than the tail
 	write := func(body string) { os.WriteFile(log, []byte(body), 0o644) }
@@ -582,7 +590,7 @@ func seenPoller(t *testing.T, raw *[]Raw) (*Poller, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "seen.json")
 	seen, _ := avatar.LoadBindings(path)
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return *raw, nil })}, StateDir: t.TempDir(), Seen: seen}
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return *raw, nil })}, StateDir: t.TempDir(), Seen: seen}
 	settle(t, *raw, p)
 	return p, path
 }
@@ -653,7 +661,7 @@ func TestSeenKeptWhenNotKnown(t *testing.T) {
 	raw := []Raw{{ID: "a", Status: "idle", StatusChangedAt: t1}}
 	p, path := seenPoller(t, &raw)
 	p.MarkSeen(p.Sessions()[0])
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}
 	p.Refresh()
 	if got := seenFile(t, path); !strings.Contains(got, `"a"`) {
 		t.Errorf("a failed poll forgot: %s", got)
@@ -716,7 +724,7 @@ func pinPoller(t *testing.T, raw *[]Raw) (*Poller, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "pins.json")
 	pins, _ := avatar.LoadBindings(path)
-	p := &Poller{Sources: []Source{SourceFunc(func() ([]Raw, error) { return *raw, nil })}, StateDir: t.TempDir(), Pins: pins}
+	p := &Poller{Sources: []Source{srcFunc(func() ([]Raw, error) { return *raw, nil })}, StateDir: t.TempDir(), Pins: pins}
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -779,7 +787,7 @@ func TestTogglePin(t *testing.T) {
 	raw = append(raw, Raw{ID: "d", Status: "idle"})
 	p.Refresh()
 	p.TogglePin(byID(t, p.Sessions(), "d"))
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) { return nil, os.ErrDeadlineExceeded })}
 	p.Refresh()
 	if got := seenFile(t, path); !strings.Contains(got, `"d"`) {
 		t.Errorf("a failed poll dropped the pin: %s", got)
@@ -953,7 +961,7 @@ func TestNameLevels(t *testing.T) {
 		{ID: "project", Project: "proj"},
 		{ID: "pi", AgentType: "pi", Pane: "%1", Project: "proj"}, // pi's pane title is not a summary                                                                // 5
 	}
-	p := &Poller{StateDir: t.TempDir(), Sources: []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}, Panes: func() (string, error) { return panes, nil }}
+	p := &Poller{StateDir: t.TempDir(), Sources: []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}, Panes: func() (string, error) { return panes, nil }}
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if err := p.Refresh(); err != nil {
 		t.Fatal(err)
@@ -991,7 +999,7 @@ func TestDoneFromTheStatusTime(t *testing.T) {
 		t.Error("a second change")
 	}
 	raw = raw[1:] // gone, back at an older time than the first: first seen anew
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}
 	p.Refresh()
 	raw = append(raw, Raw{ID: "a", Status: "idle", StatusChangedAt: at.Add(2 * time.Hour)})
 	p.Refresh()
@@ -1031,10 +1039,10 @@ func TestDoneNeedsAWorkingSession(t *testing.T) {
 	if !byID(t, p.Sessions(), "b").Done {
 		t.Error("only waited, and stopped")
 	}
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return nil, nil })}
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) { return nil, nil })}
 	p.Refresh()
 	raw[0].Status = "idle" // as it was when it went
-	p.Sources = []Source{SourceFunc(func() ([]Raw, error) { return raw, nil })}
+	p.Sources = []Source{srcFunc(func() ([]Raw, error) { return raw, nil })}
 	if done() {
 		t.Error("gone and back idle: not seen working by this run")
 	}
