@@ -47,7 +47,7 @@ class Defaults(Base):
         self.assertEqual(self.jump_target(t), ["switch", "a3"])
 
     def test_no_file_footer_is_the_default_one(self):
-        t = self.board(); bar = last_text_row(t.snap())
+        t = self.board(w=232); bar = last_text_row(t.snap())  # e242a8b: the footer got `? recall`: `q quit` needs ~210 columns
         for want in ("j/k h/l move", "enter jump", "f fold", "p preview", "tab focus preview", "i reply", "H handoff", "r restart", "x kill", "d review", "q quit"):
             self.assertIn(want, bar)
 
