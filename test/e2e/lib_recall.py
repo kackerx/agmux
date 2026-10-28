@@ -218,6 +218,13 @@ class RTerm(Term):
         r = tm("start-server", ";", "set", "-g", "remain-on-exit", "on", ";", "new-session", "-d", "-s", self.name, "-x", w, "-y", h, "-c", str(cwd or env.home), cmd)
         if r.returncode: raise RuntimeError(r.stderr)
 
+    def record(self):
+        """from now on keep the bytes the program writes to the terminal (tmux pipe-pane): what the screen cannot show, e.g. that the alternate screen was left before an exec"""
+        self.rec_file = self.env.tmp / f"{self.name}.raw"; tm("pipe-pane", "-t", self.name, f"cat >> {shlex.quote(str(self.rec_file))}")
+
+    def recorded(self):
+        return self.rec_file.read_bytes() if getattr(self, "rec_file", None) and self.rec_file.exists() else b""
+
     def visible(self, names):
         """which of {key: name} are on the screen: the layout of the list is the UI's, the session names are the fixture's"""
         t = self.text(); return {k for k, n in names.items() if n in t}

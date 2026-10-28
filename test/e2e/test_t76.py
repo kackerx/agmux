@@ -5,7 +5,7 @@ and on a vanished directory does not, no preview under 100 columns, the "indexin
 STATE: SKELETON. `FixtureSelfCheck` runs now (it checks the fakes and the harness this file stands on); every other class is skipped until `agmux recall` without --dump exists (lib_recall.ui_ready()). The bodies were written
 against the design text, not against a screen: what depends on wording or layout that only T76 decides is marked `GUESS:` — read those first when the UI lands, and fix the test (not the product) if the design leaves it open.
 The list is located by the session NAMES of the fixture (lib_recall.corpus), which the layout cannot change; no pixel / column positions are assumed."""
-import json, os, re, time, unittest
+import os, re, shlex, time, unittest
 from lib import wait, disp_width
 from lib_recall import *
 
@@ -53,7 +53,7 @@ class Base(unittest.TestCase):
         self.api_dir = str(self.env.home / "work" / "ledger.worktrees" / "feature" / "audit" / "api")
 
     def ui(self, query="", w=140, h=40, cwd=None, flags="", **kw):
-        t = RTerm(self.env, args=f"-r {flags} {query}".strip(), w=w, h=h, cwd=cwd, **kw); self.addCleanup(t.close)
+        t = RTerm(self.env, args=f"-r {flags} {shlex.quote(query) if query else ''}".strip(), w=w, h=h, cwd=cwd, **kw); self.addCleanup(t.close)
         self.assertTrue(wait(lambda: t.visible(NAMES), 10), "the list shows sessions:\n" + t.text()); time.sleep(0.5); return t
 
     def type(self, t, s): t.lit(s); time.sleep(0.5)
@@ -98,7 +98,7 @@ class List(Base):
         t = self.ui(); self.type(t, "'feature/audit/api"); self.settle(t, ["audit"]); t.keys("C-u"); time.sleep(0.4)
 
     def test_no_match_says_so_and_nothing_is_listed(self):
-        t = self.ui(); self.type(t, "'zzqqxx-nothing"); self.settle(t, []); self.assertRegex(t.text().lower(), r"no match|no result|0 ", "GUESS: wording")
+        t = self.ui(); self.type(t, "'zzqqxx-nothing"); self.settle(t, []); self.assertRegex(t.text().lower(), r"no session matches")
 
     def test_chinese_queries_work(self):
         cwd = str(self.env.home / "work" / "zh"); sid = "13131313-0000-4000-8000-000000000013"
@@ -154,12 +154,13 @@ class Enter(Base):
     """design §2: enter on a closed session quits agmux and, in the same terminal, runs `cd <cwd> && exec claude --resume <id>` / `pi --session <file>`"""
 
     def run_enter(self, query, cwd=None):
-        t = self.ui(cwd=cwd); self.type(t, query); time.sleep(0.5); t.keys("Enter"); return t
+        t = self.ui(cwd=cwd); self.type(t, query); time.sleep(0.5); t.record(); t.keys("Enter"); return t
 
     def test_a_closed_claude_session_is_resumed_in_its_cwd_by_exec(self):
         t = self.run_enter("'coupon"); self.assertTrue(wait(lambda: self.env.ran("claude"), 6), t.text()); r = self.env.ran("claude")
         self.assertEqual((len(r), r[0]["argv"], self.real(r[0]["cwd"])), (1, ["--resume", CART], self.real(self.cart_dir)))
-        self.assertEqual(t.exit_status(5), 0, "agmux is gone: the pane's process is the fake claude, which ended"); self.assertIn("FAKE-CLAUDE --resume " + CART, t.text()); self.assertNotIn("agmux", t.text().split("FAKE-CLAUDE")[0].lower().replace("agmux-e2e", ""), "no agmux screen left behind")
+        self.assertEqual(t.exit_status(5), 0, "agmux is gone: the pane's process is the fake claude, which ended"); raw = t.recorded(); i, j = raw.find(b"\x1b[?1049l"), raw.find(b"FAKE-CLAUDE --resume " + CART.encode())
+        self.assertTrue(0 <= i < j, "the terminal is given back (alternate screen left) before claude starts and prints"); self.assertTrue(raw.rfind(b"\x1b[?1006l", 0, j) >= 0, "mouse reporting is off again")
 
     def test_a_closed_pi_session_is_resumed_with_its_file(self):
         t = self.run_enter("'inner join"); self.assertTrue(wait(lambda: self.env.ran("pi"), 6), t.text()); r = self.env.ran("pi")[0]

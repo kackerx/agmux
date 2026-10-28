@@ -147,8 +147,8 @@ class Search(Base):
         self.assertEqual(self.ids(self.dump("^pi", "'ledger")), [PI_AUDIT], "the source name is the start of what is matched: `^pi`")
         self.assertEqual(sorted(self.ids(self.dump("'ledger"))), sorted([AUDIT, PI_AUDIT]), "project of a worktree")
 
-    def test_the_hit_count_of_a_match_on_the_name_is_every_sentence_of_the_session(self):
-        r = self.dump("'cart-fix"); self.assertEqual((self.ids(r), r[0].hits), ([CART], "5"), "the name is in every sentence's matched string")
+    def test_a_match_on_the_name_alone_lists_the_session_with_no_body_hits(self):
+        r = self.dump("'cart-fix"); self.assertEqual((self.ids(r), r[0].hits), ([CART], "0"), "tasks.md T75 decision (2): the hit count is sentences whose own text matched; the name is not in the text")
 
     def test_no_match_is_empty_output_and_exit_0(self):
         r = self.env.run("recall", "--dump", "'zzqqxx-nothing"); self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
@@ -242,7 +242,7 @@ class Incremental(Base):
         e = self.env.cache_json(n1); e["v"] = 999; e["users"] = [{"t": "2026-01-01T00:00:00Z", "x": "sentence of a format nobody reads"}]; self.env.put_cache(n1, e)
         (self.env.recall_dir / n2).write_text('{"v":1,"source":"claude","users":[{"t":"')  # torn
         rows = self.dump(); self.assertEqual(self.ids(rows), [CART, AUDIT, PI_AUDIT, GONE, PI_PLAIN]); self.assertEqual(self.dump("'format nobody reads"), [])
-        self.assertEqual(self.dump("'coupon")[0].hits, "3"); self.assertEqual(self.env.cache_json(n1)["v"], 1)
+        self.assertEqual(self.dump("'coupon")[0].hits, "3"); self.assertEqual(self.env.cache_json(n1)["v"], self.env.cache_json(f"claude-{GONE}.json")["v"], "rewritten at the current version (not 999)")
 
     def test_cache_files_are_named_source_dash_transcript_name_and_hold_what_the_design_says(self):
         self.dump(); self.assertEqual(self.env.cache_files(), sorted([f"claude-{CART}.json", f"claude-{AUDIT}.json", f"claude-{GONE}.json", f"claude-{self.c['hush'][1]}.json", f"pi-{PI_STAMP}_{PI_AUDIT}.json", f"pi-{PI_STAMP}_{PI_PLAIN}.json"]))
@@ -289,7 +289,7 @@ class Safety(Base):
     def test_a_transcript_that_cannot_be_read_is_one_line_on_stderr_and_the_rest_is_listed(self):
         p, sid = self.c["gone"]; os.chmod(p, 0)
         self.addCleanup(lambda: os.chmod(p, 0o644))
-        rows, r = self.env.dump(); self.assertEqual(r.returncode, 0); self.assertTrue(r.stderr.startswith("agmux: recall:") and "permission denied" in r.stderr.lower(), r.stderr)
+        rows, r = self.env.dump(); self.assertEqual(r.returncode, 1, "56fd337: a transcript that cannot be read makes the exit status 1 (the rest is still listed)"); self.assertTrue(r.stderr.startswith("agmux: recall:") and "permission denied" in r.stderr.lower(), r.stderr)
         self.assertEqual(self.ids(rows), [CART, AUDIT, PI_AUDIT, PI_PLAIN])
 
     def test_the_cache_directory_that_cannot_be_made_is_an_error_not_a_panic(self):
@@ -311,7 +311,7 @@ class Cli(Base):
         r = self.env.run("recall", "--dump", "--", "--force", "branch"); self.assertEqual([l.split("\t")[1] for l in r.stdout.splitlines()], [sid], "several words after the terminator")
 
     def test_an_unknown_option_is_usage_on_stderr_and_exit_2(self):
-        r = self.env.run("recall", "--dump", "--nope"); self.assertEqual((r.returncode, r.stdout), (2, "")); self.assertIn("unknown option --nope", r.stderr); self.assertIn("usage: agmux recall --dump", r.stderr)
+        r = self.env.run("recall", "--dump", "--nope"); self.assertEqual((r.returncode, r.stdout), (2, "")); self.assertIn("unknown option --nope", r.stderr); self.assertIn("usage: agmux recall [--dump] [--reindex] [--] [query...]", r.stderr)
         self.assertEqual(self.env.cache_files(), [], "and nothing was indexed")
 
     def test_options_in_either_order(self):

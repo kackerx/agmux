@@ -5,11 +5,17 @@ runs `new-window -c <cwd> -n <name> -- <resume argv>` and then switches to it; e
 STATE: SKELETON, skipped until T76 exists (lib_recall.ui_ready()). Fakes: tmux (the Env's: every call is logged, `Env.tmux_calls()`), claude / pi (lib_recall: cwd + argv recorded). `GUESS:` marks what only T77 decides (the exact tmux argv,
 what counts as "popup" in a test: `board --stay`, or AGMUX_CLIENT set by the launcher as in test_t10 / test_t47). Fix the test, not the product, when the design leaves it open."""
 import os, re, time, unittest
-from lib import wait
+from lib import wait, SRC
 from lib_recall import *
 from test_t76 import CART, AUDIT, GONE, PI_AUDIT, NAMES
 
-needs_ui = unittest.skipUnless(ui_ready(), "T76 / T77 (agmux -r, the board's ?) is not delivered yet: skeleton")
+def board_has_recall():
+    """T77 delivered? The `recall` action is in the config since T76; T77 is the board handling it: look for it in the board package of the source tree under test (AGMUX_T77=1 forces it on)"""
+    if os.environ.get("AGMUX_T77"): return True
+    return any('"recall"' in p.read_text() for p in (SRC / "internal" / "board").glob("*.go") if not p.name.endswith("_test.go") and not p.name.startswith("recall"))
+
+
+needs_ui = unittest.skipUnless(ui_ready() and board_has_recall(), "T77 (the board's ?) is not delivered yet: skeleton")
 
 
 class Base(unittest.TestCase):
