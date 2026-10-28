@@ -15,10 +15,10 @@
 - 筛选面板（`recall_filter`，默认 ctrl+f）：来源多选（只列本机有会话的来源，默认全选）+ 范围单选（当前项目 / 全部历史，默认全部）。面板键：上下 = `[keys] down/up`，勾选 `recall_toggle`（space），全选 `recall_all`（a），清空 `recall_none`（A），esc 收起。`recall_scope`（ctrl+t）不开面板直接切范围。勾选不记住（每次打开全选 + 全部）。
 - `recall_copy`（ctrl+y）复制 `cd '<cwd>' && claude --resume <id>` 整条；`recall_open`（ctrl+o）`$EDITOR` 开 transcript。
 - 窄于 100 列不画预览。fork（alt+enter）v1 不做。
-- **两段式（用户 2026-10-28 验收后定，和看板 `/` 一致）**：打字态里边打边筛，第一行预选（像 nvim incsearch），上下键挪选中；enter = 保留查询进**锁定态**，不 resume。锁定态：`next_match` / `prev_match`（n / N，回绕）和 `down` / `up`（j / k，不回绕）挪选中，enter = resume，`search`（/）回输入框改查询（查询保留），esc 清空查询回打字态；打字态里查询为空再 esc 才退出屏幕（面板开着先收面板）。`agmux -r <关键词>` 带参数启动直接进锁定态。ctrl+y / ctrl+o / ctrl+f / ctrl+t 两态都能用。
+- **两段式（用户 2026-10-28 验收后定，和看板 `/` 一致）**：打字态里边打边筛，第一行预选（像 nvim incsearch），上下键挪选中；enter = 保留查询进**选择态**，不 resume。选择态：`down` / `up`（j / k、方向键，不回绕）挪选中，enter = resume；**不用 n / N**（用户 2026-10-28 改：列表已经是筛过的，和 nvim 的 search 不同，n / N 没意义），`search`（/）回输入框改查询（查询保留），esc 清空查询回打字态；打字态里查询为空再 esc 才退出屏幕（面板开着先收面板）。`agmux -r <关键词>` 带参数启动直接进选择态。ctrl+y / ctrl+o / ctrl+f / ctrl+t 两态都能用。
 - **输入框（看板 `/` 和找回共用一个）**：真光标；left / right 挪光标，home / ctrl+a、end / ctrl+e 到头尾，alt+backspace / ctrl+w 删前一个词，字符插在光标处；光标位置按显示宽度算（中文 2 格）。这些编辑键固定不进 `[keys]`（同 backspace / ctrl+h / ctrl+c），模板头注里列出；打字态下 `[keys] left/right` 不起作用。
-- **预览滚动**：`preview_down` / `preview_up` 默认加 ctrl+n / ctrl+p（`["pgdown","ctrl+n"]` / `["pgup","ctrl+p"]`），打字态和锁定态都能滚；看板里同样生效（这两个键看板没占）。
-- **鼠标（用户 2026-10-28）**：`agmux -r` 和看板 `?` 里都开鼠标（看板已开，嵌入时不再吞掉）。列表行单击 = 选中（不改打字 / 锁定态）；同一行 400 ms 内再点一次 = 确认，打字态和锁定态都算（动作等于锁定态 enter：关了的 resume、在跑的看板里跳 pane、目录没了不动、窗口在建时忽略）；滚轮在列表区 = 选中行上下挪一行（不回绕）；滚轮在预览区 = 预览滚 3 行（同 ctrl+n/p）；输入框、边框、底栏上的点击和滚轮不做事；筛选面板开着时鼠标一律忽略。
+- **预览滚动**：`preview_down` / `preview_up` 默认加 ctrl+n / ctrl+p（`["pgdown","ctrl+n"]` / `["pgup","ctrl+p"]`），打字态和选择态都能滚；看板里同样生效（这两个键看板没占）。
+- **鼠标（用户 2026-10-28）**：`agmux -r` 和看板 `?` 里都开鼠标（看板已开，嵌入时不再吞掉）。列表行单击 = 选中（不改打字 / 选择态）；同一行 400 ms 内再点一次 = 确认，打字态和选择态都算（动作等于选择态 enter：关了的 resume、在跑的看板里跳 pane、目录没了不动、窗口在建时忽略）；滚轮在列表区 = 选中行上下挪一行（不回绕）；滚轮在预览区 = 预览滚 3 行（同 ctrl+n/p）；输入框、边框、底栏上的点击和滚轮不做事；筛选面板开着时鼠标一律忽略。
 - **边框（像 television）**：输入框、列表、预览各自一个粗边框（┏━┓），颜色 `[colors] recall_input` / `recall_list` / `recall_preview`（默认 `#ff8ebe` / `#6272a4` / `#bd93f9`，用户可改）。标题嵌在上边框里：列表 `n/total`，预览是会话名；输入框没有标题。
 
 ## 3. 来源接口
@@ -46,7 +46,7 @@ type Line struct{ Role byte /* '>' 用户 '<' agent */; At time.Time; Text strin
 - 匹配：全内存，`internal/fuzzy`；每句匹配串 = `来源 项目 分支 会话名 句子`；会话分 = 最高句分，用户句优先，再 mtime。筛选先过滤再匹配。实测每次按键 > 50 ms 才加防抖。
 
 ## 5. 键位全可配（用户 2026-10-28）
-看板和找回里每个按键都在 `[keys]` 下，`agmux config` 模板列全。找回新增动作：`recall`（?）、`recall_filter`（ctrl+f）、`recall_scope`（ctrl+t）、`recall_copy`（ctrl+y）、`recall_open`（ctrl+o）、`recall_toggle`（space）、`recall_all`（a）、`recall_none`（A）；上下 / 翻预览 / esc / 跳命中 / 改查询复用现有 `down` `up` `preview_down` `preview_up` `quit` `next_match` `prev_match` `search`。输入框打字状态下只有 ctrl / alt 组合和方向键算动作，字母是字符（同 `/`）。核：看板现有键是否有硬编码没走 `[keys]` 的（如选择框里的 a、预览滚轮、ctrl+d/u、n/N、g 循环），一并收进 `[keys]`。
+看板和找回里每个按键都在 `[keys]` 下，`agmux config` 模板列全。找回新增动作：`recall`（?）、`recall_filter`（ctrl+f）、`recall_scope`（ctrl+t）、`recall_copy`（ctrl+y）、`recall_open`（ctrl+o）、`recall_toggle`（space）、`recall_all`（a）、`recall_none`（A）；上下 / 翻预览 / esc / 改查询复用现有 `down` `up` `preview_down` `preview_up` `quit` `search`；`next_match` / `prev_match` 在找回里不用。输入框打字状态下只有 ctrl / alt 组合和方向键算动作，字母是字符（同 `/`）。核：看板现有键是否有硬编码没走 `[keys]` 的（如选择框里的 a、预览滚轮、ctrl+d/u、n/N、g 循环），一并收进 `[keys]`。
 
 ## 6. 中英文（用户 2026-10-28）
 `[ui] language = "en"`（`en` | `zh`，默认 en；`$AGMUX_LANG` 可覆盖，便于测试）。`internal/i18n`：`T(key string, args ...any) string`，两张表（en / zh）同一组 key，缺 zh 回落 en，缺 key 返回 key 本身并在测试里断言两表 key 集合相等。范围：看板和找回里用户看到的全部文案（底栏、消息行、预览标题、选择框、提示、找回的列头 / 顶栏 / 面板 / 底栏），`agmux setup` 的输出。不翻：`agmux config` 模板注释、`agmux show` 列、日志 / stderr 错误、README。宽度：zh 文案按显示宽度算（现有 ansi.StringWidth），底栏截断逻辑不变。
