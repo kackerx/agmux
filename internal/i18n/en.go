@@ -34,6 +34,7 @@ var en = map[string]string{
 	"footer.avatar":        "%s avatar",
 	"footer.pin":           "%s pin",
 	"footer.read":          "%s read",
+	"footer.recall":        "%s recall",
 	"footer.hide_quit":     "%s hide · %s quit",
 	"footer.quit":          "%s quit",
 

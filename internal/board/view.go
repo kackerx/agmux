@@ -719,6 +719,7 @@ func footerFor(c *config.Config) []footerKey {
 	add(false, "footer.avatar", "avatar")
 	add(false, "footer.pin", "pin")
 	add(false, "footer.read", "mark_read")
+	add(false, "footer.recall", "recall")
 	if stayFooter {
 		add(false, "footer.hide_quit", "quit", "exit")
 	} else {

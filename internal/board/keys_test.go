@@ -1807,7 +1807,7 @@ func TestOverlay(t *testing.T) {
 	if got := ansi.Strip(overlay("abc", []string{"XXXXX"}, 3)); got != "XXX" {
 		t.Errorf("a box wider than the screen is cut: %q", got)
 	}
-	if !strings.Contains(ansi.Strip(footer(false, 300, "cwd")), "a avatar · t pin · m read · q quit") {
+	if !strings.Contains(ansi.Strip(footer(false, 300, "cwd")), "a avatar · t pin · m read · ? recall · q quit") {
 		t.Errorf("footer: %s", ansi.Strip(footer(false, 300, "cwd")))
 	}
 }
@@ -2075,7 +2075,7 @@ func TestFooterPinAndRead(t *testing.T) {
 		}
 		return strings.Join(f, " · ")
 	}
-	if got := text(""); !strings.Contains(got, "a avatar · t pin · m read · q quit") {
+	if got := text(""); !strings.Contains(got, "a avatar · t pin · m read · ? recall · q quit") {
 		t.Errorf("default: %s", got)
 	}
 	if got := text("[keys]\nmark_read = [\"q\"]\npin = [\"P\"]\n"); !strings.Contains(got, "a avatar · P pin · q read") || strings.Contains(got, "m read") {
