@@ -7,8 +7,8 @@ from lib import *
 from test_t3 import last_text_row, find_cards
 from test_t11 import PreviewBase
 
-EN_FOOT = "j/k h/l move · enter jump · / search · s flash · f fold · g group:cwd · p preview · tab focus preview · i reply · H handoff · r restart · x kill · d review · a avatar · t pin · m read · q quit"
-ZH_FOOT = "j/k h/l 移动 · enter 跳转 · / 搜索 · s 闪跳 · f 折叠 · g 分组:目录 · p 预览 · tab 直通 · i 回复 · H 交接 · r 重启 · x 终止 · d 看 diff · a 头像 · t 置顶 · m 已读 · q 退出"
+EN_FOOT = "j/k h/l move · enter jump · / search · s flash · f fold · g group:cwd · p preview · tab focus preview · i reply · H handoff · r restart · x kill · d review · a avatar · t pin · m read · ? recall · q quit"
+ZH_FOOT = "j/k h/l 移动 · enter 跳转 · / 搜索 · s 闪跳 · f 折叠 · g 分组:目录 · p 预览 · tab 直通 · i 回复 · H 交接 · r 重启 · x 终止 · d 看 diff · a 头像 · t 置顶 · m 已读 · ? 找回 · q 退出"
 T = {  # what each language says (en, zh) for the same moment
     "top": ("agmux · 9 sessions", "agmux · 9 个会话"),
     "pin": ("pinned alpha-main", "已置顶 alpha-main"), "unpin": ("unpinned alpha-main", "已取消置顶 alpha-main"),
@@ -31,7 +31,7 @@ class Base(unittest.TestCase):
 
     def write(self, text): self.file.write_text(text)
 
-    def board(self, lang=None, conf=None, w=200, h=40, wait_cards=1):
+    def board(self, lang=None, conf=None, w=232, h=40, wait_cards=1):
         if conf is not None: self.write(conf)
         env = f"XDG_CONFIG_HOME={self.cfg}" + (f" AGMUX_LANG={lang}" if lang is not None else "")
         t = Term(self.env, w=w, h=h, extra_env=env); self.addCleanup(t.close)
