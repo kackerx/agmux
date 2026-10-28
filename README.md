@@ -124,7 +124,7 @@ pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi
 
 ### 配置
 
-`~/.config/agmux/config.toml`（设了 `XDG_CONFIG_HOME` 就在它下面），没有就全用默认值。`agmux config` 打印生效的完整配置：每个动作、每种颜色、`[layout]`、`[avatars]` 都占一行，行尾注释写着默认值和用途，可选项写在注释里（全英文）。**`agmux config > ~/.config/agmux/config.toml`** 就生成一份完整的配置文件，改要改的行即可（值是当时生效的值，注释里的 `default:` 永远是默认值；已有配置文件时先备份，别直接覆盖）；`agmux config --path` 打印路径。看板里每个按键都在 `[keys]` 下；搜索框 / 定位（`s`）里字母是字符，`enter`（取 `jump` 的非字符键）保留过滤，`esc`（取 `quit` 的非字符键）取消，`esc` 清掉已保留的过滤由 `clear_filter` 管；`backspace`、`ctrl+h`、`ctrl+c` 固定。
+`~/.config/agmux/config.toml`（设了 `XDG_CONFIG_HOME` 就在它下面），没有就全用默认值。`agmux config` 打印生效的完整配置：每个动作、每种颜色、`[layout]`、`[avatars]` 都占一行，行尾注释写着默认值和用途，可选项写在注释里（全英文）。**`agmux config > ~/.config/agmux/config.toml`** 就生成一份完整的配置文件，改要改的行即可（值是当时生效的值，注释里的 `default:` 永远是默认值；已有配置文件时先备份，别直接覆盖）；`agmux config --path` 打印路径。看板里每个按键都在 `[keys]` 下；搜索框 / 定位（`s`）里字母是字符，`enter` 保留过滤、`esc` 取消（`jump` / `quit` 里的非字符键也算，底栏显示配置的那个）；已保留的过滤由 `clear_filter`（默认 `esc`）清掉；`backspace`、`ctrl+h`、`ctrl+c` 固定。
 
 ```toml
 [keys]          # 动作 = 一个或多个键名（j、ctrl+k、enter、tab、shift+tab、esc、space、f5…）

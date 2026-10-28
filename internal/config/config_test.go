@@ -639,15 +639,15 @@ func TestClearFilterPreviewScrollAndCtlKeys(t *testing.T) {
 	if _, err := Parse("cfg", []byte("[keys]\nquit = [\"esc\"]\nclear_filter = [\"esc\"]\nsearch = [\"ctrl+x\"]\n")); err != nil {
 		t.Errorf("esc for both: %v", err)
 	}
-	if !c.IsCtl("quit", "esc") || c.IsCtl("quit", "q") || c.FirstCtl("quit") != "esc" || c.FirstCtl("jump") != "enter" {
-		t.Errorf("IsCtl(quit, esc) %v, IsCtl(quit, q) %v, FirstCtl(quit) %q", c.IsCtl("quit", "esc"), c.IsCtl("quit", "q"), c.FirstCtl("quit"))
+	if !c.IsCtl("quit", "esc") || c.IsCtl("quit", "q") || c.FirstCtl("quit", "x") != "esc" || c.FirstCtl("jump", "x") != "enter" {
+		t.Errorf("IsCtl(quit, esc) %v, IsCtl(quit, q) %v, FirstCtl(quit) %q", c.IsCtl("quit", "esc"), c.IsCtl("quit", "q"), c.FirstCtl("quit", "x"))
 	}
 	c, _ = Parse("cfg", []byte("[keys]\nquit = [\"q\", \"space\"]\njump = [\"l\"]\n"))
-	if c.FirstCtl("quit") != "" || c.FirstCtl("jump") != "" || c.IsCtl("quit", " ") {
-		t.Errorf("only characters: FirstCtl(quit) %q, FirstCtl(jump) %q, IsCtl(quit, space) %v", c.FirstCtl("quit"), c.FirstCtl("jump"), c.IsCtl("quit", " "))
+	if c.FirstCtl("quit", "esc") != "esc" || c.FirstCtl("jump", "enter") != "enter" || c.IsCtl("quit", " ") {
+		t.Errorf("only characters: the default; FirstCtl(quit) %q, FirstCtl(jump) %q, IsCtl(quit, space) %v", c.FirstCtl("quit", "esc"), c.FirstCtl("jump", "enter"), c.IsCtl("quit", " "))
 	}
 	c, _ = Parse("cfg", []byte("[keys]\nquit = [\"q\", \"alt+q\", \"ctrl+q\"]\n"))
-	if c.FirstCtl("quit") != "alt+q" || !c.IsCtl("quit", "alt+q") {
-		t.Errorf("alt+q is a key, not text: %q", c.FirstCtl("quit"))
+	if c.FirstCtl("quit", "esc") != "alt+q" || !c.IsCtl("quit", "alt+q") {
+		t.Errorf("alt+q is a key, not text: %q", c.FirstCtl("quit", "x"))
 	}
 }

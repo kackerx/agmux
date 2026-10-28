@@ -317,14 +317,14 @@ func typed(key string) bool { return utf8.RuneCountInString(key) == 1 }
 // letters of a binding are text, and only ctrl / alt / named keys act.
 func (c *Config) IsCtl(action, key string) bool { return !typed(key) && c.Is(action, key) }
 
-// FirstCtl is the first key of action that IsCtl accepts, "" when it has none.
-func (c *Config) FirstCtl(action string) string {
+// FirstCtl is the first key of action that IsCtl accepts, or def when it has none.
+func (c *Config) FirstCtl(action, def string) string {
 	for _, k := range c.Keys[action] {
 		if !typed(norm(k)) {
 			return k
 		}
 	}
-	return ""
+	return def
 }
 
 // First is the key shown for action in the footer and prompts; "" when it has none.
@@ -384,8 +384,8 @@ func (c *Config) String() string {
 # "f1".."f20", "ctrl+<letter>", "alt+<key>". An uppercase letter means shift+letter.
 # ctrl+c cannot be bound (it always quits); ctrl+i and ctrl+m are tab and enter.
 # A key may be bound to only one action, but confirm, leave_preview and clear_filter may share keys with others.
-# While a prompt takes text (search, flash) letters are text: jump's non-character keys keep the
-# filter, quit's cancel it; backspace, ctrl+h and ctrl+c are fixed.
+# While a prompt takes text (search, flash) letters are text: enter and jump's non-character keys
+# keep the filter, esc and quit's non-character keys cancel it; backspace, ctrl+h, ctrl+c are fixed.
 `)
 	for _, a := range Actions {
 		def := strings.Join(defaultKeys[a], ", ")

@@ -147,67 +147,68 @@ func TestClearFilterIsConfigurable(t *testing.T) {
 	}
 }
 
-// T74: while the search box takes text, quit's letters are text and only its other keys cancel; jump's
-// non-character keys keep the filter.
+// T74: while the search box takes text, letters of quit / jump are text; esc and enter always cancel /
+// keep, and the non-character keys of quit / jump do too (the footer names the configured ones).
 func TestSearchPromptKeysFollowTheConfig(t *testing.T) {
-	m := withConfig(t, "[keys]\nquit = [\"q\", \"ctrl+q\"]\njump = [\"l\", \"enter\"]\n")
+	m := withConfig(t, "[keys]\nquit = [\"q\", \"ctrl+q\"]\njump = [\"l\", \"ctrl+x\"]\n")
 	m = typeKeys(t, press1(t, m, "/"), "ql") // text, both
 	if m.query != "ql" || !m.searching {
 		t.Fatalf("q and l are text: query %q searching %v", m.query, m.searching)
 	}
-	if !strings.Contains(footerOf(m.View()), "enter keep the filter · ctrl+q clear it") {
+	if !strings.Contains(footerOf(m.View()), "ctrl+x keep the filter · ctrl+q clear it") {
 		t.Errorf("prompt: %s", footerOf(m.View()))
-	}
-	if m = press1(t, m, "esc"); !m.searching || m.query != "ql" {
-		t.Error("esc is not a cancel key any more")
 	}
 	if m = press1(t, m, "ctrl+q"); m.searching || m.query != "" {
 		t.Errorf("ctrl+q cancels: searching %v query %q", m.searching, m.query)
 	}
 	m = typeKeys(t, press1(t, m, "/"), "thr")
-	if m = press1(t, m, "enter"); m.searching || m.query != "thr" {
-		t.Errorf("enter keeps: searching %v query %q", m.searching, m.query)
+	if m = press1(t, m, "esc"); m.searching || m.query != "" {
+		t.Errorf("esc cancels whatever quit is: searching %v query %q", m.searching, m.query)
 	}
-	// jump moved off enter: enter is not "keep" any more, the new key is
-	m = withConfig(t, "[keys]\njump = [\"ctrl+x\"]\n")
-	m = typeKeys(t, press1(t, m, "/"), "thr")
-	if m = press1(t, m, "enter"); !m.searching {
-		t.Error("enter is not jump's key: the prompt goes on")
+	for _, k := range []string{"ctrl+x", "enter"} {
+		m = typeKeys(t, press1(t, m, "/"), "thr")
+		if m = press1(t, m, k); m.searching || m.query != "thr" {
+			t.Errorf("%s keeps: searching %v query %q", k, m.searching, m.query)
+		}
+		m = press1(t, m, "esc") // a kept filter goes with esc (clear_filter)
 	}
-	if m = press1(t, m, "ctrl+x"); m.searching || m.query != "thr" {
-		t.Errorf("ctrl+x keeps: searching %v query %q", m.searching, m.query)
+	// quit and jump with characters only: nothing of theirs acts in the box, esc and enter still do
+	m = withConfig(t, "[keys]\nquit = [\"q\"]\njump = [\"l\"]\n")
+	m = typeKeys(t, press1(t, m, "/"), "a")
+	if f := strings.TrimSpace(footerOf(m.View())); f != "enter keep the filter · esc clear it" {
+		t.Errorf("the keys that always work: %q", f)
 	}
-	// a quit with only characters leaves nothing to name as the cancel key
-	m = typeKeys(t, press1(t, withConfig(t, "[keys]\nquit = [\"q\"]\n"), "/"), "a")
-	if f := strings.TrimSpace(footerOf(m.View())); f != "enter keep the filter" {
-		t.Errorf("no cancel key: %q", f)
+	if m = press1(t, m, "esc"); m.searching {
+		t.Error("esc cancels")
 	}
 }
 
-// T74: flash ends on quit's non-character keys; its letters are labels / pattern.
-func TestFlashEndsOnTheQuitKey(t *testing.T) {
+// T74: flash ends on esc and on quit's non-character keys; its letters are labels / pattern.
+func TestFlashEndsOnEscAndTheQuitKey(t *testing.T) {
 	m := withConfig(t, "[keys]\nquit = [\"q\", \"ctrl+q\"]\n")
-	if m = press1(t, m, "s"); m.mode != flashing {
-		t.Fatal("s starts flash")
+	for _, k := range []string{"esc", "ctrl+q"} {
+		if m = press1(t, m, "s"); m.mode != flashing {
+			t.Fatal("s starts flash")
+		}
+		if !strings.Contains(footerOf(m.View()), "ctrl+q") {
+			t.Errorf("flash footer: %s", footerOf(m.View()))
+		}
+		if m = press1(t, m, k); m.mode != browsing {
+			t.Errorf("%s ends flash", k)
+		}
 	}
-	if m = press1(t, m, "esc"); m.mode != flashing {
-		t.Error("esc is not bound to quit any more: flash goes on")
-	}
-	if !strings.Contains(footerOf(m.View()), "ctrl+q") {
-		t.Errorf("flash footer: %s", footerOf(m.View()))
-	}
-	if m = press1(t, m, "ctrl+q"); m.mode != browsing {
-		t.Error("ctrl+q ends flash")
+	if m = press1(t, withConfig(t, "[keys]\nquit = [\"q\"]\n"), "s", "q"); m.mode != flashing || m.flash.pat != "q" {
+		t.Errorf("q is the pattern: mode %v pat %q", m.mode, m.flash.pat)
 	}
 }
 
-// T74: locked out of a dead pane, quit's non-character keys give the keys back, and so does leave_preview.
-func TestLockedOutLeavesOnTheQuitKey(t *testing.T) {
+// T74: locked out of a dead pane, esc, quit's non-character keys and leave_preview give the keys back.
+func TestLockedOutLeavesOnEscTheQuitKeyAndLeavePreview(t *testing.T) {
 	c, err := config.Parse("cfg", []byte("[keys]\nquit = [\"q\", \"ctrl+q\"]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"ctrl+q", "tab"} {
+	for _, k := range []string{"esc", "ctrl+q", "tab"} {
 		src := &mutSrc{ss: sessions}
 		m := New(src, &fakeRunner{})
 		m.getenv = func(string) string { return "" }
@@ -215,8 +216,8 @@ func TestLockedOutLeavesOnTheQuitKey(t *testing.T) {
 		tm, _ := m.Update(tea.WindowSizeMsg{Width: 232, Height: 50})
 		m = press1(t, tm.(Model), "i")
 		src.ss = sessions[1:]
-		if m = press1(t, m, "esc"); !m.pvFocus {
-			t.Errorf("%s: esc is not a quit key here: still locked out", k)
+		if m = press1(t, m, "q"); !m.pvFocus {
+			t.Errorf("%s: q is a character: still locked out", k)
 		}
 		if m = press1(t, m, k); m.pvFocus {
 			t.Errorf("%s leaves the locked-out state", k)

@@ -476,7 +476,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// the preview has the keys: everything but leave_preview's keys (tab) goes to the locked
 	// pane, ctrl+c and shift+tab included (Claude Code interrupts and cycles modes with them)
 	if m.pvFocus {
-		if m.cfg.Is("leave_preview", k.String()) || !m.passThrough() && m.cfg.IsCtl("quit", k.String()) {
+		if m.cfg.Is("leave_preview", k.String()) || !m.passThrough() && (k.String() == "esc" || m.cfg.IsCtl("quit", k.String())) {
 			m.pvFocus = false
 			return m, nil
 		}
@@ -513,7 +513,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.kill(m.target)
 	case flashing: // text narrows the hits, a hit's label moves the focus there and ends it
 		switch {
-		case m.cfg.IsCtl("quit", k.String()):
+		case k.String() == "esc" || m.cfg.IsCtl("quit", k.String()):
 			m.mode = browsing
 		case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
 			if r := []rune(m.flash.pat); len(r) > 0 {
@@ -621,12 +621,12 @@ func (m Model) visibleFocus() string {
 // on the first card it shows; esc / ctrl+c drop it, the focus back where it was.
 func (m Model) searchKey(k tea.KeyMsg) Model {
 	switch s := k.String(); {
-	case m.cfg.IsCtl("jump", s): // onto the best match; with no query or no match, the focus stays
+	case s == "enter" || m.cfg.IsCtl("jump", s): // onto the best match; with no query or no match, the focus stays
 		m.searching = false
 		if ss, _ := m.shown(); m.query != "" && len(ss) > 0 {
 			m.focus = ss[0].ID
 		}
-	case k.Type == tea.KeyCtrlC || m.cfg.IsCtl("quit", s):
+	case k.Type == tea.KeyCtrlC || s == "esc" || m.cfg.IsCtl("quit", s):
 		m.searching, m.query, m.focus = false, "", m.searchFrom
 		m.focus = m.visibleFocus()
 	case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
@@ -1312,14 +1312,7 @@ func hintLine(parts ...string) string {
 
 // typingHint is the footer of the search prompt: the keys that keep the filter and drop it.
 func (m Model) typingHint() string {
-	var keep, drop string
-	if k := m.cfg.FirstCtl("jump"); k != "" {
-		keep = i18n.T("search.keep", k)
-	}
-	if k := m.cfg.FirstCtl("quit"); k != "" {
-		drop = i18n.T("search.drop", k)
-	}
-	return hintLine(keep, drop)
+	return hintLine(i18n.T("search.keep", m.cfg.FirstCtl("jump", "enter")), i18n.T("search.drop", m.cfg.FirstCtl("quit", "esc")))
 }
 
 func (m Model) View() string {
@@ -1384,7 +1377,7 @@ func (m Model) View() string {
 	}
 	switch { // the footer is always the last line
 	case m.mode == flashing:
-		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+hintLine(i18n.T("flash.hint"), m.cfg.FirstCtl("quit")))
+		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+hintLine(i18n.T("flash.hint"), m.cfg.FirstCtl("quit", "esc")))
 	case m.searching:
 		out = out[:strings.LastIndexByte(out, '\n')+1] + fg(cFocus, " "+m.typingHint())
 	case m.mode == pickAvatar:
