@@ -690,3 +690,4 @@
 - 验收：单测 三态轮转（含窄屏两态）、预览态各键；黑盒 真 pty 三框颜色随 tab 变、预览态 j 滚一行。
 ### T91 e2e（tester，与 T87 并行起步）
 - t87 拆序列；t88 焦点色两态、旧键报错；t92 tab 轮转三框颜色、预览态滚动 / enter / esc；t89 两种边框字符；t90 真 zsh；t82 / t50 / t17 跟改（颜色清单 recall_input / recall_list → recall_border / recall_focus，个数不变 22）。
+- tester（tester-t91 884532d，先不合）：t87 14 / t88 27 / t89 21 / t90 32 / t92 32 共 126 条 + t82 / t50 / t17 跟改；用 /tmp 一次性原型验过全绿；**在旧二进制上强跑 t87 复现了用户的串字**（拆两次写 → `<65;21;9M` 进输入框），T87 的读法成立。t83_ready 改成新旧颜色名都认；t92 / t87 随 T88 等出现放开。两处 spec 补：预览态下缩到 <100 列回选择态；面板开着时 tab 不做事。给 dev：`[layout] recall_border` 放段末（t43 整段断言）；t50 golden 在 internal/config/testdata 要更新；旧键报错文案含 unknown 即可。
