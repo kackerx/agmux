@@ -53,6 +53,7 @@ func (m Model) recallUpdate(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.rc.w, m.rc.h = msg.Width, msg.Height // the board takes it too
+		m.rc.pvFocus = m.rc.pvFocus && m.rc.previewOn()
 		return m, nil, false
 	case tea.KeyMsg, tea.MouseMsg, recallTickMsg, recallIndexedMsg, recallFoundMsg, recallEditedMsg:
 		tm, cmd := m.rc.Update(msg)

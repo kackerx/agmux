@@ -82,17 +82,21 @@ func stateColor(st string) lipgloss.Color {
 	return cMuted
 }
 
-// thickBox draws lines in a thick border of color c, w wide and h tall (borders included); the
+// recallBorder is the border of recall's three boxes: [layout] recall_border, set by useConfig.
+var recallBorder = lipgloss.ThickBorder()
+
+// recallBox draws lines in a recallBorder box of color c, w wide and h tall (borders included); the
 // title is set into the top border. Lines are cut to the box and padded to it.
-func thickBox(c lipgloss.Color, title string, lines []string, w, h int) []string {
+func recallBox(c lipgloss.Color, title string, lines []string, w, h int) []string {
 	if w < 2 || h < 2 {
 		return nil
 	}
 	inner := w - 2
-	top := fg(c, "┏"+strings.Repeat("━", inner)+"┓")
+	b := recallBorder
+	top := fg(c, b.TopLeft+strings.Repeat(b.Top, inner)+b.TopRight)
 	if title != "" && inner >= 6 {
 		t := ansi.Truncate(title, inner-4, "…")
-		top = fg(c, "┏━ ") + t + "\x1b[0m" + fg(c, " "+strings.Repeat("━", w-5-ansi.StringWidth(t))+"┓")
+		top = fg(c, b.TopLeft+b.Top+" ") + t + "\x1b[0m" + fg(c, " "+strings.Repeat(b.Top, w-5-ansi.StringWidth(t))+b.TopRight)
 	}
 	out := []string{top}
 	for i := range h - 2 {
@@ -100,9 +104,9 @@ func thickBox(c lipgloss.Color, title string, lines []string, w, h int) []string
 		if i < len(lines) {
 			l = lines[i]
 		}
-		out = append(out, fg(c, "┃")+pad(ansi.Truncate(l, inner, ""), inner)+"\x1b[0m"+fg(c, "┃"))
+		out = append(out, fg(c, b.Left)+pad(ansi.Truncate(l, inner, ""), inner)+"\x1b[0m"+fg(c, b.Right))
 	}
-	return append(out, fg(c, "┗"+strings.Repeat("━", inner)+"┛"))
+	return append(out, fg(c, b.BottomLeft+strings.Repeat(b.Bottom, inner)+b.BottomRight))
 }
 
 func (m recallModel) View() string {
@@ -128,10 +132,10 @@ func (m recallModel) frame() (view string, x, y int, ok bool) {
 	lines := m.inputBox(prog)
 	if bh := m.bodyH(); bh > 0 {
 		lw := m.listW()
-		body := thickBox(cRecallList, m.listTitle(), m.listLines(bh-2, lw-2), lw, bh)
+		body := recallBox(m.boxColor(m.locked && !m.previewFocused(), cRecallBorder), m.listTitle(), m.listLines(bh-2, lw-2), lw, bh)
 		if m.previewOn() {
 			title, content := m.previewParts(bh - 2)
-			pv := thickBox(cRecallPreview, title, content, m.w-lw, bh)
+			pv := recallBox(m.boxColor(m.previewFocused(), cRecallPreview), title, content, m.w-lw, bh)
 			for i := range body {
 				body[i] += pv[i]
 			}
@@ -155,13 +159,23 @@ func (m recallModel) listTitle() string {
 	return fmt.Sprintf("%d/%d", len(m.results), m.total)
 }
 
+// boxColor is the border of a box: the focus color for the one that has the keys (the query box
+// while typing, the list once the query is kept, the preview after tab), else its plain one. The
+// filter panel opened over them changes nothing.
+func (m recallModel) boxColor(focused bool, plain lipgloss.Color) lipgloss.Color {
+	if focused {
+		return cRecallFocus
+	}
+	return plain
+}
+
 // inputBox is the query in a box of its own; on the right how far the index is, while it is built.
 // The caret is there while the input has the keys.
 // prog is what progressText said for this frame: the index goes on while the frame is drawn, and
 // the caret and the cursor must be put by the same words.
 func (m recallModel) inputBox(prog string) []string {
 	left := fg(cFocus, " / ") + queryView(m.query, m.qpos, !m.locked, m.roomFor(prog))
-	return thickBox(cRecallInput, "", []string{spread(left, fg(cMuted, prog), m.w-2, "…")}, m.w, 3)
+	return recallBox(m.boxColor(!m.locked, cRecallBorder), "", []string{spread(left, fg(cMuted, prog), m.w-2, "…")}, m.w, 3)
 }
 
 // progressText is how far the index is while it is built (read once for a frame), else nothing.
@@ -194,6 +208,13 @@ func (m recallModel) footer() string {
 	switch {
 	case m.panel:
 		parts = append(parts, i18n.T("recall.panel.hint", k("recall_toggle"), k("recall_all"), k("recall_none"), "esc"))
+	case m.previewFocused(): // after tab: one row of what the preview takes
+		add(k("jump"), "recall.footer.resume")
+		if d, u := k("down"), k("up"); d != "" && u != "" {
+			parts = append(parts, i18n.T("recall.footer.scroll", d, u))
+		}
+		add(k("search"), "recall.footer.edit")
+		parts = append(parts, i18n.T("recall.footer.tolist", "esc"))
 	case m.locked: // a kept query: every key of [keys] acts
 		add(k("jump"), "recall.footer.resume")
 		if d, u := k("down"), k("up"); d != "" && u != "" {

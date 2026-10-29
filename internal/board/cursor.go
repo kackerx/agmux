@@ -65,21 +65,23 @@ func (m Model) pvBox() (right []string, x, y int) {
 
 // searchCount is what the top bar says on the right while a filter is on: how many cards it shows of
 // how many there are.
-func (m Model) searchCount(shown int) string {
-	return fmt.Sprintf("%d/%d ", shown, len(m.src.Sessions()))
+func (m Model) searchCount(shown, total int) string {
+	return fmt.Sprintf("%d/%d ", shown, total)
 }
 
 // searchRoom is the cells the filter's text has in the top bar: what is between " / " and the count.
-func (m Model) searchRoom(shown int) int { return m.w - 3 - ansi.StringWidth(m.searchCount(shown)) - 1 }
+func (m Model) searchRoom(shown, total int) int {
+	return m.w - 3 - ansi.StringWidth(m.searchCount(shown, total)) - 1
+}
 
 // searchCursor is the screen cell (0-based) of the / filter's caret, for the terminal's cursor (an
 // input method puts its candidates there): the top bar, after " / " and the text before the caret,
 // cut the way the bar cuts it. Only while the box has the keys; shown is how many cards it shows.
-func (m Model) searchCursor(shown int) (x, y int, ok bool) {
+func (m Model) searchCursor(shown, total int) (x, y int, ok bool) {
 	if !m.searching || m.rc != nil || m.w == 0 {
 		return 0, 0, false
 	}
-	return 3 + queryCaretCells(m.query, m.qpos, m.searchRoom(shown)), 0, true
+	return 3 + queryCaretCells(m.query, m.qpos, m.searchRoom(shown, total)), 0, true
 }
 
 // wantCursor: the terminal's cursor should be shown (on the pane's cursor) rather than hidden.
@@ -90,7 +92,7 @@ func (m Model) wantCursor() bool {
 	}
 	if m.curOut != nil && m.searching { // the / filter's caret
 		ss, _ := m.shown()
-		_, _, ok := m.searchCursor(len(ss))
+		_, _, ok := m.searchCursor(len(ss), len(m.src.Sessions()))
 		return ok
 	}
 	if m.curOut == nil || !m.previewOn() {

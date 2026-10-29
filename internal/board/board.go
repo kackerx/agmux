@@ -485,6 +485,10 @@ func (m *Model) lock(s store.Session) {
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	k, ok := withoutMouseTail(k)
+	if !ok {
+		return m, nil
+	}
 	// the preview has the keys: everything but leave_preview's keys (tab) goes to the locked
 	// pane, ctrl+c and shift+tab included (Claude Code interrupts and cycles modes with them)
 	if m.pvFocus {
@@ -1337,7 +1341,9 @@ func (m Model) View() string {
 		right, cx, cy = m.pvBox()
 	}
 	ss, hits := m.shown()
-	if x, y, ok := m.searchCursor(len(ss)); ok { // typing the filter: the cursor is the caret (the keys are not the pane's)
+	// the count is read once: the text and the cursor must agree on its width
+	total := len(m.src.Sessions())
+	if x, y, ok := m.searchCursor(len(ss), total); ok { // typing the filter: the cursor is the caret (the keys are not the pane's)
 		cx, cy = x, y
 	}
 	if m.curOut != nil {
@@ -1346,8 +1352,8 @@ func (m Model) View() string {
 	out, rects, off := view(ss, m.w, m.h, m.focus, m.frame, m.now(), m.msgLine(focused), ok && focused.TmuxPane == "" && !focused.Background, m.foldedNow(), m.cardsW(), right, hits, m.pin(), m.groupMode())
 	if m.searching || m.query != "" { // the top bar is the filter: what it is and how many it shows
 		lines := strings.SplitN(out, "\n", 3)
-		count := fg(cMuted, m.searchCount(len(ss)))
-		lines[0] = spread(fg(cFocus, " / ")+queryView(m.query, m.qpos, m.searching, m.searchRoom(len(ss))), count, m.w, "…")
+		count := fg(cMuted, m.searchCount(len(ss), total))
+		lines[0] = spread(fg(cFocus, " / ")+queryView(m.query, m.qpos, m.searching, m.searchRoom(len(ss), total)), count, m.w, "…")
 		if len(ss) == 0 && len(lines) > 2 {
 			lines[1] = fg(cMuted, " "+i18n.T("search.no_match"))
 		}

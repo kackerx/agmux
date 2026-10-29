@@ -23,7 +23,7 @@ page_up = ["ctrl+u"]          # default: ctrl+u — scroll the board a page up
 jump = ["enter"]              # default: enter — switch tmux to the focused pane
 fold = ["f"]                  # default: f — fold / unfold the focused group
 preview = ["p"]               # default: p — open / close the pane preview
-focus_preview = ["tab"]       # default: tab — pass keys through to the previewed pane
+focus_preview = ["tab"]       # default: tab — pass keys through to the previewed pane; in recall, move the focus input > list > preview
 leave_preview = ["tab"]       # default: tab — back to the board
 preview_up = ["pgup", "ctrl+p"] # default: pgup, ctrl+p — scroll the preview back
 preview_down = ["pgdown", "ctrl+n"] # default: pgdown, ctrl+n — scroll the preview forward
@@ -78,8 +78,8 @@ bar_high = "#ff6188"          # default: #ff6188
 bar_empty = "#585b70"         # default: #585b70
 muted = "#6272a4"             # default: #6272a4 — secondary text, footer
 disabled = "#45475a"          # default: #45475a
-recall_input = "#ff8ebe"      # default: #ff8ebe — recall: the border of the query box
-recall_list = "#6272a4"       # default: #6272a4 — recall: the border of the session list
+recall_border = "#6272a4"     # default: #6272a4 — recall: the border of the query box and the list when they do not have the keys
+recall_focus = "#ff8ebe"      # default: #ff8ebe — recall: the border of the one that has the keys: the query box while typing, the list once the query is kept
 recall_preview = "#bd93f9"    # default: #bd93f9 — recall: the border of the preview
 
 [layout]
@@ -89,6 +89,7 @@ flow = "bands"                # default: "bands" — "bands": a row of groups at
                               #   height; "stack": groups stack down each column, no gaps
 group_by = "cwd"              # default: "cwd" — grouping at start: "cwd", "project", "session" or
                               #   "state"; the group key cycles through them in that order
+recall_border = "thick"       # default: "thick" — recall's three boxes: "thick" ┏━┓ or "rounded" ╭─╮
 
 [ui]
 language = "en"               # default: "en" — "en" or "zh"; $AGMUX_LANG overrides it

@@ -45,14 +45,14 @@ var defaultKeys = map[string][]string{
 // Colors, in print order.
 var Colors = []string{
 	"working", "idle", "done", "attention", "focus", "match", "border", "name", "branch", "model", "effort", "agent", "dir",
-	"bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled", "recall_input", "recall_list", "recall_preview",
+	"bar_low", "bar_mid", "bar_high", "bar_empty", "muted", "disabled", "recall_border", "recall_focus", "recall_preview",
 }
 
 var defaultColors = map[string]string{
 	"working": "#ffb86c", "idle": "#585b70", "done": "#50fa7b", "attention": "#ff6188", "focus": "#ff8ebe", "match": "#f2d06b", "border": "",
 	"name": "5", "branch": "12", "model": "14", "effort": "13", "agent": "#bd93f9", "dir": "11",
 	"bar_low": "#a6e3a1", "bar_mid": "#f9e2af", "bar_high": "#ff6188", "bar_empty": "#585b70",
-	"muted": "#6272a4", "disabled": "#45475a", "recall_input": "#ff8ebe", "recall_list": "#6272a4", "recall_preview": "#bd93f9",
+	"muted": "#6272a4", "disabled": "#45475a", "recall_border": "#6272a4", "recall_focus": "#ff8ebe", "recall_preview": "#bd93f9",
 }
 
 type Config struct {
@@ -64,6 +64,7 @@ type Config struct {
 	PreviewWidth int    // [layout] preview_width: the preview's share of the terminal width, in percent
 	GroupBy      string // [layout] group_by: how cards are grouped at start: one of GroupModes
 	Flow         string // [layout] flow: "bands" (a row of groups at a time) or "stack" (group k in column k mod n)
+	RecallBorder string // [layout] recall_border: the corners of recall's three boxes, "thick" or "rounded"
 
 	Language string // [ui] language: "en" or "zh"; $AGMUX_LANG wins (i18n.Resolve)
 
@@ -74,7 +75,7 @@ type Config struct {
 
 // Default is the configuration with no file.
 func Default() *Config {
-	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, PreviewWidth: 40, Flow: "bands", GroupBy: "cwd", Language: "en", AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
+	c := &Config{Keys: map[string][]string{}, Colors: map[string]string{}, MaxColumns: 4, PreviewWidth: 40, Flow: "bands", RecallBorder: "thick", GroupBy: "cwd", Language: "en", AvatarRenderer: "auto", AvatarDefault: "hash", AvatarBind: map[string]string{}}
 	for k, v := range defaultKeys {
 		c.Keys[k] = slices.Clone(v) // callers may change c; the defaults stay
 	}
@@ -136,6 +137,7 @@ func Parse(path string, data []byte) (*Config, error) {
 			PreviewWidth int    `toml:"preview_width"`
 			Flow         string `toml:"flow"`
 			GroupBy      string `toml:"group_by"`
+			RecallBorder string `toml:"recall_border"`
 		} `toml:"layout"`
 		UI struct {
 			Language string `toml:"language"`
@@ -239,6 +241,12 @@ func Parse(path string, data []byte) (*Config, error) {
 			return nil, fmt.Errorf("%s: layout.group_by: %q is not a grouping (use %s)", path, g, strings.Join(GroupModes, ", "))
 		}
 		c.GroupBy = raw.Layout.GroupBy
+	}
+	if md.IsDefined("layout", "recall_border") {
+		if b := raw.Layout.RecallBorder; b != "thick" && b != "rounded" {
+			return nil, fmt.Errorf("%s: layout.recall_border: %q is not a border (use \"thick\" or \"rounded\")", path, b)
+		}
+		c.RecallBorder = raw.Layout.RecallBorder
 	}
 	if md.IsDefined("ui", "language") {
 		if l := raw.UI.Language; !i18n.Valid(l) {
@@ -346,7 +354,7 @@ func (c *Config) First(action string) string {
 var actionUse = map[string]string{
 	"page_down": "scroll the board a page down", "page_up": "scroll the board a page up",
 	"jump": "switch tmux to the focused pane", "fold": "fold / unfold the focused group",
-	"preview": "open / close the pane preview", "focus_preview": "pass keys through to the previewed pane",
+	"preview": "open / close the pane preview", "focus_preview": "pass keys through to the previewed pane; in recall, move the focus input > list > preview",
 	"leave_preview": "back to the board", "reply": "type a reply into the focused session",
 	"handoff": "send /handoff to the focused session", "search": "filter the cards by fuzzy search",
 	"next_match": "next search hit", "prev_match": "previous search hit", "flash": "move the focus to a card by its label",
@@ -368,7 +376,7 @@ var colorUse = map[string]string{
 	"focus": "the focused card", "match": "search hits", "border": "borders of unfocused cards",
 	"name": "session name", "agent": "the agent role on line 2", "dir": "group headers and their rule",
 	"bar_low": "context bar, low usage", "muted": "secondary text, footer",
-	"recall_input": "recall: the border of the query box", "recall_list": "recall: the border of the session list", "recall_preview": "recall: the border of the preview",
+	"recall_border": "recall: the border of the query box and the list when they do not have the keys", "recall_focus": "recall: the border of the one that has the keys: the query box while typing, the list once the query is kept", "recall_preview": "recall: the border of the preview",
 }
 
 // String is the effective config as a commented TOML file, ready to save as config.toml: each setting
@@ -435,6 +443,7 @@ func (c *Config) String() string {
 	cont(`height; "stack": groups stack down each column, no gaps`)
 	line(fmt.Sprintf("group_by = %q", c.GroupBy), with(`"cwd"`, `grouping at start: "cwd", "project", "session" or`))
 	cont(`"state"; the group key cycles through them in that order`)
+	line(fmt.Sprintf("recall_border = %q", c.RecallBorder), with(`"thick"`, `recall's three boxes: "thick" ┏━┓ or "rounded" ╭─╮`))
 	b.WriteString("\n[ui]\n")
 	line(fmt.Sprintf("language = %q", c.Language), with(`"en"`, `"en" or "zh"; $AGMUX_LANG overrides it`))
 	b.WriteString("\n[avatars]\n")

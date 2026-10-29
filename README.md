@@ -124,13 +124,14 @@ pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi
 
 `agmux recall [关键词]`（等价于 `agmux -r [关键词]`）：只记得聊过什么、不记得是哪个 worktree 哪个会话时用。不需要 tmux，任何终端都行。读的是 Claude Code 的 `~/.claude/projects/*/*.jsonl`（`$CLAUDE_CONFIG_DIR` 优先）和 pi 的 `~/.pi/agent/sessions/*/*.jsonl`（`$PI_CODING_AGENT_DIR`），只读，不改它们；索引缓存在 `$XDG_CACHE_HOME/agmux/recall`（默认 `~/.cache/agmux/recall`），第一次打开会边建边出（顶栏 `indexing n / N`），之后增量更新，毫秒级。`agmux recall --reindex` 清缓存重建。
 
-一行一个会话：状态点（● 在跑 / ○ 已关）、名字、项目（worktree 写成 `主仓库.wt/目录`）、分支、多久以前、命中了几句、最匹配的那句；右边（终端 ≥ 100 列）是预览：会话卡加上全部命中的句子，每处上下各带一句，中间没命中的折成 `… n lines …`。你说的和 agent 说的（每段回复只取头 200 字）都搜，同分你说的排前面。语法同看板的 `/`（fzf：空格 = 且、`'精确`、`^前缀`、`后缀$`、`!排除`），匹配串是「来源 项目 分支 会话名 句子」，所以也可以直接打项目名、分支名；命中数只算句子本身。空查询 = 最近的会话。
+一行一个会话：状态点（● 在跑 / ○ 已关）、名字、项目（worktree 写成 `主仓库.wt/目录`）、分支、多久以前、命中了几句、最匹配的那句；右边（终端 ≥ 100 列）是预览：会话卡加上全部命中的句子，每处上下各带一句，中间没命中的折成 `… n lines …`。你说的和 agent 说的（每段回复只取头 200 字）都搜，同分你说的排前面。语法同看板的 `/`（fzf：空格 = 且、`'精确`、`^前缀`、`后缀$`、`!排除`），匹配串是「来源 项目 分支 会话名 句子」，所以也可以直接打项目名、分支名；命中数只算句子本身。空查询 = 最近的会话。输入框、列表、预览各一个粗边框，有键盘的那个亮 `[colors] recall_focus`（打字时是输入框，`enter` 保留查询后是列表），另一个是 `recall_border`（灰），预览始终 `recall_preview`。
 
 | 键 | 作用 |
 |---|---|
 | 打字 | 进查询（字母都是字符；动作键只有 ctrl / alt 组合和方向键） |
 | `↓` `↑` / `ctrl+d` `ctrl+u` | 选会话 / 翻页（[keys] `down` `up` `page_down` `page_up`） |
 | `pgup` `pgdown` | 滚预览（`preview_up` `preview_down`） |
+| `tab` | 切焦点：输入框 → 列表 → 预览 → 输入框（`focus_preview`；终端窄于 100 列没有预览时只在前两个之间切）。预览有焦点时：`j` `k` / 方向键滚 1 行，`ctrl+n` `ctrl+p` 滚 3 行，`enter` 恢复，`esc` 回列表，`/` 回输入框；有焦点的框边框是 `recall_focus` 色 |
 | `enter` | 恢复：recall 退出，在**同一个终端**里 `cd` 到会话目录再 `exec claude --resume <id>`（pi 是 `pi --session <文件>`）。在跑的会话不动，底栏说它在哪个 pane；目录没了、命令不在 PATH 里也只在底栏说 |
 | `ctrl+f` | 筛选面板：来源多选（只列本机有会话的来源）+ 范围单选（全部历史 / 当前项目）。面板里 `space` 勾选、`a` 全选、`A` 清空、`↓` `↑` 移动、`esc` 收起 |
 | `ctrl+t` | 不开面板，直接在「当前项目」和「全部历史」之间切 |
@@ -139,6 +140,8 @@ pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi
 | `esc` | 三级：收起面板 → 清空查询 → 退出（`ctrl+c` 直接退出） |
 
 看板里按 `?`（`[keys] recall`）就是同一个界面（同一个进程，在跑的会话用看板当前的会话表，不再单独查一遍）：`esc` 还是三级（面板 → 清查询 → 回看板），查询为空时再按 `?` 也回看板。`enter` 的去向看看板在哪：在跑的会话走看板自己的跳转；已经关了的会话——看板在普通 pane（或不在 tmux 里）就原地换成 `claude --resume`（看板退出），在 tmux 浮窗里（`display-popup`，或 `--stay`）就在你当前的 tmux session 里用会话目录开一个新窗口跑 resume 命令，再把你的 client 切过去（`--stay` 时看板留着）。
+
+原地 resume 的 claude / pi 退出后，你的 shell 还在原来的目录（子进程改不了父 shell）。想留在会话目录：在 `~/.zshrc`（或 `~/.bashrc`）里加一行 `eval "$(agmux shell zsh)"`（bash 写 `agmux shell bash`；fish 不支持）。它定义一个 `agmux` 函数：每次调用给 agmux 一个临时文件（`$AGMUX_CWD_FILE`），agmux 原地 exec 前把会话目录写进去，退出后函数 `cd` 过去。只有 `agmux -r` 和看板普通 pane 里的原地 resume 会写；tmux 浮窗 / `--stay` 里开的新窗口本来就在会话目录。`agmux setup` 也会提一句，不改你的 rc 文件。
 
 这些键都在 `[keys]`：`recall`（`?`）、`recall_filter`、`recall_scope`、`recall_copy`、`recall_open`、`recall_toggle`、`recall_all`、`recall_none`。`agmux recall --dump [关键词]` 不开界面，一行一个会话（来源、id、名字、项目、分支、mtime、命中数、片段，制表符分隔）。
 
@@ -168,6 +171,7 @@ max_columns = 4                     # 终端够宽时最多几列卡片（1–8�
 preview_width = 40                  # 预览占终端宽度的百分比（30–70，默认 40，最少 60 列）；越宽，pane 里的长行被截掉得越少，卡片区相应变窄（终端窄，100–133 列，而这个值又大时，卡片区可能窄于 40 列）
 flow = "bands"                      # 组怎么排：bands（默认）每 n 个组一行，行高 = 最高的组，矮的组下面留空；stack 第 k 个组进第 k mod n 列，每列自己往下堆（没有空洞，列高不齐）
 group_by = "cwd"                    # 启动时的分组方式：cwd | project | session | state；运行中按 g 换
+recall_border = "thick"             # 找回界面三个框的边框：thick ┏━┓（默认）| rounded ╭─╮（筛选面板本来就是圆角）
 
 [ui]
 language = "en"                     # en | zh：看板和 agmux setup 的文案语言；环境变量 AGMUX_LANG 优先（config 模板的注释、报错、agmux show 不翻）

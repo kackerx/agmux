@@ -56,6 +56,7 @@ type recallModel struct {
 	clickRow int        // the row of the last click on the list, for the double click
 	clickAt  time.Time  // and when
 	locked   bool       // the query is kept (enter in the input): j / k choose, enter resumes, / edits again
+	pvFocus  bool       // with locked: the preview has the keys (tab from the list): j / k scroll it; see previewFocused
 	results  []recall.Result
 	sel, top int
 	sources  []string        // those that have a session here
@@ -182,6 +183,7 @@ func (m recallModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		m.pvFocus = m.pvFocus && m.previewOn() // no preview, no focus on it: widening again does not give it back
 	case recallTickMsg: // what the index has so far, while it is built
 		var cmd tea.Cmd
 		if m.ix.Gen() != m.gen && !m.searching { // not over one that is out: a slow search would never be shown
@@ -336,12 +338,30 @@ func (m recallModel) back() (tea.Model, tea.Cmd) {
 	case m.panel:
 		m.panel = false
 	case m.locked || m.query != "":
-		m.locked, m.query, m.qpos = false, "", 0
+		m.locked, m.pvFocus, m.query, m.qpos = false, false, "", 0
 		return m.search(false)
 	default:
 		return m.end()
 	}
 	return m, nil
+}
+
+// previewFocused: the preview has the keys (pvFocus is only ever set with locked) and is on the screen: a
+// terminal made narrow takes it away.
+func (m recallModel) previewFocused() bool { return m.pvFocus && m.previewOn() }
+
+// nextFocus is tab: the input, then the list (the query is kept), then the preview, then the input
+// again; a terminal too narrow for the preview goes from the list straight back to the input.
+func (m recallModel) nextFocus() recallModel {
+	switch {
+	case !m.locked:
+		m.locked = true
+	case !m.previewFocused() && m.previewOn():
+		m.pvFocus = true
+	default:
+		m.locked, m.pvFocus, m.qpos = false, false, len([]rune(m.query))
+	}
+	return m
 }
 
 // scrollPreview moves the preview d lines down (up when negative), to its ends and no further.
@@ -408,12 +428,20 @@ func (m recallModel) end() (tea.Model, tea.Cmd) {
 }
 
 func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	k, ok := withoutMouseTail(k)
+	if !ok {
+		return m, nil
+	}
 	s := k.String()
 	if k.Type == tea.KeyCtrlC {
 		return m, tea.Quit
 	}
 	m.msg = ""
 	if s == "esc" || m.cfg.IsCtl("quit", s) {
+		if m.previewFocused() && !m.panel { // out of the preview, to the list
+			m.pvFocus = false
+			return m, nil
+		}
 		return m.back()
 	}
 	// the key that opened this screen from the board closes it: a character only when it is not text
@@ -448,8 +476,14 @@ func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.enter()
 	case m.locked && m.cfg.Is("search", s): // back to the input, the query as it was
-		m.locked, m.qpos = false, len([]rune(m.query))
+		m.locked, m.pvFocus, m.qpos = false, false, len([]rune(m.query))
 		return m, nil
+	case act("focus_preview", s):
+		return m.nextFocus(), nil
+	case m.previewFocused() && act("down", s):
+		return m.scrollPreview(1), nil
+	case m.previewFocused() && act("up", s):
+		return m.scrollPreview(-1), nil
 	case act("down", s):
 		return m.move(1), nil
 	case act("up", s):

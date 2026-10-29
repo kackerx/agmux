@@ -90,8 +90,8 @@ func TestSearchCursorOfALongText(t *testing.T) {
 	press1(key("/"))
 	press1(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(strings.Repeat("x", 60))})
 	ss, _ := m.shown()
-	room := m.searchRoom(len(ss))
-	x, y, ok := m.searchCursor(len(ss))
+	room := m.searchRoom(len(ss), 3)
+	x, y, ok := m.searchCursor(len(ss), 3)
 	if !ok || y != 0 || x != 3+room-1 || x > m.w-2 {
 		t.Errorf("x %d y %d ok %v (room %d)", x, y, ok, room)
 	}
@@ -100,7 +100,7 @@ func TestSearchCursorOfALongText(t *testing.T) {
 		t.Errorf("placed %q, want %q", m.curOut.pos, want)
 	}
 	// one blank cell between the text and the count
-	if cw := ansi.StringWidth(m.searchCount(len(ss))); x != m.w-cw-2 {
+	if cw := ansi.StringWidth(m.searchCount(len(ss), 3)); x != m.w-cw-2 {
 		t.Errorf("x %d, the count starts at %d", x, m.w-cw)
 	}
 	// the cursor is on the cell the screen draws the caret in
@@ -111,8 +111,8 @@ func TestSearchCursorOfALongText(t *testing.T) {
 		t.Errorf("the caret is drawn at %d, the cursor at %d: %q", ansi.StringWidth(row[:max(i, 0)]), x, row)
 	}
 	// the count's width is part of it: "10/14 " takes a cell more than "3/14 "
-	if m.searchRoom(10) != m.searchRoom(3)-1 {
-		t.Errorf("room %d vs %d", m.searchRoom(10), m.searchRoom(3))
+	if m.searchRoom(10, 14) != m.searchRoom(3, 14)-1 {
+		t.Errorf("room %d vs %d", m.searchRoom(10, 14), m.searchRoom(3, 14))
 	}
 }
 
@@ -127,21 +127,21 @@ func TestSearchCursorNotWhenNotTyping(t *testing.T) {
 		}
 		_ = tm
 	}
-	if _, _, ok := m.searchCursor(3); ok {
+	if _, _, ok := m.searchCursor(3, 3); ok {
 		t.Error("not searching: no cursor")
 	}
 	// before the first size nothing is drawn: no cursor
 	fresh := New(&mutSrc{ss: sessions}, &fakeRunner{})
 	fresh.curOut = &cursorOut{}
 	fresh.searching = true
-	if _, _, ok := fresh.searchCursor(3); ok || fresh.wantCursor() {
+	if _, _, ok := fresh.searchCursor(3, 3); ok || fresh.wantCursor() {
 		t.Error("no size yet")
 	}
 	// in the recall screen the filter box is not on screen
 	e, _ := newEmb(t, userOnly, paneEnv, false)
 	e = openRecallOn(t, e)
 	e.searching = true
-	if _, _, ok := e.searchCursor(3); ok {
+	if _, _, ok := e.searchCursor(3, 3); ok {
 		t.Error("recall open: the board's box is not there")
 	}
 }
