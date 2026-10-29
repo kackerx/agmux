@@ -354,7 +354,7 @@ func (c *Config) First(action string) string {
 var actionUse = map[string]string{
 	"page_down": "scroll the board a page down", "page_up": "scroll the board a page up",
 	"jump": "switch tmux to the focused pane", "fold": "fold / unfold the focused group",
-	"preview": "open / close the pane preview", "focus_preview": "pass keys through to the previewed pane",
+	"preview": "open / close the pane preview", "focus_preview": "pass keys through to the previewed pane; in recall, move the focus input > list > preview",
 	"leave_preview": "back to the board", "reply": "type a reply into the focused session",
 	"handoff": "send /handoff to the focused session", "search": "filter the cards by fuzzy search",
 	"next_match": "next search hit", "prev_match": "previous search hit", "flash": "move the focus to a card by its label",

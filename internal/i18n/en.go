@@ -111,6 +111,8 @@ var en = map[string]string{
 	"recall.footer.keep":         "%s keep the query",
 	"recall.footer.move":         "%s/%s move",
 	"recall.footer.edit":         "%s edit",
+	"recall.footer.scroll":       "%s/%s scroll",
+	"recall.footer.tolist":       "%s back to the list",
 	"recall.footer.filter":       "%s filter",
 	"recall.footer.scope":        "%s scope:%s",
 	"recall.footer.copy":         "%s copy",

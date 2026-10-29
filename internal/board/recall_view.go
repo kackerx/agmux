@@ -132,10 +132,10 @@ func (m recallModel) frame() (view string, x, y int, ok bool) {
 	lines := m.inputBox(prog)
 	if bh := m.bodyH(); bh > 0 {
 		lw := m.listW()
-		body := recallBox(m.boxColor(m.locked), m.listTitle(), m.listLines(bh-2, lw-2), lw, bh)
+		body := recallBox(m.boxColor(m.locked && !m.previewFocused(), cRecallBorder), m.listTitle(), m.listLines(bh-2, lw-2), lw, bh)
 		if m.previewOn() {
 			title, content := m.previewParts(bh - 2)
-			pv := recallBox(cRecallPreview, title, content, m.w-lw, bh)
+			pv := recallBox(m.boxColor(m.previewFocused(), cRecallPreview), title, content, m.w-lw, bh)
 			for i := range body {
 				body[i] += pv[i]
 			}
@@ -159,14 +159,14 @@ func (m recallModel) listTitle() string {
 	return fmt.Sprintf("%d/%d", len(m.results), m.total)
 }
 
-// boxColor is the border of the query box or the list: focus color for the one that has the keys
-// (the box while typing, the list once the query is kept), else the plain one. The filter panel
-// opened over them changes nothing.
-func (m recallModel) boxColor(focused bool) lipgloss.Color {
+// boxColor is the border of a box: the focus color for the one that has the keys (the query box
+// while typing, the list once the query is kept, the preview after tab), else its plain one. The
+// filter panel opened over them changes nothing.
+func (m recallModel) boxColor(focused bool, plain lipgloss.Color) lipgloss.Color {
 	if focused {
 		return cRecallFocus
 	}
-	return cRecallBorder
+	return plain
 }
 
 // inputBox is the query in a box of its own; on the right how far the index is, while it is built.
@@ -175,7 +175,7 @@ func (m recallModel) boxColor(focused bool) lipgloss.Color {
 // the caret and the cursor must be put by the same words.
 func (m recallModel) inputBox(prog string) []string {
 	left := fg(cFocus, " / ") + queryView(m.query, m.qpos, !m.locked, m.roomFor(prog))
-	return recallBox(m.boxColor(!m.locked), "", []string{spread(left, fg(cMuted, prog), m.w-2, "…")}, m.w, 3)
+	return recallBox(m.boxColor(!m.locked, cRecallBorder), "", []string{spread(left, fg(cMuted, prog), m.w-2, "…")}, m.w, 3)
 }
 
 // progressText is how far the index is while it is built (read once for a frame), else nothing.
@@ -208,6 +208,13 @@ func (m recallModel) footer() string {
 	switch {
 	case m.panel:
 		parts = append(parts, i18n.T("recall.panel.hint", k("recall_toggle"), k("recall_all"), k("recall_none"), "esc"))
+	case m.previewFocused(): // after tab: one row of what the preview takes
+		add(k("jump"), "recall.footer.resume")
+		if d, u := k("down"), k("up"); d != "" && u != "" {
+			parts = append(parts, i18n.T("recall.footer.scroll", d, u))
+		}
+		add(k("search"), "recall.footer.edit")
+		parts = append(parts, i18n.T("recall.footer.tolist", "esc"))
 	case m.locked: // a kept query: every key of [keys] acts
 		add(k("jump"), "recall.footer.resume")
 		if d, u := k("down"), k("up"); d != "" && u != "" {

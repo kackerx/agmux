@@ -131,6 +131,7 @@ pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi
 | 打字 | 进查询（字母都是字符；动作键只有 ctrl / alt 组合和方向键） |
 | `↓` `↑` / `ctrl+d` `ctrl+u` | 选会话 / 翻页（[keys] `down` `up` `page_down` `page_up`） |
 | `pgup` `pgdown` | 滚预览（`preview_up` `preview_down`） |
+| `tab` | 切焦点：输入框 → 列表 → 预览 → 输入框（`focus_preview`；终端窄于 100 列没有预览时只在前两个之间切）。预览有焦点时：`j` `k` / 方向键滚 1 行，`ctrl+n` `ctrl+p` 滚 3 行，`enter` 恢复，`esc` 回列表，`/` 回输入框；有焦点的框边框是 `recall_focus` 色 |
 | `enter` | 恢复：recall 退出，在**同一个终端**里 `cd` 到会话目录再 `exec claude --resume <id>`（pi 是 `pi --session <文件>`）。在跑的会话不动，底栏说它在哪个 pane；目录没了、命令不在 PATH 里也只在底栏说 |
 | `ctrl+f` | 筛选面板：来源多选（只列本机有会话的来源）+ 范围单选（全部历史 / 当前项目）。面板里 `space` 勾选、`a` 全选、`A` 清空、`↓` `↑` 移动、`esc` 收起 |
 | `ctrl+t` | 不开面板，直接在「当前项目」和「全部历史」之间切 |
