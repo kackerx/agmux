@@ -183,6 +183,7 @@ func (m recallModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		m.pvFocus = m.pvFocus && m.previewOn() // no preview, no focus on it: widening again does not give it back
 	case recallTickMsg: // what the index has so far, while it is built
 		var cmd tea.Cmd
 		if m.ix.Gen() != m.gen && !m.searching { // not over one that is out: a slow search would never be shown

@@ -120,6 +120,11 @@ func TestRecallPreviewState(t *testing.T) {
 	if p, _ = rpress(t, p, "esc"); !p.previewFocused() || p.panel {
 		t.Errorf("esc closes the panel: pv %v panel %v", p.previewFocused(), p.panel)
 	}
+	// the panel is open: tab does nothing (the panel has its own keys)
+	pp, _ := rpress(t, rtype(t, w.model(), "scrolling"), "tab", "ctrl+f")
+	if pp, _ = rpress(t, pp, "tab"); !pp.panel || !pp.locked || pp.previewFocused() {
+		t.Errorf("tab with the panel open: panel %v locked %v preview %v", pp.panel, pp.locked, pp.previewFocused())
+	}
 	// a terminal made too narrow takes the preview away, and the focus with it: esc is the list's
 	tm, _ := pv().Update(tea.WindowSizeMsg{Width: 99, Height: 30})
 	n := tm.(recallModel)
@@ -135,6 +140,25 @@ func TestRecallPreviewState(t *testing.T) {
 	tm, _ = n.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	if tm.(recallModel).previewFocused() {
 		t.Error("the preview has the focus again")
+	}
+	// narrowed and widened without a key between: the focus does not come back with the preview
+	tm2, _ := pv().Update(tea.WindowSizeMsg{Width: 99, Height: 30})
+	tm2, _ = tm2.(recallModel).Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	if tm2.(recallModel).previewFocused() {
+		t.Error("widened again: the preview took the focus back")
+	}
+	e, _ := newEmb(t, userOnly, paneEnv, false)
+	e = openRecallOn(t, e)
+	for _, k := range []string{"tab", "tab"} {
+		tm, _ := e.Update(key(k))
+		e = tm.(Model)
+	}
+	for _, w := range []int{99, 140} {
+		tm, _ := e.Update(tea.WindowSizeMsg{Width: w, Height: 30})
+		e = tm.(Model)
+	}
+	if e.rc.previewFocused() {
+		t.Error("in the board: the preview took the focus back")
 	}
 	if n, _ = rpress(t, tm.(recallModel), "tab"); !n.locked || n.previewFocused() { // the list is next, not a preview from before
 		t.Errorf("tab after that: locked %v preview %v", n.locked, n.previewFocused())
