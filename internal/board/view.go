@@ -43,26 +43,26 @@ var stayFooter bool
 // Colors; defaults match claude-hud's segments (ANSI slots), and
 // useConfig replaces them with config.toml's [colors].
 var (
-	cName                                     = lipgloss.Color("5")
-	cModel                                    = lipgloss.Color("14")
-	cEffort                                   = lipgloss.Color("13")
-	cAgent                                    = lipgloss.Color("#bd93f9")
-	cDir                                      = lipgloss.Color("11")
-	cBranch                                   = lipgloss.Color("12")
-	cMuted                                    = lipgloss.Color("#6272a4")                                                       // secondary text
-	cRecallInput, cRecallList, cRecallPreview = lipgloss.Color("#ff8ebe"), lipgloss.Color("#6272a4"), lipgloss.Color("#bd93f9") // the three borders of recall
-	cWorking                                  = lipgloss.Color("#ffb86c")
-	cDone                                     = lipgloss.Color("#50fa7b")
-	cRed                                      = lipgloss.Color("#ff6188") // attention / waiting, errors
-	cDim                                      = lipgloss.Color("#585b70") // idle border, preview box
-	cGreen                                    = lipgloss.Color("#a6e3a1") // context bar < 30%
-	cYellow                                   = lipgloss.Color("#f9e2af") // 30–60%
-	cBarHigh                                  = lipgloss.Color("#ff6188") // ≥ 60%
-	cBarEmpty                                 = lipgloss.Color("#585b70")
-	cFocus                                    = lipgloss.Color("#ff8ebe")
-	cBorder                                   = lipgloss.Color("")        // every card's border but the focused one's; empty: follows the status
-	cMatch                                    = lipgloss.Color("#f2d06b") // search hits: this background, dark text, like nvim's Search
-	cOff                                      = lipgloss.Color("#45475a") // disabled footer keys
+	cName                                       = lipgloss.Color("5")
+	cModel                                      = lipgloss.Color("14")
+	cEffort                                     = lipgloss.Color("13")
+	cAgent                                      = lipgloss.Color("#bd93f9")
+	cDir                                        = lipgloss.Color("11")
+	cBranch                                     = lipgloss.Color("12")
+	cMuted                                      = lipgloss.Color("#6272a4")                                                       // secondary text
+	cRecallBorder, cRecallFocus, cRecallPreview = lipgloss.Color("#6272a4"), lipgloss.Color("#ff8ebe"), lipgloss.Color("#bd93f9") // the borders of recall: without the keys, with them, the preview
+	cWorking                                    = lipgloss.Color("#ffb86c")
+	cDone                                       = lipgloss.Color("#50fa7b")
+	cRed                                        = lipgloss.Color("#ff6188") // attention / waiting, errors
+	cDim                                        = lipgloss.Color("#585b70") // idle border, preview box
+	cGreen                                      = lipgloss.Color("#a6e3a1") // context bar < 30%
+	cYellow                                     = lipgloss.Color("#f9e2af") // 30–60%
+	cBarHigh                                    = lipgloss.Color("#ff6188") // ≥ 60%
+	cBarEmpty                                   = lipgloss.Color("#585b70")
+	cFocus                                      = lipgloss.Color("#ff8ebe")
+	cBorder                                     = lipgloss.Color("")        // every card's border but the focused one's; empty: follows the status
+	cMatch                                      = lipgloss.Color("#f2d06b") // search hits: this background, dark text, like nvim's Search
+	cOff                                        = lipgloss.Color("#45475a") // disabled footer keys
 )
 
 // useConfig applies config.toml: colors, and the footer built from the key bindings.
@@ -71,7 +71,7 @@ func useConfig(c *config.Config) {
 		"working": &cWorking, "idle": &cDim, "done": &cDone, "attention": &cRed, "focus": &cFocus, "match": &cMatch, "border": &cBorder,
 		"name": &cName, "branch": &cBranch, "model": &cModel, "effort": &cEffort, "agent": &cAgent, "dir": &cDir,
 		"bar_low": &cGreen, "bar_mid": &cYellow, "bar_high": &cBarHigh, "bar_empty": &cBarEmpty,
-		"muted": &cMuted, "disabled": &cOff, "recall_input": &cRecallInput, "recall_list": &cRecallList, "recall_preview": &cRecallPreview,
+		"muted": &cMuted, "disabled": &cOff, "recall_border": &cRecallBorder, "recall_focus": &cRecallFocus, "recall_preview": &cRecallPreview,
 	} {
 		*v = lipgloss.Color(c.Colors[name])
 	}

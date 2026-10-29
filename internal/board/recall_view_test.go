@@ -119,7 +119,8 @@ func TestRecallFitsAnyTerminal(t *testing.T) {
 	}
 }
 
-// T82: the border colors are [colors] recall_input / recall_list / recall_preview.
+// T88: the border of the box that has the keys is [colors] recall_focus, the other one's recall_border, the
+// preview's always recall_preview. Typing: the query box has them; the kept query: the list.
 func TestRecallBorderColors(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -127,6 +128,7 @@ func TestRecallBorderColors(t *testing.T) {
 	defer useConfig(config.Default())
 	w := newRWorld(t)
 	w.fill()
+	const focus, plain, prev = "38;2;255;142;190", "38;2;97;113;163", "38;2;189;147;249"
 	// per row of the screen: the input box is rows 0-2, the list and the preview (right of the list) from row 3
 	paint := func(m recallModel) (input, list, preview string) {
 		rows := strings.Split(m.View(), "\n")
@@ -134,31 +136,55 @@ func TestRecallBorderColors(t *testing.T) {
 		cut := strings.Index(l, "┓")
 		return rows[0], l[:cut], l[cut:]
 	}
-	i, l, p := paint(w.model())
-	for name, c := range map[string][3]string{"input": {i, "38;2;255;142;190", "ff8ebe"}, "list": {l, "38;2;97;113;163", "6272a4"}, "preview": {p, "38;2;189;147;249", "bd93f9"}} {
-		if !strings.Contains(c[0], c[1]) {
-			t.Errorf("default %s border: want %s (#%s) in %q", name, c[1], c[2], c[0])
+	typing := rtype(t, w.model(), "o")
+	locked, _ := rpress(t, typing, "enter")
+	panel, _ := rpress(t, typing, "ctrl+f")
+	lockedPanel, _ := rpress(t, locked, "ctrl+f")
+	if !panel.panel || !lockedPanel.panel {
+		t.Fatal("ctrl+f did not open the panel")
+	}
+	check := func(what string, m recallModel, in, li string) {
+		t.Helper()
+		i, l, p := paint(m)
+		for name, c := range map[string][3]string{"input": {i, in, plain + focus}, "list": {l, li, plain + focus}, "preview": {p, prev, ""}} {
+			if !strings.Contains(c[0], c[1]) {
+				t.Errorf("%s: the %s border should be %s in %q", what, name, c[1], c[0])
+			}
+		}
+		other := map[string]string{focus: plain, plain: focus}
+		if strings.Contains(i, other[in]) || strings.Contains(l, other[li]) {
+			t.Errorf("%s: a box has both colors: %q %q", what, i, l)
 		}
 	}
-	cfg, err := config.Parse("cfg", []byte("[colors]\nrecall_input = \"#112233\"\nrecall_list = \"#445566\"\nrecall_preview = \"#778899\"\n"))
+	check("typing", typing, focus, plain)
+	check("typing, panel open", panel, focus, plain)
+	check("kept", locked, plain, focus)
+	check("kept, panel open", lockedPanel, plain, focus)
+	cfg, err := config.Parse("cfg", []byte("[colors]\nrecall_border = \"#112233\"\nrecall_focus = \"#445566\"\nrecall_preview = \"#778899\"\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	useConfig(cfg)
-	i, l, p = paint(w.model())
-	for name, c := range map[string][2]string{"input": {i, "38;2;17;34;51"}, "list": {l, "38;2;68;85;102"}, "preview": {p, "38;2;119;136;153"}} {
-		if !strings.Contains(c[0], c[1]) {
-			t.Errorf("configured %s border: want %s in %q", name, c[1], c[0])
-		}
+	i, l, p := paint(typing)
+	if !strings.Contains(i, "38;2;68;85;102") || !strings.Contains(l, "38;2;17;34;51") || !strings.Contains(p, "38;2;119;136;153") {
+		t.Errorf("configured, typing: %q %q %q", i, l, p)
 	}
-	if strings.Contains(i, "38;2;255;142;190") {
-		t.Errorf("the default is gone from the input box: %q", i)
+	i, l, _ = paint(locked)
+	if !strings.Contains(i, "38;2;17;34;51") || !strings.Contains(l, "38;2;68;85;102") {
+		t.Errorf("configured, kept: %q %q", i, l)
 	}
-	if _, err := config.Parse("cfg", []byte("[colors]\nrecall_list = \"nope\"\n")); err == nil {
+	if _, err := config.Parse("cfg", []byte("[colors]\nrecall_focus = \"nope\"\n")); err == nil {
 		t.Error("a bad color is refused")
 	}
-	if c := config.Default(); c.Colors["recall_input"] != "#ff8ebe" || c.Colors["recall_list"] != "#6272a4" || c.Colors["recall_preview"] != "#bd93f9" {
-		t.Errorf("defaults %v %v %v", c.Colors["recall_input"], c.Colors["recall_list"], c.Colors["recall_preview"])
+	// the keys of the first release are gone, and the error says what there is
+	for _, old := range []string{"recall_input", "recall_list"} {
+		_, err := config.Parse("cfg", []byte("[colors]\n"+old+" = \"#112233\"\n"))
+		if err == nil || !strings.Contains(err.Error(), old) || !strings.Contains(err.Error(), "recall_focus") {
+			t.Errorf("%s: %v", old, err)
+		}
+	}
+	if c := config.Default(); c.Colors["recall_border"] != "#6272a4" || c.Colors["recall_focus"] != "#ff8ebe" || c.Colors["recall_preview"] != "#bd93f9" {
+		t.Errorf("defaults %v %v %v", c.Colors["recall_border"], c.Colors["recall_focus"], c.Colors["recall_preview"])
 	}
 }
 
@@ -166,7 +192,7 @@ func TestRecallBorderColors(t *testing.T) {
 func TestThickBoxHasTheSizeAsked(t *testing.T) {
 	for w := 2; w <= 12; w++ {
 		for h := 2; h <= 5; h++ {
-			box := thickBox(cRecallList, "a title that is long", []string{"x", "a line much longer than the box"}, w, h)
+			box := thickBox(cRecallBorder, "a title that is long", []string{"x", "a line much longer than the box"}, w, h)
 			if len(box) != h {
 				t.Fatalf("%dx%d: %d rows", w, h, len(box))
 			}
@@ -177,14 +203,14 @@ func TestThickBoxHasTheSizeAsked(t *testing.T) {
 			}
 		}
 	}
-	if thickBox(cRecallList, "", nil, 1, 3) != nil || thickBox(cRecallList, "", nil, 5, 1) != nil {
+	if thickBox(cRecallBorder, "", nil, 1, 3) != nil || thickBox(cRecallBorder, "", nil, 5, 1) != nil {
 		t.Error("no room for a border: no box")
 	}
 	// a title that fits is set into the border, with a space either side
-	if l := ansi.Strip(thickBox(cRecallList, "ab", nil, 12, 3)[0]); l != "┏━ ab ━━━━━┓" {
+	if l := ansi.Strip(thickBox(cRecallBorder, "ab", nil, 12, 3)[0]); l != "┏━ ab ━━━━━┓" {
 		t.Errorf("title: %q", l)
 	}
-	if l := ansi.Strip(thickBox(cRecallList, "ab", nil, 5, 3)[0]); l != "┏━━━┓" { // no room for one
+	if l := ansi.Strip(thickBox(cRecallBorder, "ab", nil, 5, 3)[0]); l != "┏━━━┓" { // no room for one
 		t.Errorf("a title with no room: %q", l)
 	}
 }

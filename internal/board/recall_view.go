@@ -128,7 +128,7 @@ func (m recallModel) frame() (view string, x, y int, ok bool) {
 	lines := m.inputBox(prog)
 	if bh := m.bodyH(); bh > 0 {
 		lw := m.listW()
-		body := thickBox(cRecallList, m.listTitle(), m.listLines(bh-2, lw-2), lw, bh)
+		body := thickBox(m.boxColor(m.locked), m.listTitle(), m.listLines(bh-2, lw-2), lw, bh)
 		if m.previewOn() {
 			title, content := m.previewParts(bh - 2)
 			pv := thickBox(cRecallPreview, title, content, m.w-lw, bh)
@@ -155,13 +155,23 @@ func (m recallModel) listTitle() string {
 	return fmt.Sprintf("%d/%d", len(m.results), m.total)
 }
 
+// boxColor is the border of the query box or the list: focus color for the one that has the keys
+// (the box while typing, the list once the query is kept), else the plain one. The filter panel
+// opened over them changes nothing.
+func (m recallModel) boxColor(focused bool) lipgloss.Color {
+	if focused {
+		return cRecallFocus
+	}
+	return cRecallBorder
+}
+
 // inputBox is the query in a box of its own; on the right how far the index is, while it is built.
 // The caret is there while the input has the keys.
 // prog is what progressText said for this frame: the index goes on while the frame is drawn, and
 // the caret and the cursor must be put by the same words.
 func (m recallModel) inputBox(prog string) []string {
 	left := fg(cFocus, " / ") + queryView(m.query, m.qpos, !m.locked, m.roomFor(prog))
-	return thickBox(cRecallInput, "", []string{spread(left, fg(cMuted, prog), m.w-2, "…")}, m.w, 3)
+	return thickBox(m.boxColor(!m.locked), "", []string{spread(left, fg(cMuted, prog), m.w-2, "…")}, m.w, 3)
 }
 
 // progressText is how far the index is while it is built (read once for a frame), else nothing.

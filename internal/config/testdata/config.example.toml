@@ -78,8 +78,8 @@ bar_high = "#ff6188"          # default: #ff6188
 bar_empty = "#585b70"         # default: #585b70
 muted = "#6272a4"             # default: #6272a4 — secondary text, footer
 disabled = "#45475a"          # default: #45475a
-recall_input = "#ff8ebe"      # default: #ff8ebe — recall: the border of the query box
-recall_list = "#6272a4"       # default: #6272a4 — recall: the border of the session list
+recall_border = "#6272a4"     # default: #6272a4 — recall: the border of the query box and the list when they do not have the keys
+recall_focus = "#ff8ebe"      # default: #ff8ebe — recall: the border of the one that has the keys: the query box while typing, the list once the query is kept
 recall_preview = "#bd93f9"    # default: #bd93f9 — recall: the border of the preview
 
 [layout]
