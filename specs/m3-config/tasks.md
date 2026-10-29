@@ -685,5 +685,8 @@
 - 为的是：pi / claude 退出后 shell 还在原目录，用户要留在会话目录。
 - 验收：单测 写 / 不写文件；黑盒 真 `zsh -f` 里 eval 后 `agmux -r 关键词`（假 claude 立刻退出）→ `pwd` 是会话目录；没 eval 时目录不变、也没留临时文件。
 
+### T92 tab 切焦点（用户 2026-10-29 追加，和 T88 一起做）
+- 要做：design §2「tab 切焦点」整条：`focus_preview`（tab）轮转 输入框 → 列表 → 预览；预览态 j/k/方向键滚 1 行、ctrl+n/p 3 行、enter resume、esc 回列表、`/` 回输入框；焦点框用 `recall_focus`；窄屏无预览时跳过预览。底栏预览态单列一行。
+- 验收：单测 三态轮转（含窄屏两态）、预览态各键；黑盒 真 pty 三框颜色随 tab 变、预览态 j 滚一行。
 ### T91 e2e（tester，与 T87 并行起步）
-- t87 拆序列；t88 焦点色两态、旧键报错；t89 两种边框字符；t90 真 zsh；t82 / t50 / t17 跟改（颜色清单 recall_input / recall_list → recall_border / recall_focus，个数不变 22）。
+- t87 拆序列；t88 焦点色两态、旧键报错；t92 tab 轮转三框颜色、预览态滚动 / enter / esc；t89 两种边框字符；t90 真 zsh；t82 / t50 / t17 跟改（颜色清单 recall_input / recall_list → recall_border / recall_focus，个数不变 22）。
