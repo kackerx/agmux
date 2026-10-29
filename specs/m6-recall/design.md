@@ -19,7 +19,8 @@
 - **输入框（看板 `/` 和找回共用一个）**：真光标；left / right 挪光标，home / ctrl+a、end / ctrl+e 到头尾，alt+backspace / ctrl+w 删前一个词，字符插在光标处；光标位置按显示宽度算（中文 2 格）。这些编辑键固定不进 `[keys]`（同 backspace / ctrl+h / ctrl+c），模板头注里列出；打字态下 `[keys] left/right` 不起作用。
 - **预览滚动**：`preview_down` / `preview_up` 默认加 ctrl+n / ctrl+p（`["pgdown","ctrl+n"]` / `["pgup","ctrl+p"]`），打字态和选择态都能滚；看板里同样生效（这两个键看板没占）。
 - **鼠标（用户 2026-10-28）**：`agmux -r` 和看板 `?` 里都开鼠标（看板已开，嵌入时不再吞掉）。列表行单击 = 选中（不改打字 / 选择态）；同一行 400 ms 内再点一次 = 确认，打字态和选择态都算（动作等于选择态 enter：关了的 resume、在跑的看板里跳 pane、目录没了不动、窗口在建时忽略）；滚轮在列表区 = 选中行上下挪一行（不回绕）；滚轮在预览区 = 预览滚 3 行（同 ctrl+n/p）；滚轮落在框的边框上也算在框内；输入框、底栏上的点击和滚轮、边框上的点击不做事；筛选面板开着时鼠标一律忽略。
-- **边框（像 television）**：输入框、列表、预览各自一个粗边框（┏━┓），颜色 `[colors] recall_input` / `recall_list` / `recall_preview`（默认 `#ff8ebe` / `#6272a4` / `#bd93f9`，用户可改）。标题嵌在上边框里：列表 `n/total`，预览是会话名；输入框没有标题。
+- **边框（像 television；用户 2026-10-29 改）**：输入框、列表、预览各一个边框，样式 `[layout] recall_border = "thick"`（`thick` ┏━┓ | `rounded` ╭─╮，默认 thick）。颜色：没焦点的框灰（`[colors] recall_border`，默认 `#6272a4`）；输入态输入框、选择态列表框用 `recall_focus`（默认 `#ff8ebe`），一眼看出焦点在哪；预览框始终 `recall_preview`（默认 `#bd93f9`）。标题嵌在上边框里：列表 `命中数/总数`，预览是会话名；输入框没有标题。
+- **resume 结束后 shell 留在会话目录（用户 2026-10-29）**：子进程改不了父 shell 的目录，所以走 shell 函数：`eval "$(agmux shell zsh)"` 定义一个 `agmux` 函数，每次调用设 `$AGMUX_CWD_FILE`，agmux 原地 exec 前把会话目录写进去，退出后函数 `cd` 过去。只有原地 exec 的两条路径写（`agmux -r`、看板普通 pane）；new-window 路径本来就在会话目录。`agmux setup` 的输出提示加这一句，不改 rc 文件。bash 同一段，fish 不做。
 
 ## 3. 来源接口
 `internal/recall`：

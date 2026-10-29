@@ -661,3 +661,29 @@
 - tester（370f983，合回 main 0bfc546）：整套 fe3c052 上 1453 条连续一次约 2 小时，23 红：产品 10（看板 `/` 真光标，a0963c8 复跑绿）、测试跟改 13（t17 / t50 颜色清单 +3；t19 / t22 / t43 看板输入框不再画 `▏`；t41 长查询改滚动不用 `…`），抖动 0。T83：t79 22 / t80 / t81 / t82 / t84 36 全绿。没覆盖：真 kitty 目视、边框色只读前景、看板 esc 回卡片后细节。**第十六批 tester 通过，产品目标 a0963c8，含测试 0bfc546。** 派 dev 安装。
 - 流程改（tester 建议，采纳）：dev 改共用组件（输入框、底栏、配置清单、颜色表）时，交付里列一句「哪些旧 e2e 断言会受影响」，tester 先 grep 再跑整套。
 - dev 安装 cea5f33 到 ~/go/bin/agmux（vcs.modified=false）。**第十六批交付，待用户验收。**
+
+## 第十七批：找回第二轮验收返修（用户 2026-10-29 用 cea5f33 验收后提的 4 条）
+
+### T87 滚轮序列串进输入框（bug）
+- 现象：kitty + tmux，预览区滚轮，输入框出现 `<64;174;28M<64;174;28M`（SGR 鼠标序列去掉 `\x1b[` 后的尾巴）。
+- 做法：先真 tmux / kitty 复现定位。我的读法：bubbletea v1 readAnsiInputs 短读时一条序列被拆成两次 read，`\x1b[` 单独成了 alt+[（输入框忽略），`<64;174;28M` 成了字符串进输入框；tmux 在中间转发时容易拆。修：共用输入框忽略匹配 `^<\d+;\d+;\d+[Mm]` 的 rune 串（加 `ponytail:` 注释说明是 bubbletea v1 拆读的绕法）；若定位到别的原因，回我再定。顺手：看板 View 里计数串只算一次（reviewer 备忘）。
+- 验收：单测 喂这种 KeyRunes 不入框、正常文字照旧；黑盒 真 pty 把一条滚轮序列拆两次写（先 `\x1b[`，停 30 ms，再剩下）× 若干条，输入框文字不变。
+
+### T88 焦点框高亮
+- 要做：design §2 边框条：没焦点的框灰 `recall_border`（#6272a4）；输入态输入框、选择态列表框 `recall_focus`（#ff8ebe）；预览框始终 `recall_preview`。删 recall_input / recall_list（刚发布无人用；旧键按现有规则报 unknown setting）。面板开着时颜色不变。
+- 为的是：现在输入框和列表都亮，分不清焦点在哪。
+- 验收：单测 两态 × 三框颜色；模板 / golden / README；黑盒 t82 跟改。
+
+### T89 圆角边框可配
+- `[layout] recall_border = "thick"`（thick | rounded，默认 thick），三个框一起换，面板本来就是圆角不动；坏值一行报错点名。
+- 验收：单测 + golden + 黑盒 两种字符。
+
+### T90 resume 结束后 shell cd 到会话目录
+- 要做：design §2 新条。`agmux shell zsh` 打印：
+  `agmux() { local f d; f=$(mktemp) || return; AGMUX_CWD_FILE=$f command agmux "$@"; local rc=$?; [[ -s $f ]] && d=$(<"$f") && cd -- "$d"; rm -f -- "$f"; return $rc; }`
+  agmux 原地 exec 前（`agmux -r` 和看板普通 pane 两条路径）若设了 `$AGMUX_CWD_FILE` 就把会话目录写进去；new-window 路径不写；`agmux shell bash` 同一段；`agmux setup` 输出加一句提示。不改用户 rc 文件。
+- 为的是：pi / claude 退出后 shell 还在原目录，用户要留在会话目录。
+- 验收：单测 写 / 不写文件；黑盒 真 `zsh -f` 里 eval 后 `agmux -r 关键词`（假 claude 立刻退出）→ `pwd` 是会话目录；没 eval 时目录不变、也没留临时文件。
+
+### T91 e2e（tester，与 T87 并行起步）
+- t87 拆序列；t88 焦点色两态、旧键报错；t89 两种边框字符；t90 真 zsh；t82 / t50 / t17 跟改（颜色清单 recall_input / recall_list → recall_border / recall_focus，个数不变 22）。
