@@ -317,9 +317,13 @@ func runRecall(ix *recall.Index, query string) error {
 
 // shellFunc is what `agmux shell zsh|bash` prints: an agmux function that gives agmux a file to write the
 // directory of a session resumed in place into ($AGMUX_CWD_FILE, see execResume), and cds there when agmux
-// is done: a child process can not change its parent's directory. zsh and bash read the same text.
-const shellFunc = `agmux() { local f d; f=$(mktemp) || return; AGMUX_CWD_FILE=$f command agmux "$@"; local rc=$?; [[ -s $f ]] && d=$(<"$f") && cd -- "$d"; rm -f -- "$f"; return $rc; }
+// is done: a child process can not change its parent's directory. zsh's always block removes the file
+// even when ctrl+c ends the function; bash has no such block and leaves a file in that case.
+const (
+	zshFunc  = "agmux() { local f d rc; f=$(mktemp) || return; { AGMUX_CWD_FILE=$f command agmux \"$@\"; rc=$?; [[ -s $f ]] && d=$(<\"$f\") && cd -- \"$d\"; } always { rm -f -- \"$f\"; }; return $rc; }\n"
+	bashFunc = `agmux() { local f d; f=$(mktemp) || return; AGMUX_CWD_FILE=$f command agmux "$@"; local rc=$?; [[ -s $f ]] && d=$(<"$f") && cd -- "$d"; rm -f -- "$f"; return $rc; }
 `
+)
 
 // shellCmd is `agmux shell zsh|bash`.
 func shellCmd(args []string, stdout, stderr io.Writer) int {
@@ -327,7 +331,7 @@ func shellCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, `usage: agmux shell zsh|bash   (in your rc file: eval "$(agmux shell zsh)"; fish is not supported)`)
 		return 2
 	}
-	fmt.Fprint(stdout, shellFunc)
+	fmt.Fprint(stdout, map[string]string{"zsh": zshFunc, "bash": bashFunc}[args[0]])
 	return 0
 }
 
@@ -352,7 +356,11 @@ func execResume(dir string, argv []string) error {
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "PWD=") || strings.HasPrefix(kv, "AGMUX_CWD_FILE=")
 	})
-	return syscallExec(bin, argv, append(env, "PWD="+dir)) // Chdir does not move $PWD, and tools believe it
+	err = syscallExec(bin, argv, append(env, "PWD="+dir)) // Chdir does not move $PWD, and tools believe it
+	if f := os.Getenv("AGMUX_CWD_FILE"); f != "" && err != nil {
+		os.Truncate(f, 0) // nothing was resumed: the shell stays where it is
+	}
+	return err
 }
 
 // configCmd is `agmux config [--path]`: the effective config (defaults + config.toml), or its path.

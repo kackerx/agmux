@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -15,7 +16,7 @@ import (
 // T90: `agmux shell zsh|bash` prints the function; anything else is a usage error that says what there is.
 func TestShellCmd(t *testing.T) {
 	var zsh, bash, errs bytes.Buffer
-	if run([]string{"shell", "zsh"}, &zsh, &errs) != 0 || run([]string{"shell", "bash"}, &bash, &errs) != 0 || zsh.String() != shellFunc || bash.String() != shellFunc {
+	if run([]string{"shell", "zsh"}, &zsh, &errs) != 0 || run([]string{"shell", "bash"}, &bash, &errs) != 0 || zsh.String() != zshFunc || bash.String() != bashFunc {
 		t.Fatalf("zsh %q bash %q err %q", zsh.String(), bash.String(), errs.String())
 	}
 	for _, args := range [][]string{{"shell"}, {"shell", "fish"}, {"shell", "zsh", "bash"}, {"shell", ""}} {
@@ -37,14 +38,18 @@ func TestShellFunctionInRealShells(t *testing.T) {
 			continue
 		}
 		t.Run(sh, func(t *testing.T) {
-			tmp, target, start := t.TempDir(), t.TempDir(), t.TempDir()
+			tmp, start := t.TempDir(), t.TempDir()
+			target := filepath.Join(t.TempDir(), "-a b $HOME 'q' \"d\" `x`") // what the quoting has to hold
+			if err := os.Mkdir(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
 			fake := filepath.Join(tmp, "bin")
 			os.Mkdir(fake, 0o755)
 			// the fake agmux writes $WRITE (if set) into the file it was given, echoes its arguments and exits 3
 			os.WriteFile(filepath.Join(fake, "agmux"), []byte("#!/bin/sh\n[ -n \"$WRITE\" ] && printf %s \"$WRITE\" > \"$AGMUX_CWD_FILE\"\necho \"args: $*\"\nprintf %s \"$AGMUX_CWD_FILE\" > \"$REC\"\nexit 3\n"), 0o755)
 			rec := filepath.Join(tmp, "cwdfile") // where the fake agmux says which file it was given
 			invoke := func(write string) string {
-				script := shellFunc + `agmux -r "two words"; echo "rc=$?"; pwd -P`
+				script := map[string]string{"zsh": zshFunc, "bash": bashFunc}[sh] + `agmux -r "two words"; echo "rc=$?"; pwd -P`
 				cmd := exec.Command(path, "-f", "-c", script)
 				if sh == "bash" {
 					cmd = exec.Command(path, "--norc", "-c", script)
@@ -109,6 +114,18 @@ func TestExecResumeWritesTheDirectory(t *testing.T) {
 	}
 
 	// no variable, no file; a file that can not be written does not stop the resume
+	// the exec came back with an error: nothing was resumed, the file is emptied so that the shell stays
+	os.WriteFile(file, []byte("stale"), 0o600)
+	t.Setenv("AGMUX_CWD_FILE", file)
+	syscallExec = func(string, []string, []string) error { return errors.New("exec: boom") }
+	if err := execResume(dir, []string{"claude"}); err == nil {
+		t.Error("the error of the exec is the error")
+	}
+	if got, err := os.ReadFile(file); err != nil || len(got) != 0 {
+		t.Errorf("after a failed exec the file is %q %v", got, err)
+	}
+	os.Remove(file)
+	syscallExec = func(b string, argv, env []string) error { gotEnv = env; return nil }
 	said := captureStderr(t)
 	t.Setenv("AGMUX_CWD_FILE", "")
 	if err := execResume(dir, []string{"claude"}); err != nil {

@@ -1,6 +1,7 @@
 package board
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -52,7 +53,7 @@ func TestRecallInputIgnoresMouseTail(t *testing.T) {
 	}
 }
 
-// The board's / filter, a locked pane and the recall screen inside the board all get the tail.
+// The board's / filter and the recall screen inside the board drop the tail; the locked pane is sent what came.
 func TestBoardIgnoresMouseTail(t *testing.T) {
 	m := wide(&fakeRunner{}, 232, 50)
 	m, _ = press(t, m, "/")
@@ -68,13 +69,10 @@ func TestBoardIgnoresMouseTail(t *testing.T) {
 	r := &fakeRunner{}
 	p, _ := press(t, wide(r, 232, 50), "i") // pass-through on a1 / %1
 	r.calls = nil
-	p.Update(runes("<64;174;28M"))
-	if got := sentKeys(r); len(got) != 0 {
+	_, cmd := p.Update(runes("<64;174;28M"))
+	run(&p, cmd)
+	if got := sentKeys(r); len(got) != 1 || !strings.Contains(got[0], "<64;174;28M") { // the pane gets what came, whole: not filtered
 		t.Errorf("sent to the pane: %q", got)
-	}
-	p, _ = press(t, p, "x")
-	if got := sentKeys(r); len(got) != 1 {
-		t.Errorf("a real key must still be sent: %q", got)
 	}
 
 	e, _ := newEmb(t, userOnly, paneEnv, false)

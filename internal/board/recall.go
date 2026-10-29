@@ -183,7 +183,7 @@ func (m recallModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
-		m.pvFocus = m.pvFocus && m.previewOn() // no preview, no focus on it: widening again does not give it back
+		m.pvFocus = m.pvFocus && m.previewOn() // no preview, no focus on it, and widening does not give it back
 	case recallTickMsg: // what the index has so far, while it is built
 		var cmd tea.Cmd
 		if m.ix.Gen() != m.gen && !m.searching { // not over one that is out: a slow search would never be shown
@@ -346,9 +346,9 @@ func (m recallModel) back() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// previewFocused: the preview has the keys (pvFocus is only ever set with locked) and is on the screen: a
-// terminal made narrow takes it away.
-func (m recallModel) previewFocused() bool { return m.pvFocus && m.previewOn() }
+// previewFocused: the preview has the keys (pvFocus is only set with locked, and cleared when a
+// resize takes the preview away: update, recallUpdate).
+func (m recallModel) previewFocused() bool { return m.pvFocus }
 
 // nextFocus is tab: the input, then the list (the query is kept), then the preview, then the input
 // again; a terminal too narrow for the preview goes from the list straight back to the input.
@@ -356,7 +356,7 @@ func (m recallModel) nextFocus() recallModel {
 	switch {
 	case !m.locked:
 		m.locked = true
-	case !m.previewFocused() && m.previewOn():
+	case !m.pvFocus && m.previewOn():
 		m.pvFocus = true
 	default:
 		m.locked, m.pvFocus, m.qpos = false, false, len([]rune(m.query))
