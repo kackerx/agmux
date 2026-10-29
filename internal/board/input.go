@@ -1,6 +1,7 @@
 package board
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -20,6 +21,25 @@ import (
 //	anything printable  is put in at the caret (a paste may carry control characters: spaces)
 //
 // Kitty sends option+backspace as ESC DEL, which bubbletea reads as alt+backspace.
+
+// ponytail: bubbletea v1 takes a read that ends in the middle of an SGR mouse report as complete: a
+// tmux that flushes a half-arrived "ESC [" (escape-time) leaves "<64;174;28M" to come in as text.
+// This drops that text wherever keys are read (the query, the keys of [keys], a locked pane's
+// input). Only a cut right after "ESC [" is known; a cut inside the numbers still gets through.
+var mouseTail = regexp.MustCompile(`<\d+;\d+;\d+[Mm]`)
+
+// withoutMouseTail is k without the mouse-report text in it; ok is false when nothing is left.
+func withoutMouseTail(k tea.KeyMsg) (tea.KeyMsg, bool) {
+	if k.Type != tea.KeyRunes || k.Paste {
+		return k, true
+	}
+	s := string(k.Runes)
+	if t := mouseTail.ReplaceAllString(s, ""); t != s {
+		k.Runes = []rune(t)
+		return k, t != ""
+	}
+	return k, true
+}
 
 // editQuery applies k to the input; ok says k was an editing key (the caller then has nothing to
 // do with it). The caret is kept inside the text.

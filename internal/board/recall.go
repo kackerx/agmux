@@ -408,6 +408,10 @@ func (m recallModel) end() (tea.Model, tea.Cmd) {
 }
 
 func (m recallModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	k, ok := withoutMouseTail(k)
+	if !ok {
+		return m, nil
+	}
 	s := k.String()
 	if k.Type == tea.KeyCtrlC {
 		return m, tea.Quit
