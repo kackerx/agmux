@@ -72,6 +72,9 @@ commands:
           Claude Code status line wrapper: saves the payload for the board, runs <command>
   config [--path]
           print the effective config (defaults + ~/.config/agmux/config.toml), or its path
+  shell zsh|bash
+          print a shell function to eval in your rc file: eval "$(agmux shell zsh)"; after a session
+          resumed in place (agmux -r, the board's ?) your shell is in that session's directory
   setup [--write]
           point ~/.claude/settings.json's statusLine.command at agmux statusline, and install the pi
           extension that shows pi sessions on the board (dry run without --write)
@@ -95,7 +98,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return code
 			}
 			fmt.Fprintln(stdout)
-			return max(code, pi.Setup(slices.Contains(args[1:], "--write"), stdout, stderr))
+			code = max(code, pi.Setup(slices.Contains(args[1:], "--write"), stdout, stderr))
+			fmt.Fprintln(stdout, "\n"+i18n.T("setup.shell"))
+			return code
+		case "shell":
+			return shellCmd(args[1:], stdout, stderr)
 		case "board":
 			return boardCmd(args[1:])
 		case "config":
@@ -308,6 +315,22 @@ func runRecall(ix *recall.Index, query string) error {
 	return execResume(res.Dir, res.Argv)
 }
 
+// shellFunc is what `agmux shell zsh|bash` prints: an agmux function that gives agmux a file to write the
+// directory of a session resumed in place into ($AGMUX_CWD_FILE, see execResume), and cds there when agmux
+// is done: a child process can not change its parent's directory. zsh and bash read the same text.
+const shellFunc = `agmux() { local f d; f=$(mktemp) || return; AGMUX_CWD_FILE=$f command agmux "$@"; local rc=$?; [[ -s $f ]] && d=$(<"$f") && cd -- "$d"; rm -f -- "$f"; return $rc; }
+`
+
+// shellCmd is `agmux shell zsh|bash`.
+func shellCmd(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 || args[0] != "zsh" && args[0] != "bash" {
+		fmt.Fprintln(stderr, `usage: agmux shell zsh|bash   (in your rc file: eval "$(agmux shell zsh)"; fish is not supported)`)
+		return 2
+	}
+	fmt.Fprint(stdout, shellFunc)
+	return 0
+}
+
 // syscallExec is syscall.Exec; the tests put their own in.
 var syscallExec = syscall.Exec
 
@@ -320,7 +343,15 @@ func execResume(dir string, argv []string) error {
 	if err := os.Chdir(dir); err != nil {
 		return err
 	}
-	env := slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "PWD=") })
+	// eval "$(agmux shell zsh)": the shell's function waits for the directory in this file; the agent has no use for it
+	if f := os.Getenv("AGMUX_CWD_FILE"); f != "" {
+		if err := os.WriteFile(f, []byte(dir), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "agmux: %v: your shell will stay where it is (AGMUX_CWD_FILE is set by the function `agmux shell` prints)\n", err)
+		}
+	}
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "PWD=") || strings.HasPrefix(kv, "AGMUX_CWD_FILE=")
+	})
 	return syscallExec(bin, argv, append(env, "PWD="+dir)) // Chdir does not move $PWD, and tools believe it
 }
 

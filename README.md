@@ -141,6 +141,8 @@ pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi
 
 看板里按 `?`（`[keys] recall`）就是同一个界面（同一个进程，在跑的会话用看板当前的会话表，不再单独查一遍）：`esc` 还是三级（面板 → 清查询 → 回看板），查询为空时再按 `?` 也回看板。`enter` 的去向看看板在哪：在跑的会话走看板自己的跳转；已经关了的会话——看板在普通 pane（或不在 tmux 里）就原地换成 `claude --resume`（看板退出），在 tmux 浮窗里（`display-popup`，或 `--stay`）就在你当前的 tmux session 里用会话目录开一个新窗口跑 resume 命令，再把你的 client 切过去（`--stay` 时看板留着）。
 
+原地 resume 的 claude / pi 退出后，你的 shell 还在原来的目录（子进程改不了父 shell）。想留在会话目录：在 `~/.zshrc`（或 `~/.bashrc`）里加一行 `eval "$(agmux shell zsh)"`（bash 写 `agmux shell bash`；fish 不支持）。它定义一个 `agmux` 函数：每次调用给 agmux 一个临时文件（`$AGMUX_CWD_FILE`），agmux 原地 exec 前把会话目录写进去，退出后函数 `cd` 过去。只有 `agmux -r` 和看板普通 pane 里的原地 resume 会写；tmux 浮窗 / `--stay` 里开的新窗口本来就在会话目录。`agmux setup` 也会提一句，不改你的 rc 文件。
+
 这些键都在 `[keys]`：`recall`（`?`）、`recall_filter`、`recall_scope`、`recall_copy`、`recall_open`、`recall_toggle`、`recall_all`、`recall_none`。`agmux recall --dump [关键词]` 不开界面，一行一个会话（来源、id、名字、项目、分支、mtime、命中数、片段，制表符分隔）。
 
 ### 看过的 done 算已读

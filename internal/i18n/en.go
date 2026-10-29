@@ -93,6 +93,7 @@ var en = map[string]string{
 	"setup.already_set":  "already set: %s",
 	"setup.none":         "(none)",
 	"setup.command":      "statusLine.command:\n  before: %s\n  after:  %s",
+	"setup.shell":        "shell: to land in a session's directory after agmux -r / ? resumes it, add to your shell rc (not changed here):\n  eval \"$(agmux shell zsh)\"   # bash: agmux shell bash",
 	"setup.dry_run":      "dry run: add --write to apply",
 	"setup.written_bak":  "written (backup: %s.bak)",
 	"setup.written_new":  "written (new file: %s)",

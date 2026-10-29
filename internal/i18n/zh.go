@@ -86,6 +86,7 @@ var zh = map[string]string{
 	"setup.already_set":  "已设置：%s",
 	"setup.none":         "（无）",
 	"setup.command":      "statusLine.command:\n  之前：%s\n  之后：%s",
+	"setup.shell":        "shell：想在 agmux -r / ? 恢复会话、退出后留在会话目录，把下面一行加进你的 shell rc（这里不会改它）：\n  eval \"$(agmux shell zsh)\"   # bash：agmux shell bash",
 	"setup.dry_run":      "试运行：加 --write 才会写入",
 	"setup.written_bak":  "已写入（备份：%s.bak）",
 	"setup.written_new":  "已写入（新文件：%s）",
