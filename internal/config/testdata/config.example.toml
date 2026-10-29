@@ -89,6 +89,7 @@ flow = "bands"                # default: "bands" — "bands": a row of groups at
                               #   height; "stack": groups stack down each column, no gaps
 group_by = "cwd"              # default: "cwd" — grouping at start: "cwd", "project", "session" or
                               #   "state"; the group key cycles through them in that order
+recall_border = "thick"       # default: "thick" — recall's three boxes: "thick" ┏━┓ or "rounded" ╭─╮
 
 [ui]
 language = "en"               # default: "en" — "en" or "zh"; $AGMUX_LANG overrides it

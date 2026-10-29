@@ -188,11 +188,11 @@ func TestRecallBorderColors(t *testing.T) {
 	}
 }
 
-// thickBox is as wide and as tall as asked whatever it holds, at any size.
+// recallBox is as wide and as tall as asked whatever it holds, at any size.
 func TestThickBoxHasTheSizeAsked(t *testing.T) {
 	for w := 2; w <= 12; w++ {
 		for h := 2; h <= 5; h++ {
-			box := thickBox(cRecallBorder, "a title that is long", []string{"x", "a line much longer than the box"}, w, h)
+			box := recallBox(cRecallBorder, "a title that is long", []string{"x", "a line much longer than the box"}, w, h)
 			if len(box) != h {
 				t.Fatalf("%dx%d: %d rows", w, h, len(box))
 			}
@@ -203,14 +203,14 @@ func TestThickBoxHasTheSizeAsked(t *testing.T) {
 			}
 		}
 	}
-	if thickBox(cRecallBorder, "", nil, 1, 3) != nil || thickBox(cRecallBorder, "", nil, 5, 1) != nil {
+	if recallBox(cRecallBorder, "", nil, 1, 3) != nil || recallBox(cRecallBorder, "", nil, 5, 1) != nil {
 		t.Error("no room for a border: no box")
 	}
 	// a title that fits is set into the border, with a space either side
-	if l := ansi.Strip(thickBox(cRecallBorder, "ab", nil, 12, 3)[0]); l != "┏━ ab ━━━━━┓" {
+	if l := ansi.Strip(recallBox(cRecallBorder, "ab", nil, 12, 3)[0]); l != "┏━ ab ━━━━━┓" {
 		t.Errorf("title: %q", l)
 	}
-	if l := ansi.Strip(thickBox(cRecallBorder, "ab", nil, 5, 3)[0]); l != "┏━━━┓" { // no room for one
+	if l := ansi.Strip(recallBox(cRecallBorder, "ab", nil, 5, 3)[0]); l != "┏━━━┓" { // no room for one
 		t.Errorf("a title with no room: %q", l)
 	}
 }

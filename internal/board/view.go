@@ -77,6 +77,10 @@ func useConfig(c *config.Config) {
 	}
 	avatar.AlertColor = cRed
 	maxCols, stackFlow, previewPct = c.MaxColumns, c.Flow == "stack", c.PreviewWidth
+	recallBorder = lipgloss.ThickBorder()
+	if c.RecallBorder == "rounded" {
+		recallBorder = lipgloss.RoundedBorder()
+	}
 	footerKeys = footerFor(c)
 	bgJump, bgReply = c.First("jump"), c.First("reply")
 }

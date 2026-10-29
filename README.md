@@ -168,6 +168,7 @@ max_columns = 4                     # 终端够宽时最多几列卡片（1–8�
 preview_width = 40                  # 预览占终端宽度的百分比（30–70，默认 40，最少 60 列）；越宽，pane 里的长行被截掉得越少，卡片区相应变窄（终端窄，100–133 列，而这个值又大时，卡片区可能窄于 40 列）
 flow = "bands"                      # 组怎么排：bands（默认）每 n 个组一行，行高 = 最高的组，矮的组下面留空；stack 第 k 个组进第 k mod n 列，每列自己往下堆（没有空洞，列高不齐）
 group_by = "cwd"                    # 启动时的分组方式：cwd | project | session | state；运行中按 g 换
+recall_border = "thick"             # 找回界面三个框的边框：thick ┏━┓（默认）| rounded ╭─╮（筛选面板本来就是圆角）
 
 [ui]
 language = "en"                     # en | zh：看板和 agmux setup 的文案语言；环境变量 AGMUX_LANG 优先（config 模板的注释、报错、agmux show 不翻）
