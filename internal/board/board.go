@@ -485,9 +485,11 @@ func (m *Model) lock(s store.Session) {
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	k, ok := withoutMouseTail(k)
-	if !ok {
-		return m, nil
+	if !m.pvFocus { // the pass-through sends what came, as it came (see mouseTail)
+		var ok bool
+		if k, ok = withoutMouseTail(k); !ok {
+			return m, nil
+		}
 	}
 	// the preview has the keys: everything but leave_preview's keys (tab) goes to the locked
 	// pane, ctrl+c and shift+tab included (Claude Code interrupts and cycles modes with them)

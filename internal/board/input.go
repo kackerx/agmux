@@ -22,10 +22,14 @@ import (
 //
 // Kitty sends option+backspace as ESC DEL, which bubbletea reads as alt+backspace.
 
-// ponytail: bubbletea v1 takes a read that ends in the middle of an SGR mouse report as complete: a
-// tmux that flushes a half-arrived "ESC [" (escape-time) leaves "<64;174;28M" to come in as text.
-// This drops that text wherever keys are read (the query, the keys of [keys], a locked pane's
-// input). Only a cut right after "ESC [" is known; a cut inside the numbers still gets through.
+// ponytail: bubbletea v1 reads stdin 256 bytes at a time and takes a read that ends inside an SGR mouse
+// report as complete when it is shorter than 256 (readAnsiInputs): "ESC [" becomes alt+[ and the rest,
+// "<64;174;28M", comes in as text. A wheel flick makes such cuts. This drops that text in the query and
+// the keys of [keys]. Not covered: a cut inside the numbers ("<64;17" + "4;28M") or after "ESC" alone
+// leaves pieces that match nothing here; the cure is a reader in front of bubbletea that joins the
+// pieces, if it ever matters. The locked pane's keys (pass-through) are not filtered: the pane
+// gets the whole report there (Claude Code ignores it), and without its "ESC [" the rest would
+// eat the next key.
 var mouseTail = regexp.MustCompile(`<\d+;\d+;\d+[Mm]`)
 
 // withoutMouseTail is k without the mouse-report text in it; ok is false when nothing is left.

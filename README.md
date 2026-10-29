@@ -124,7 +124,7 @@ pi（`@earendil-works/pi-coding-agent`）没有会话登记，看板靠一个 pi
 
 `agmux recall [关键词]`（等价于 `agmux -r [关键词]`）：只记得聊过什么、不记得是哪个 worktree 哪个会话时用。不需要 tmux，任何终端都行。读的是 Claude Code 的 `~/.claude/projects/*/*.jsonl`（`$CLAUDE_CONFIG_DIR` 优先）和 pi 的 `~/.pi/agent/sessions/*/*.jsonl`（`$PI_CODING_AGENT_DIR`），只读，不改它们；索引缓存在 `$XDG_CACHE_HOME/agmux/recall`（默认 `~/.cache/agmux/recall`），第一次打开会边建边出（顶栏 `indexing n / N`），之后增量更新，毫秒级。`agmux recall --reindex` 清缓存重建。
 
-一行一个会话：状态点（● 在跑 / ○ 已关）、名字、项目（worktree 写成 `主仓库.wt/目录`）、分支、多久以前、命中了几句、最匹配的那句；右边（终端 ≥ 100 列）是预览：会话卡加上全部命中的句子，每处上下各带一句，中间没命中的折成 `… n lines …`。你说的和 agent 说的（每段回复只取头 200 字）都搜，同分你说的排前面。语法同看板的 `/`（fzf：空格 = 且、`'精确`、`^前缀`、`后缀$`、`!排除`），匹配串是「来源 项目 分支 会话名 句子」，所以也可以直接打项目名、分支名；命中数只算句子本身。空查询 = 最近的会话。输入框、列表、预览各一个粗边框，有键盘的那个亮 `[colors] recall_focus`（打字时是输入框，`enter` 保留查询后是列表），另一个是 `recall_border`（灰），预览始终 `recall_preview`。
+一行一个会话：状态点（● 在跑 / ○ 已关）、名字、项目（worktree 写成 `主仓库.wt/目录`）、分支、多久以前、命中了几句、最匹配的那句；右边（终端 ≥ 100 列）是预览：会话卡加上全部命中的句子，每处上下各带一句，中间没命中的折成 `… n lines …`。你说的和 agent 说的（每段回复只取头 200 字）都搜，同分你说的排前面。语法同看板的 `/`（fzf：空格 = 且、`'精确`、`^前缀`、`后缀$`、`!排除`），匹配串是「来源 项目 分支 会话名 句子」，所以也可以直接打项目名、分支名；命中数只算句子本身。空查询 = 最近的会话。输入框、列表、预览各一个边框（默认粗，`[layout] recall_border = "rounded"` 换成圆角），有键盘的那个亮 `[colors] recall_focus`（打字时是输入框，`enter` 保留查询后是列表，`tab` 切到预览后是预览），另一个是 `recall_border`（灰），预览没有键盘时是 `recall_preview`。
 
 | 键 | 作用 |
 |---|---|

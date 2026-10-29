@@ -376,7 +376,7 @@ var colorUse = map[string]string{
 	"focus": "the focused card", "match": "search hits", "border": "borders of unfocused cards",
 	"name": "session name", "agent": "the agent role on line 2", "dir": "group headers and their rule",
 	"bar_low": "context bar, low usage", "muted": "secondary text, footer",
-	"recall_border": "recall: the border of the query box and the list when they do not have the keys", "recall_focus": "recall: the border of the one that has the keys: the query box while typing, the list once the query is kept", "recall_preview": "recall: the border of the preview",
+	"recall_border": "recall: the border of the query box and the list when they have no keys", "recall_focus": "recall: the border of the one that has the keys: the query box while typing, the list once the query is kept, the preview after tab", "recall_preview": "recall: the border of the preview when it has no keys",
 }
 
 // String is the effective config as a commented TOML file, ready to save as config.toml: each setting
